@@ -1,0 +1,19 @@
+{
+  "name": "seele",
+  "version": "1.0.0",
+  "description": "Seele 股票数据管理系统 - 前后端统一入口",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run dev:back\" \"npm run dev:front\"",
+    "dev:front": "cd seele-frontend && npm run serve",
+    "dev:back": "cd seele-backend && .venv/Scripts/python start.py",
+    "build": "cd seele-frontend && npm run build",
+    "lint": "cd seele-frontend && npm run lint"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  },
+  "workspaces": [
+    "seele-frontend"
+  ]
+}

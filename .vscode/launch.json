@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: FastAPI",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--reload", "--port", "9000"],
+      "cwd": "${workspaceFolder}/seele-backend",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Chrome: Vue",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:8000",
+      "webRoot": "${workspaceFolder}/seele-frontend/src"
+    }
+  ]
+}
