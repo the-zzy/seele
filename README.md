@@ -5,7 +5,7 @@ Seele 是一个基于 Vue 3 + FastAPI 的全栈股票数据管理系统，提供
 ## 目录结构
 
 ```
-d:\code
+d:\seele
 ├── seele-backend/          # FastAPI 后端
 │   ├── app/                # 主应用包
 │   │   ├── routes/         # API 路由层
