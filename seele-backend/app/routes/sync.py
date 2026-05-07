@@ -888,7 +888,7 @@ def _sync_financial_bulk(task_id: str | None = None, on_progress: Callable | Non
             update_dict = {
                 k: upsert_stmt.inserted[k]
                 for k in upsert_stmt.inserted.keys()
-                if k not in ("symbol",)
+                if k not in ("symbol", "updated_at")
             }
             upsert_stmt = upsert_stmt.on_duplicate_key_update(**update_dict)
             db_write.execute(upsert_stmt)
