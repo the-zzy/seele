@@ -58,6 +58,39 @@ def _calc_fifo_position(trades: List[models.PortfolioTrade]) -> tuple[int, float
     return remaining_qty, remaining_cost
 
 
+def _calc_new_sell_fifo_cost(existing_trades: List[models.PortfolioTrade], sell_quantity: int) -> float:
+    """基于已有交易记录，计算新的一笔卖出对应的 FIFO 成本"""
+    buys = sorted([t for t in existing_trades if t.trade_type == 'BUY'], key=lambda x: x.trade_date)
+    sells = sorted([t for t in existing_trades if t.trade_type == 'SELL'], key=lambda x: x.trade_date)
+
+    buy_queue = [(b.quantity, b.price) for b in buys]
+    for s in sells:
+        sq = s.quantity
+        while sq > 0 and buy_queue:
+            bq, bp = buy_queue[0]
+            if bq <= sq:
+                sq -= bq
+                buy_queue.pop(0)
+            else:
+                buy_queue[0] = (bq - sq, bp)
+                sq = 0
+
+    remaining_sq = sell_quantity
+    cost = 0.0
+    while remaining_sq > 0 and buy_queue:
+        bq, bp = buy_queue[0]
+        if bq <= remaining_sq:
+            cost += bq * bp
+            remaining_sq -= bq
+            buy_queue.pop(0)
+        else:
+            cost += remaining_sq * bp
+            buy_queue[0] = (bq - remaining_sq, bp)
+            remaining_sq = 0
+
+    return cost
+
+
 def _calc_closed_for_symbol(db: Session, symbol: str) -> Optional[dict]:
     """计算某股票的清仓盈亏，若未清仓返回 None"""
     trades = portfolio_trade_crud.get_by_symbol(db, symbol)
@@ -154,6 +187,18 @@ def _sync_all_positions(db: Session) -> None:
         _sync_position_snapshot(db, symbol)
 
 
+def _get_position_with_live_price(db: Session, p: models.PortfolioPosition) -> dict:
+    """基于持仓快照，实时查询最新价格并计算返回数据"""
+    data = schemas.PortfolioPositionResponse.model_validate(p).model_dump()
+    latest_price = _get_latest_close(db, p.symbol)
+    if latest_price is not None:
+        data['current_price'] = round(latest_price, 4)
+        data['market_value'] = round(latest_price * p.quantity, 4)
+        data['unrealized_pnl'] = round(data['market_value'] - p.avg_cost * p.quantity, 4)
+        data['unrealized_pnl_pct'] = round(data['unrealized_pnl'] / (p.avg_cost * p.quantity) * 100, 4) if p.avg_cost > 0 else None
+    return data
+
+
 # ==================== 交易记录接口 ====================
 
 @router.post('/portfolio/trades')
@@ -165,7 +210,22 @@ def create_trade(
     if obj_in.trade_type not in ('BUY', 'SELL'):
         raise HTTPException(status_code=400, detail='trade_type 必须为 BUY 或 SELL')
 
-    trade = portfolio_trade_crud.create(db, obj_in)
+    # 构建数据，排除 realized_pnl（模型无此字段）
+    data = obj_in.model_dump(exclude={'realized_pnl'})
+    if data.get('amount') is None and data.get('price') and data.get('quantity'):
+        data['amount'] = round(data['price'] * data['quantity'], 4)
+
+    # 卖出时若填写了实际盈亏，自动计算手续费
+    if obj_in.trade_type == 'SELL' and obj_in.realized_pnl is not None:
+        existing_trades = portfolio_trade_crud.get_by_symbol(db, obj_in.symbol)
+        fifo_cost = _calc_new_sell_fifo_cost(existing_trades, obj_in.quantity)
+        theoretical_pnl = data['amount'] - fifo_cost
+        data['fee'] = round(theoretical_pnl - obj_in.realized_pnl, 4)
+
+    trade = models.PortfolioTrade(**data)
+    db.add(trade)
+    db.commit()
+    db.refresh(trade)
 
     # 同步该股票的持仓快照
     _sync_position_snapshot(db, obj_in.symbol)
@@ -230,6 +290,13 @@ def delete_trade(id: int, db: Session = Depends(get_db)):
     return success(message='删除成功')
 
 
+@router.post('/portfolio/sync')
+def sync_positions(db: Session = Depends(get_db)):
+    """手动触发全部持仓快照同步"""
+    _sync_all_positions(db)
+    return success(message='同步完成')
+
+
 # ==================== 持仓与清仓接口 ====================
 
 @router.get('/portfolio/positions')
@@ -237,9 +304,9 @@ def get_positions(
     group: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    """获取当前持仓及浮动盈亏（从快照表查询）"""
+    """获取当前持仓及浮动盈亏（实时价格计算）"""
     positions = portfolio_position_crud.get_list(db, group)
-    items = [schemas.PortfolioPositionResponse.model_validate(p).model_dump() for p in positions]
+    items = [_get_position_with_live_price(db, p) for p in positions]
     return list_success(items)
 
 
@@ -286,18 +353,19 @@ def get_alerts(db: Session = Depends(get_db)):
     alerts = portfolio_position_crud.get_alerts(db)
     result = []
     for p in alerts:
-        if p.stop_loss_price and p.current_price <= p.stop_loss_price:
+        live_price = _get_latest_close(db, p.symbol) or p.current_price
+        if p.stop_loss_price and live_price <= p.stop_loss_price:
             alert_type = 'stop_loss'
             target_price = p.stop_loss_price
         else:
             alert_type = 'take_profit'
             target_price = p.take_profit_price
 
-        pnl_pct = round((p.current_price - p.avg_cost) / p.avg_cost * 100, 2) if p.avg_cost > 0 else 0
+        pnl_pct = round((live_price - p.avg_cost) / p.avg_cost * 100, 2) if p.avg_cost > 0 else 0
         result.append({
             'symbol': p.symbol,
             'name': p.name,
-            'current_price': p.current_price,
+            'current_price': live_price,
             'alert_type': alert_type,
             'target_price': target_price,
             'pnl_pct': pnl_pct,
@@ -347,7 +415,10 @@ def get_summary(db: Session = Depends(get_db)):
     config = portfolio_config_crud.get_or_create(db)
 
     total_invested = sum(p.avg_cost * p.quantity for p in positions)
-    total_market_value = sum(p.market_value or 0 for p in positions)
+    total_market_value = 0.0
+    for p in positions:
+        latest_price = _get_latest_close(db, p.symbol)
+        total_market_value += latest_price * p.quantity if latest_price else (p.market_value or 0)
     unrealized_pnl = total_market_value - total_invested
 
     realized_pnl = sum(c.realized_pnl for c in closed_data)
@@ -453,15 +524,20 @@ def get_distribution(db: Session = Depends(get_db)):
     config = portfolio_config_crud.get_or_create(db)
 
     total_invested = sum(p.avg_cost * p.quantity for p in positions)
-    total_market_value = sum(p.market_value or 0 for p in positions)
+    total_market_value = 0.0
+    position_mvs = []
+    for p in positions:
+        latest_price = _get_latest_close(db, p.symbol)
+        mv = latest_price * p.quantity if latest_price else (p.market_value or 0)
+        total_market_value += mv
+        position_mvs.append((p, mv))
     unrealized_pnl = total_market_value - total_invested
     realized_pnl = sum(c.realized_pnl for c in closed_data)
     total_pnl = unrealized_pnl + realized_pnl
     total_asset = config.initial_capital + total_pnl
 
     items = []
-    for p in positions:
-        mv = p.market_value or 0
+    for p, mv in position_mvs:
         ratio = mv / total_asset * 100 if total_asset > 0 else 0
         items.append({
             'symbol': p.symbol,

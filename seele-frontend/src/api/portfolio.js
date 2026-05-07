@@ -51,12 +51,23 @@ export const portfolioApi = {
   },
 
   /**
+   * 同步持仓快照
+   */
+  syncPositions () {
+    return request({
+      url: '/portfolio/sync',
+      method: 'post'
+    })
+  },
+
+  /**
    * 获取当前持仓
    */
-  getPositions () {
+  getPositions (group) {
     return request({
       url: '/portfolio/positions',
-      method: 'get'
+      method: 'get',
+      params: group ? { group } : {}
     })
   },
 

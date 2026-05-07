@@ -314,7 +314,11 @@ function renderPieChart (list) {
 function renderBarChart () {
   const data = pnlComparisonData.value.slice(0, 10)
   if (!data.length) {
-    barRef.init({ series: [{ type: 'bar', data: [] }] })
+    barRef.init({
+      xAxis: { type: 'value', show: false },
+      yAxis: { type: 'category', show: false, data: [] },
+      series: [{ type: 'bar', data: [] }]
+    })
     return
   }
   const upColor = getThemeColor('--up')
@@ -363,6 +367,15 @@ async function refreshAll () {
     renderBarChart()
   })
   loading.value = false
+}
+
+async function onSyncPositions () {
+  try {
+    await portfolioApi.syncPositions()
+    await refreshAll()
+  } catch (e) {
+    alert('同步失败: ' + (e.message || '未知错误'))
+  }
 }
 
 function onGroupChange (group) {
@@ -457,6 +470,7 @@ onMounted(() => {
     >
       <template #actions>
         <span class="capital-hint">初始资金 {{ (summary.initial_capital || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
+        <button class="btn-config" @click="onSyncPositions">同步持仓</button>
         <button class="btn-config" @click="openCapitalModal">设置资金</button>
         <button class="btn-primary" @click="openModal('BUY')">+ 买入</button>
         <button class="btn-sell" @click="openModal('SELL')">- 卖出</button>
@@ -581,6 +595,7 @@ onMounted(() => {
                 <th>股票名称</th>
                 <th class="num">总买入</th>
                 <th class="num">总卖出</th>
+                <th class="num">手续费</th>
                 <th class="num">实现盈亏</th>
                 <th class="num">盈亏比例</th>
                 <th class="num">持仓天数</th>
@@ -588,16 +603,17 @@ onMounted(() => {
             </thead>
             <tbody>
               <tr v-if="loading">
-                <td colspan="7" class="empty">加载中...</td>
+                <td colspan="8" class="empty">加载中...</td>
               </tr>
               <tr v-else-if="!closedList.length">
-                <td colspan="7" class="empty">暂无记录</td>
+                <td colspan="8" class="empty">暂无记录</td>
               </tr>
               <tr v-for="item in closedList" :key="item.id">
                 <td class="mono">{{ item.symbol }}</td>
                 <td>{{ item.name }}</td>
                 <td class="num">{{ Number(item.total_buy_amount).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }}</td>
                 <td class="num">{{ Number(item.total_sell_amount).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }}</td>
+                <td class="num">{{ Number(item.total_fee || 0).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }}</td>
                 <td class="num" :class="Number(item.realized_pnl) > 0 ? 'up' : Number(item.realized_pnl) < 0 ? 'down' : ''">
                   {{ Number(item.realized_pnl).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }}
                 </td>
@@ -625,6 +641,7 @@ onMounted(() => {
     <PortfolioTradeModal
       v-model:visible="modalVisible"
       :type="modalType"
+      :positions="positions"
       @submit="onSubmitTrade"
     />
 

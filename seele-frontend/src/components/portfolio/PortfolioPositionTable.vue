@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 
-const props = defineProps({
+defineProps({
   list: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false }
 })
@@ -113,7 +113,7 @@ function holdingDays (firstBuyDate) {
                 <span v-if="alertText(item)" class="alert-badge">{{ alertText(item) }}</span>
               </td>
               <td>{{ item.name }}</td>
-              <td class="num">{{ item.quantity.toLocaleString() }}</td>
+              <td class="num">{{ item.quantity != null ? item.quantity.toLocaleString() : '-' }}</td>
               <td class="num">{{ fmt(item.avg_cost) }}</td>
               <td class="num">{{ fmt(item.current_price) }}</td>
               <td class="num">{{ fmt(item.market_value) }}</td>

@@ -338,6 +338,7 @@ class PortfolioTradeCreate(BaseModel):
     quantity: int = Field(..., description='成交股数')
     amount: Optional[float] = Field(None, description='成交金额（不传则自动计算）')
     fee: Optional[float] = Field(0, description='交易手续费')
+    realized_pnl: Optional[float] = Field(None, description='实际盈亏金额（卖出时可选，用于自动计算手续费）')
     remark: Optional[str] = Field(None, description='备注')
 
     @field_validator('trade_date', mode='before')
@@ -421,6 +422,7 @@ class PortfolioClosedResponse(BaseModel):
     close_date: str
     realized_pnl: float
     pnl_pct: float
+    total_fee: Optional[float] = 0
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 

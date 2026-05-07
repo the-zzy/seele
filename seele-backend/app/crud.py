@@ -604,13 +604,12 @@ portfolio_closed_crud = PortfolioClosedCRUD()
 class PortfolioPositionCRUD:
     """持仓快照 CRUD"""
 
-    def get_by_symbol(self, db: Session, symbol: str, group: str = 'default') -> Optional[models.PortfolioPosition]:
-        """根据股票代码和分组查询持仓快照"""
-        return (
-            db.query(models.PortfolioPosition)
-            .filter(models.PortfolioPosition.symbol == symbol, models.PortfolioPosition.group == group)
-            .first()
-        )
+    def get_by_symbol(self, db: Session, symbol: str, group: str = None) -> Optional[models.PortfolioPosition]:
+        """根据股票代码查询持仓快照（group 为 None 时不限分组）"""
+        query = db.query(models.PortfolioPosition).filter(models.PortfolioPosition.symbol == symbol)
+        if group:
+            query = query.filter(models.PortfolioPosition.group == group)
+        return query.first()
 
     def get_list(self, db: Session, group: Optional[str] = None) -> List[models.PortfolioPosition]:
         """查询持仓快照列表"""
@@ -634,12 +633,12 @@ class PortfolioPositionCRUD:
         db.refresh(db_obj)
         return db_obj
 
-    def delete_by_symbol(self, db: Session, symbol: str, group: str = 'default') -> bool:
-        """根据股票代码和分组删除持仓快照"""
-        db.query(models.PortfolioPosition).filter(
-            models.PortfolioPosition.symbol == symbol,
-            models.PortfolioPosition.group == group
-        ).delete()
+    def delete_by_symbol(self, db: Session, symbol: str, group: str = None) -> bool:
+        """根据股票代码删除持仓快照（group 为 None 时不限分组）"""
+        query = db.query(models.PortfolioPosition).filter(models.PortfolioPosition.symbol == symbol)
+        if group:
+            query = query.filter(models.PortfolioPosition.group == group)
+        query.delete()
         db.commit()
         return True
 
