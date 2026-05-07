@@ -49,6 +49,20 @@ const modalType = ref('BUY')
 const capitalModalVisible = ref(false)
 const capitalInput = ref('')
 
+// 分组筛选
+const activeGroup = ref('')
+const groupOptions = [
+  { label: '全部', value: '' },
+  { label: '默认', value: 'default' },
+  { label: '核心仓', value: 'core' },
+  { label: '观察仓', value: 'watch' },
+  { label: '试错仓', value: 'trial' }
+]
+
+// 预警
+const alerts = ref([])
+const alertsVisible = ref(true)
+
 // 图表
 const trendRef = useEChart()
 const dailyPnlRef = useEChart()
@@ -88,10 +102,29 @@ async function loadSummary () {
 
 async function loadPositions () {
   try {
-    const res = await portfolioApi.getPositions()
+    const res = await portfolioApi.getPositions(activeGroup.value || undefined)
     positions.value = res || []
   } catch (e) {
     console.error('加载持仓失败:', e)
+  }
+}
+
+async function loadAlerts () {
+  try {
+    const res = await portfolioApi.getAlerts()
+    alerts.value = res || []
+  } catch (e) {
+    console.error('加载预警失败:', e)
+  }
+}
+
+async function onUpdatePosition (symbol, data) {
+  try {
+    await portfolioApi.updatePosition(symbol, data)
+    await loadPositions()
+    await loadAlerts()
+  } catch (e) {
+    alert('更新失败: ' + (e.message || '未知错误'))
   }
 }
 
@@ -119,6 +152,14 @@ async function loadClosed () {
   } catch (e) {
     console.error('加载清仓记录失败:', e)
   }
+}
+
+function pnlClass (v) {
+  if (v == null) return ''
+  const n = Number(v)
+  if (n > 0) return 'up'
+  if (n < 0) return 'down'
+  return ''
 }
 
 function getThemeColor (name) {
@@ -315,12 +356,18 @@ async function refreshAll () {
     loadTrades(),
     loadClosed(),
     loadDailyPnl(),
-    loadDistribution()
+    loadDistribution(),
+    loadAlerts()
   ])
   nextTick(() => {
     renderBarChart()
   })
   loading.value = false
+}
+
+function onGroupChange (group) {
+  activeGroup.value = group
+  loadPositions()
 }
 
 function openModal (type) {
@@ -418,6 +465,29 @@ onMounted(() => {
 
     <PortfolioStatsCards :summary="summary" />
 
+    <!-- 预警提示 -->
+    <div v-if="alerts.length && alertsVisible" class="alert-banner">
+      <div class="alert-header">
+        <span class="alert-icon">⚠️</span>
+        <span class="alert-title">持仓预警 {{ alerts.length }} 条</span>
+        <button class="alert-close" @click="alertsVisible = false">&times;</button>
+      </div>
+      <div class="alert-list">
+        <div
+          v-for="alert in alerts"
+          :key="alert.symbol + alert.alert_type"
+          class="alert-item"
+          :class="alert.alert_type"
+        >
+          <span class="alert-symbol">{{ alert.name }} ({{ alert.symbol }})</span>
+          <span class="alert-type">{{ alert.alert_type === 'stop_loss' ? '止损' : '止盈' }}</span>
+          <span class="alert-price">现价 {{ Number(alert.current_price).toFixed(2) }}</span>
+          <span class="alert-target">目标 {{ Number(alert.target_price).toFixed(2) }}</span>
+          <span class="alert-pnl" :class="pnlClass(alert.pnl_pct)">{{ alert.pnl_pct > 0 ? '+' : '' }}{{ alert.pnl_pct }}%</span>
+        </div>
+      </div>
+    </div>
+
     <div class="charts-grid">
       <div class="chart-card">
         <div class="chart-title">资产趋势</div>
@@ -461,10 +531,24 @@ onMounted(() => {
       </button>
     </div>
 
+    <!-- 分组筛选 -->
+    <div v-if="activeTab === 'positions'" class="group-filter">
+      <button
+        v-for="opt in groupOptions"
+        :key="opt.value"
+        class="group-btn"
+        :class="{ active: activeGroup === opt.value }"
+        @click="onGroupChange(opt.value)"
+      >
+        {{ opt.label }}
+      </button>
+    </div>
+
     <PortfolioPositionTable
       v-if="activeTab === 'positions'"
       :list="positions"
       :loading="loading"
+      @update-position="onUpdatePosition"
     />
 
     <template v-if="activeTab === 'trades'">
@@ -574,6 +658,148 @@ onMounted(() => {
   padding: 4px 28px 18px;
   box-sizing: border-box;
   overflow: auto;
+}
+
+.alert-banner {
+  background: var(--bg-secondary);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.alert-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.alert-icon {
+  font-size: 14px;
+}
+
+.alert-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.alert-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+
+  &:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+  }
+}
+
+.alert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--rule);
+}
+
+.alert-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  font-size: 12px;
+
+  &.stop_loss {
+    background: rgba(239, 68, 68, 0.04);
+  }
+
+  &.take_profit {
+    background: rgba(16, 185, 129, 0.04);
+  }
+}
+
+.alert-symbol {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  min-width: 120px;
+}
+
+.alert-type {
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--text-muted);
+
+  .stop_loss & {
+    background: var(--up);
+  }
+
+  .take_profit & {
+    background: var(--down);
+  }
+}
+
+.alert-price, .alert-target {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.alert-pnl {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-weight: 600;
+
+  &.up {
+    color: var(--up);
+  }
+
+  &.down {
+    color: var(--down);
+  }
+}
+
+.group-filter {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+
+.group-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text-muted);
+  background: transparent;
+  transition: all 0.2s;
+
+  &:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  &.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(59, 130, 246, 0.08);
+  }
 }
 
 .capital-hint {

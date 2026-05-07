@@ -598,6 +598,86 @@ class PortfolioClosedCRUD:
 portfolio_closed_crud = PortfolioClosedCRUD()
 
 
+# ==================== 持仓快照 ====================
+
+
+class PortfolioPositionCRUD:
+    """持仓快照 CRUD"""
+
+    def get_by_symbol(self, db: Session, symbol: str, group: str = 'default') -> Optional[models.PortfolioPosition]:
+        """根据股票代码和分组查询持仓快照"""
+        return (
+            db.query(models.PortfolioPosition)
+            .filter(models.PortfolioPosition.symbol == symbol, models.PortfolioPosition.group == group)
+            .first()
+        )
+
+    def get_list(self, db: Session, group: Optional[str] = None) -> List[models.PortfolioPosition]:
+        """查询持仓快照列表"""
+        stmt = db.query(models.PortfolioPosition)
+        if group:
+            stmt = stmt.filter(models.PortfolioPosition.group == group)
+        return stmt.order_by(models.PortfolioPosition.unrealized_pnl.desc()).all()
+
+    def upsert(self, db: Session, data: dict) -> models.PortfolioPosition:
+        """更新或插入持仓快照"""
+        symbol = data['symbol']
+        group = data.get('group', 'default')
+        db_obj = self.get_by_symbol(db, symbol, group)
+        if db_obj:
+            for key, value in data.items():
+                setattr(db_obj, key, value)
+        else:
+            db_obj = models.PortfolioPosition(**data)
+            db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def delete_by_symbol(self, db: Session, symbol: str, group: str = 'default') -> bool:
+        """根据股票代码和分组删除持仓快照"""
+        db.query(models.PortfolioPosition).filter(
+            models.PortfolioPosition.symbol == symbol,
+            models.PortfolioPosition.group == group
+        ).delete()
+        db.commit()
+        return True
+
+    def get_alerts(self, db: Session) -> List[models.PortfolioPosition]:
+        """获取触发止损/止盈预警的持仓"""
+        return (
+            db.query(models.PortfolioPosition)
+            .filter(
+                models.PortfolioPosition.quantity > 0,
+                models.PortfolioPosition.alert_triggered == 0,
+                models.PortfolioPosition.current_price.isnot(None),
+                or_(
+                    and_(
+                        models.PortfolioPosition.stop_loss_price.isnot(None),
+                        models.PortfolioPosition.current_price <= models.PortfolioPosition.stop_loss_price
+                    ),
+                    and_(
+                        models.PortfolioPosition.take_profit_price.isnot(None),
+                        models.PortfolioPosition.current_price >= models.PortfolioPosition.take_profit_price
+                    )
+                )
+            )
+            .all()
+        )
+
+    def mark_alert_triggered(self, db: Session, id: int) -> bool:
+        """标记预警已触发"""
+        db_obj = db.query(models.PortfolioPosition).filter(models.PortfolioPosition.id == id).first()
+        if db_obj:
+            db_obj.alert_triggered = 1
+            db.commit()
+            return True
+        return False
+
+
+portfolio_position_crud = PortfolioPositionCRUD()
+
+
 # ==================== 持仓配置 ====================
 
 

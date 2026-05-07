@@ -14,7 +14,9 @@ const form = reactive({
   name: '',
   trade_date: '',
   price: '',
-  quantity: ''
+  quantity: '',
+  fee: '',
+  remark: ''
 })
 
 const showDropdown = ref(false)
@@ -30,6 +32,8 @@ watch(() => props.visible, (val) => {
     form.trade_date = new Date().toISOString().slice(0, 10)
     form.price = ''
     form.quantity = ''
+    form.fee = ''
+    form.remark = ''
     closeDropdown()
   }
 })
@@ -118,14 +122,17 @@ function onSubmit () {
     alert('请输入有效的成交股数（100股的整数倍）')
     return
   }
-  emit('submit', {
+  const data = {
     symbol: form.symbol.trim(),
     name: form.name.trim(),
     trade_type: props.type,
     trade_date: form.trade_date,
     price: price,
     quantity: qty
-  })
+  }
+  if (form.fee !== '' && form.fee != null) data.fee = Number(form.fee)
+  if (form.remark) data.remark = form.remark.trim()
+  emit('submit', data)
 }
 </script>
 
@@ -191,6 +198,14 @@ function onSubmit () {
         <div class="form-row">
           <label>成交股数</label>
           <input v-model="form.quantity" placeholder="100股的整数倍" type="number" step="100">
+        </div>
+        <div class="form-row">
+          <label>手续费</label>
+          <input v-model="form.fee" placeholder="元（可选）" type="number" step="0.01">
+        </div>
+        <div class="form-row">
+          <label>备注</label>
+          <input v-model="form.remark" placeholder="可选" type="text">
         </div>
       </div>
       <div class="modal-footer">

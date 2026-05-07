@@ -107,6 +107,40 @@ export const portfolioApi = {
   },
 
   /**
+   * 更新持仓（止损止盈、分组、备注）
+   * @param {string} symbol - 股票代码
+   * @param {Object} data
+   */
+  updatePosition (symbol, data) {
+    return request({
+      url: `/portfolio/positions/${symbol}`,
+      method: 'put',
+      data
+    })
+  },
+
+  /**
+   * 获取持仓预警
+   */
+  getAlerts () {
+    return request({
+      url: '/portfolio/alerts',
+      method: 'get'
+    })
+  },
+
+  /**
+   * 标记预警已处理
+   * @param {number} id
+   */
+  dismissAlert (id) {
+    return request({
+      url: `/portfolio/alerts/${id}/dismiss`,
+      method: 'post'
+    })
+  },
+
+  /**
    * 获取持仓配置
    */
   getConfig () {
