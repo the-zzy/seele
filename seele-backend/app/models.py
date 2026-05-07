@@ -83,8 +83,36 @@ class PortfolioTrade(Base):
     price = Column(Float, nullable=False, comment='成交价格')
     quantity = Column(Integer, nullable=False, comment='成交股数')
     amount = Column(Float, nullable=False, comment='成交金额')
+    fee = Column(Float, default=0, comment='交易手续费')
+    remark = Column(String(255), comment='备注')
     created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
+
+
+class PortfolioPosition(Base):
+    """持仓快照表：缓存当前持仓的实时计算结果"""
+    __tablename__ = 'portfolio_position'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False, index=True, comment='股票代码')
+    name = Column(String(100), nullable=False, comment='股票名称')
+    quantity = Column(Integer, nullable=False, default=0, comment='持仓股数')
+    avg_cost = Column(Float, nullable=False, default=0, comment='平均成本')
+    current_price = Column(Float, comment='最新收盘价')
+    market_value = Column(Float, comment='市值')
+    unrealized_pnl = Column(Float, comment='浮动盈亏')
+    unrealized_pnl_pct = Column(Float, comment='浮动盈亏百分比')
+    stop_loss_price = Column(Float, comment='止损价')
+    take_profit_price = Column(Float, comment='止盈价')
+    alert_triggered = Column(Integer, nullable=False, default=0, comment='是否已触发提醒 0/1')
+    group = Column(String(50), default='default', comment='持仓分组（如 core, watch）')
+    remark = Column(String(255), comment='备注')
+    first_buy_date = Column(Date, comment='首次买入日期')
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
+
+    __table_args__ = (
+        UniqueConstraint('group', 'symbol', name='uq_portfolio_position_group_symbol'),
+    )
 
 
 class PortfolioClosed(Base):
@@ -103,6 +131,8 @@ class PortfolioClosed(Base):
     close_date = Column(Date, nullable=False, comment='清仓日期')
     realized_pnl = Column(Float, nullable=False, comment='实现盈亏')
     pnl_pct = Column(Float, nullable=False, comment='盈亏百分比')
+    total_fee = Column(Float, default=0, comment='总手续费')
+    group = Column(String(50), default='default', comment='持仓分组')
     created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
 
