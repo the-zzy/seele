@@ -486,3 +486,120 @@ class PositionDistributionItem(BaseModel):
     name: str = Field(..., description='股票名称')
     market_value: float = Field(..., description='市值')
     ratio: float = Field(..., description='占比')
+
+
+# ==================== 财务指标 ====================
+
+
+class StockFinancialIndicatorCreate(BaseModel):
+    """财务指标-创建"""
+    symbol: str = Field(..., description='股票代码')
+    name: Optional[str] = Field(None, description='股票名称')
+    report_date: Optional[date] = Field(None, description='报告期')
+    net_profit: Optional[float] = Field(None, description='净利润')
+    net_profit_yoy: Optional[float] = Field(None, description='净利润同比增长率(%)')
+    deduct_net_profit: Optional[float] = Field(None, description='扣非净利润')
+    total_revenue: Optional[float] = Field(None, description='营业总收入')
+    revenue_yoy: Optional[float] = Field(None, description='营收同比增长率(%)')
+    gross_profit_ratio: Optional[float] = Field(None, description='销售毛利率(%)')
+    net_profit_ratio: Optional[float] = Field(None, description='销售净利率(%)')
+    roe: Optional[float] = Field(None, description='净资产收益率(%)')
+    roe_diluted: Optional[float] = Field(None, description='净资产收益率-摊薄(%)')
+    eps: Optional[float] = Field(None, description='基本每股收益')
+    bps: Optional[float] = Field(None, description='每股净资产')
+    ops_cash_flow_per_share: Optional[float] = Field(None, description='每股经营现金流')
+    current_ratio: Optional[float] = Field(None, description='流动比率')
+    quick_ratio: Optional[float] = Field(None, description='速动比率')
+    debt_ratio: Optional[float] = Field(None, description='资产负债率(%)')
+    total_assets: Optional[float] = Field(None, description='资产总计(万元)')
+    total_equity: Optional[float] = Field(None, description='所有者权益合计(万元)')
+    operate_cash_flow: Optional[float] = Field(None, description='经营活动现金流净额')
+
+
+class StockFinancialIndicatorResponse(BaseModel):
+    """财务指标-响应"""
+    symbol: str
+    name: Optional[str] = None
+    report_date: Optional[str] = None
+    net_profit: Optional[float] = None
+    net_profit_yoy: Optional[float] = None
+    deduct_net_profit: Optional[float] = None
+    total_revenue: Optional[float] = None
+    revenue_yoy: Optional[float] = None
+    gross_profit_ratio: Optional[float] = None
+    net_profit_ratio: Optional[float] = None
+    roe: Optional[float] = None
+    roe_diluted: Optional[float] = None
+    eps: Optional[float] = None
+    bps: Optional[float] = None
+    ops_cash_flow_per_share: Optional[float] = None
+    current_ratio: Optional[float] = None
+    quick_ratio: Optional[float] = None
+    debt_ratio: Optional[float] = None
+    total_assets: Optional[float] = None
+    total_equity: Optional[float] = None
+    operate_cash_flow: Optional[float] = None
+    updated_at: Optional[str] = None
+
+    @field_validator('report_date', mode='before')
+    @classmethod
+    def validate_report_date(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d')
+        return str(v)
+
+    @field_validator('updated_at', mode='before')
+    @classmethod
+    def validate_timestamp(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d %H:%M:%S')
+        return str(v)
+
+    class Config:
+        from_attributes = True
+
+
+class StockFinancialIndicatorQuery(BaseModel):
+    """财务指标-分页查询"""
+    page_num: int = Field(default=1, description='页码')
+    page_size: int = Field(default=20, description='每页条数')
+    symbol: Optional[str] = Field(None, description='股票代码')
+    name: Optional[str] = Field(None, description='股票名称')
+    industry: Optional[str] = Field(None, description='所属行业')
+    market: Optional[str] = Field(None, description='市场板块')
+    sort_field: Optional[str] = Field(None, description='排序字段')
+    sort_order: Optional[str] = Field(default='desc', description='排序方向')
+    roe_min: Optional[float] = Field(None, description='ROE最小值')
+    roe_max: Optional[float] = Field(None, description='ROE最大值')
+    gross_profit_ratio_min: Optional[float] = Field(None, description='毛利率最小值')
+    gross_profit_ratio_max: Optional[float] = Field(None, description='毛利率最大值')
+    net_profit_ratio_min: Optional[float] = Field(None, description='净利率最小值')
+    net_profit_ratio_max: Optional[float] = Field(None, description='净利率最大值')
+    net_profit_yoy_min: Optional[float] = Field(None, description='净利润增长率最小值')
+    net_profit_yoy_max: Optional[float] = Field(None, description='净利润增长率最大值')
+    revenue_yoy_min: Optional[float] = Field(None, description='营收增长率最小值')
+    revenue_yoy_max: Optional[float] = Field(None, description='营收增长率最大值')
+    debt_ratio_min: Optional[float] = Field(None, description='资产负债率最小值')
+    debt_ratio_max: Optional[float] = Field(None, description='资产负债率最大值')
+
+
+class FinancialPickerQuery(BaseModel):
+    """财务选股-查询参数"""
+    roe_min: float = Field(default=15.0, description='ROE最小值，默认15')
+    gross_profit_ratio_min: float = Field(default=30.0, description='毛利率最小值，默认30')
+    net_profit_ratio_min: Optional[float] = Field(None, description='净利率最小值')
+    net_profit_yoy_min: float = Field(default=20.0, description='净利润同比增长率最小值，默认20')
+    revenue_yoy_min: float = Field(default=15.0, description='营收同比增长率最小值，默认15')
+    debt_ratio_max: float = Field(default=60.0, description='资产负债率最大值，默认60')
+    exclude_st: bool = Field(default=True, description='排除ST，默认true')
+    exclude_cyb: bool = Field(default=True, description='排除创业板，默认true')
+    exclude_kcb: bool = Field(default=True, description='排除科创板，默认true')
+    exclude_bse: bool = Field(default=True, description='排除北交所，默认true')
+    sort_field: str = Field(default='roe', description='排序字段，默认roe')
+    sort_order: str = Field(default='desc', description='排序方向，asc/desc，默认desc')
+    page_num: int = Field(default=1, description='页码，默认1')
+    page_size: int = Field(default=100, ge=1, le=100, description='每页条数，默认100，最大100')

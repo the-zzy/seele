@@ -10,7 +10,7 @@ from app import models
 from app.config import get_settings
 from app.database import engine, Base
 from app.response import success
-from app.routes import pickers, portfolio, stock_basic, stock_daily, stock_indicator, sync
+from app.routes import financial, pickers, portfolio, stock_basic, stock_daily, stock_indicator, sync
 
 
 @asynccontextmanager
@@ -44,6 +44,7 @@ app.include_router(stock_basic.router, prefix="/api")
 app.include_router(stock_daily.router, prefix="/api")
 app.include_router(stock_indicator.router, prefix="/api")
 app.include_router(pickers.router, prefix="/api")
+app.include_router(financial.router, prefix="/api")
 app.include_router(portfolio.router, prefix="/api")
 app.include_router(sync.router, prefix="/api")
 

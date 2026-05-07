@@ -773,3 +773,185 @@ def post_sync_stock_basic(
         'summary': f"同步完成（{result['source']}），共 {result['total']} 条，新增 {result['created']} 条，更新 {result['updated']} 条",
         **result,
     })
+
+
+# ==================== 财务指标同步 ====================
+
+
+def _parse_financial_value(val):
+    """解析财务指标值，处理 '--'、空值、False、中文单位、百分比等"""
+    if val is None or val == '' or val == '--' or val is False:
+        return None
+    val_str = str(val).strip()
+    if val_str == '--' or val_str == 'False':
+        return None
+    # 移除百分比符号
+    if val_str.endswith('%'):
+        val_str = val_str[:-1]
+    # 移除中文单位（亿、万）并转换
+    multiplier = 1
+    if val_str.endswith('亿'):
+        multiplier = 1
+        val_str = val_str[:-1]
+    elif val_str.endswith('万'):
+        multiplier = 1
+        val_str = val_str[:-1]
+    try:
+        return float(val_str) * multiplier
+    except (ValueError, TypeError):
+        return None
+
+
+def _sync_financial_for_symbol(symbol: str, name: str) -> Optional[dict]:
+    """同步单只股票财务指标，返回解析后的数据字典"""
+    try:
+        import akshare as ak
+        df = ak.stock_financial_abstract_ths(symbol, indicator='按报告期')
+        if df is None or df.empty:
+            return None
+        row = df.iloc[-1]
+        return {
+            'symbol': symbol,
+            'name': name,
+            'report_date': _parse_list_date(row.get('报告期')),
+            'net_profit': _parse_financial_value(row.get('净利润')),
+            'net_profit_yoy': _parse_financial_value(row.get('净利润同比增长率')),
+            'deduct_net_profit': _parse_financial_value(row.get('扣非净利润')),
+            'total_revenue': _parse_financial_value(row.get('营业总收入')),
+            'revenue_yoy': _parse_financial_value(row.get('营业总收入同比增长率')),
+            'gross_profit_ratio': _parse_financial_value(row.get('销售毛利率')),
+            'net_profit_ratio': _parse_financial_value(row.get('销售净利率')),
+            'roe': _parse_financial_value(row.get('净资产收益率')),
+            'roe_diluted': _parse_financial_value(row.get('净资产收益率-摊薄')),
+            'eps': _parse_financial_value(row.get('基本每股收益')),
+            'bps': _parse_financial_value(row.get('每股净资产')),
+            'ops_cash_flow_per_share': _parse_financial_value(row.get('每股经营现金流')),
+            'current_ratio': _parse_financial_value(row.get('流动比率')),
+            'quick_ratio': _parse_financial_value(row.get('速动比率')),
+            'debt_ratio': _parse_financial_value(row.get('资产负债率')),
+            'total_assets': _parse_financial_value(row.get('资产总计')),
+            'total_equity': _parse_financial_value(row.get('所有者权益（或股东权益）合计')),
+            'operate_cash_flow': _parse_financial_value(row.get('经营活动产生的现金流量净额')),
+        }
+    except Exception:
+        return None
+
+
+def _sync_financial_bulk(task_id: str | None = None, on_progress: Callable | None = None) -> dict:
+    """批量同步全部股票财务指标"""
+    db = SessionLocal()
+    try:
+        all_stocks = crud.stock_basic_crud.get_list(
+            db,
+            schemas.StockBasicQuery(page_num=1, page_size=10000)
+        )[0]
+    finally:
+        db.close()
+
+    _failed: List[str] = []
+    records: List[dict] = []
+    total_stocks = len(all_stocks)
+
+    def _push_progress(current: int, status: str, extra: dict | None = None):
+        payload = {"current": current, "total": total_stocks, "status": status}
+        if extra:
+            payload.update(extra)
+        if task_id and current % 10 == 0:
+            _update_task_progress(task_id, current, total_stocks)
+        if on_progress:
+            on_progress(current, total_stocks, status)
+
+    _push_progress(0, "running", {"message": "开始同步财务指标"})
+
+    for i, stock in enumerate(all_stocks, 1):
+        data = _sync_financial_for_symbol(stock.symbol, stock.name)
+        if data:
+            records.append(data)
+        else:
+            _failed.append(stock.symbol)
+
+        _push_progress(i, "running", {
+            "symbol": stock.symbol,
+            "success": len(records),
+            "failed": len(_failed),
+        })
+
+        if i % 50 == 0:
+            time.sleep(0.5)
+
+    # 批量写入
+    db_write = SessionLocal()
+    try:
+        from sqlalchemy.dialects.mysql import insert
+        if records:
+            upsert_stmt = insert(models.StockFinancialIndicator).values(records)
+            update_dict = {
+                k: upsert_stmt.inserted[k]
+                for k in upsert_stmt.inserted.keys()
+                if k not in ("symbol",)
+            }
+            upsert_stmt = upsert_stmt.on_duplicate_key_update(**update_dict)
+            db_write.execute(upsert_stmt)
+            db_write.commit()
+    finally:
+        db_write.close()
+
+    return {
+        "total_stocks": total_stocks,
+        "upserted": len(records),
+        "failed": len(_failed),
+        "failed_symbols": _failed[:50],
+        "summary": (
+            f"财务指标同步完成，"
+            f"写入/更新: {len(records)}, "
+            f"异常: {len(_failed)}"
+        ),
+    }
+
+
+def _run_sync_financial_bg(task_id: str) -> None:
+    """后台执行财务指标同步任务"""
+    try:
+        result = _sync_financial_bulk(task_id=task_id)
+        _finish_task(task_id, result=result)
+    except Exception as exc:
+        _finish_task(task_id, error=str(exc))
+
+
+# 3.6 同步全部股票财务指标（后台异步版）
+@router.post("/financial")
+def post_sync_financial(
+    db: Session = Depends(get_db),
+):
+    """同步全部股票财务指标（后台异步版）"""
+    task_id = str(uuid.uuid4())
+    _register_task(task_id, "financial")
+    t = threading.Thread(target=_run_sync_financial_bg, args=(task_id,), daemon=True)
+    t.start()
+    return success({
+        "task_id": task_id,
+        "status": "running",
+        "hint": "财务指标同步任务已提交后台执行，约需 3-5 分钟，请稍后刷新页面查看",
+    })
+
+
+# 3.7 同步单只股票财务指标
+@router.post("/financial/{symbol}")
+def post_sync_financial_by_symbol(
+    symbol: str,
+    db: Session = Depends(get_db),
+):
+    """同步单只股票财务指标"""
+    stock = crud.stock_basic_crud.get_by_symbol(db, symbol)
+    name = stock.name if stock else symbol
+    data = _sync_financial_for_symbol(symbol, name)
+    if not data:
+        raise HTTPException(status_code=404, detail=f"未获取到 {symbol} 的财务指标数据")
+
+    obj_in = schemas.StockFinancialIndicatorCreate(**data)
+    result = crud.stock_financial_indicator_crud.upsert(db, obj_in)
+    return success({
+        "symbol": symbol,
+        "report_date": data.get("report_date").isoformat() if data.get("report_date") else None,
+        "summary": f"同步完成: {symbol}",
+    })
