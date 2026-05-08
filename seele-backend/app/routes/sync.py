@@ -5,8 +5,10 @@
 import asyncio
 import concurrent.futures
 import json
+import logging
 import threading
 import time
+import traceback
 import uuid
 from datetime import date, datetime, timedelta
 from typing import Callable, List, Optional
@@ -22,6 +24,8 @@ from app import crud, models, schemas
 from app.database import SessionLocal, get_db
 from app.filters import get_baostock_code
 from app.response import success
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sync", tags=["数据同步"])
 
@@ -638,6 +642,18 @@ def _sync_stock_basic_from_akshare(db: Session) -> dict:
 
     records_map: dict[str, dict] = {}
 
+    # 获取流通市值（亿元）
+    cap_map: dict[str, float] = {}
+    try:
+        df_spot = ak.stock_zh_a_spot_em()
+        for _, row in df_spot.iterrows():
+            symbol = str(row['代码']).strip().zfill(6)
+            cap = row.get('流通市值')
+            if pd.notna(cap) and cap:
+                cap_map[symbol] = round(float(cap) / 1e8, 4)
+    except Exception as exc:
+        logger.warning('[SYNC_STOCK_BASIC] 获取流通市值失败: %s', exc)
+
     # 1. 上海
     df_sh = ak.stock_info_sh_name_code()
     for _, row in df_sh.iterrows():
@@ -651,6 +667,7 @@ def _sync_stock_basic_from_akshare(db: Session) -> dict:
             'market': _infer_market(symbol),
             'industry': None,
             'area': None,
+            'float_market_cap': cap_map.get(symbol),
         }
 
     # 2. 深圳
@@ -666,6 +683,7 @@ def _sync_stock_basic_from_akshare(db: Session) -> dict:
             'market': _infer_market(symbol),
             'industry': str(row['所属行业']).strip() if pd.notna(row['所属行业']) else None,
             'area': None,
+            'float_market_cap': cap_map.get(symbol),
         }
 
     # 3. 北京
@@ -681,6 +699,7 @@ def _sync_stock_basic_from_akshare(db: Session) -> dict:
             'market': _infer_market(symbol),
             'industry': str(row['所属行业']).strip() if pd.notna(row['所属行业']) else None,
             'area': str(row['地区']).strip() if pd.notna(row['地区']) else None,
+            'float_market_cap': cap_map.get(symbol),
         }
 
     records = [schemas.StockBasicCreate(**d) for d in records_map.values()]
@@ -772,4 +791,270 @@ def post_sync_stock_basic(
     return success({
         'summary': f"同步完成（{result['source']}），共 {result['total']} 条，新增 {result['created']} 条，更新 {result['updated']} 条",
         **result,
+    })
+
+
+# ==================== 财务指标同步 ====================
+
+
+def _parse_financial_value(val):
+    """解析财务指标值，处理 '--'、空值、False、中文单位、百分比等"""
+    if val is None or val == '' or val == '--' or val is False:
+        return None
+    val_str = str(val).strip()
+    if val_str == '--' or val_str == 'False':
+        return None
+    # 移除百分比符号
+    if val_str.endswith('%'):
+        val_str = val_str[:-1]
+    # 移除中文单位（亿、万）并转换
+    multiplier = 1
+    if val_str.endswith('亿'):
+        multiplier = 1
+        val_str = val_str[:-1]
+    elif val_str.endswith('万'):
+        multiplier = 1
+        val_str = val_str[:-1]
+    try:
+        return float(val_str) * multiplier
+    except (ValueError, TypeError):
+        return None
+
+
+def _sync_financial_for_symbol(symbol: str, name: str) -> Optional[dict]:
+    """同步单只股票财务指标，返回解析后的数据字典"""
+    try:
+        import akshare as ak
+        df = ak.stock_financial_abstract_ths(symbol, indicator='按报告期')
+        if df is None or df.empty:
+            return None
+        row = df.iloc[-1]
+        return {
+            'symbol': symbol,
+            'name': name,
+            'report_date': _parse_list_date(row.get('报告期')),
+            'net_profit': _parse_financial_value(row.get('净利润')),
+            'net_profit_yoy': _parse_financial_value(row.get('净利润同比增长率')),
+            'deduct_net_profit': _parse_financial_value(row.get('扣非净利润')),
+            'total_revenue': _parse_financial_value(row.get('营业总收入')),
+            'revenue_yoy': _parse_financial_value(row.get('营业总收入同比增长率')),
+            'gross_profit_ratio': _parse_financial_value(row.get('销售毛利率')),
+            'net_profit_ratio': _parse_financial_value(row.get('销售净利率')),
+            'roe': _parse_financial_value(row.get('净资产收益率')),
+            'roe_diluted': _parse_financial_value(row.get('净资产收益率-摊薄')),
+            'eps': _parse_financial_value(row.get('基本每股收益')),
+            'bps': _parse_financial_value(row.get('每股净资产')),
+            'ops_cash_flow_per_share': _parse_financial_value(row.get('每股经营现金流')),
+            'current_ratio': _parse_financial_value(row.get('流动比率')),
+            'quick_ratio': _parse_financial_value(row.get('速动比率')),
+            'debt_ratio': _parse_financial_value(row.get('资产负债率')),
+            'total_assets': _parse_financial_value(row.get('资产总计')),
+            'total_equity': _parse_financial_value(row.get('所有者权益（或股东权益）合计')),
+            'operate_cash_flow': _parse_financial_value(row.get('经营活动产生的现金流量净额')),
+        }
+    except Exception:
+        return None
+
+
+def _sync_financial_bulk(
+    task_id: str | None = None,
+    on_progress: Callable | None = None,
+    progress_queue: asyncio.Queue | None = None,
+) -> dict:
+    """批量同步全部股票财务指标"""
+    logger.info('[SYNC_FINANCIAL] 开始批量同步财务指标')
+    db = SessionLocal()
+    try:
+        all_stocks = crud.stock_basic_crud.get_list(
+            db,
+            schemas.StockBasicQuery(page_num=1, page_size=10000)
+        )[0]
+    except Exception as exc:
+        logger.error('[SYNC_FINANCIAL] 获取股票列表失败: %s', exc)
+        logger.error(traceback.format_exc())
+        raise
+    finally:
+        db.close()
+
+    _failed: List[str] = []
+    records: List[dict] = []
+    total_stocks = len(all_stocks)
+    logger.info('[SYNC_FINANCIAL] 共 %d 只股票待同步', total_stocks)
+
+    def _push_progress(current: int, status: str, extra: dict | None = None):
+        payload = {"current": current, "total": total_stocks, "status": status}
+        if extra:
+            payload.update(extra)
+        if task_id and current % 10 == 0:
+            _update_task_progress(task_id, current, total_stocks)
+        if on_progress:
+            on_progress(current, total_stocks, status)
+        if progress_queue is not None:
+            try:
+                progress_queue.put_nowait(payload)
+            except asyncio.QueueFull:
+                pass
+
+    _push_progress(0, "running", {"message": "开始同步财务指标"})
+
+    for i, stock in enumerate(all_stocks, 1):
+        data = _sync_financial_for_symbol(stock.symbol, stock.name)
+        if data:
+            records.append(data)
+        else:
+            _failed.append(stock.symbol)
+
+        _push_progress(i, "running", {
+            "symbol": stock.symbol,
+            "success": len(records),
+            "failed": len(_failed),
+        })
+
+        if i % 50 == 0:
+            time.sleep(0.5)
+
+    # 批量写入
+    db_write = SessionLocal()
+    try:
+        from sqlalchemy.dialects.mysql import insert
+        if records:
+            logger.info('[SYNC_FINANCIAL] 准备写入 %d 条记录', len(records))
+            upsert_stmt = insert(models.StockFinancialIndicator).values(records)
+            update_dict = {
+                k: upsert_stmt.inserted[k]
+                for k in upsert_stmt.inserted.keys()
+                if k not in ("symbol", "updated_at")
+            }
+            upsert_stmt = upsert_stmt.on_duplicate_key_update(**update_dict)
+            db_write.execute(upsert_stmt)
+            db_write.commit()
+            logger.info('[SYNC_FINANCIAL] 写入完成')
+        else:
+            logger.warning('[SYNC_FINANCIAL] 没有记录需要写入')
+    except Exception as exc:
+        logger.error('[SYNC_FINANCIAL] 批量写入失败: %s', exc)
+        logger.error(traceback.format_exc())
+        raise
+    finally:
+        db_write.close()
+
+    return {
+        "total_stocks": total_stocks,
+        "upserted": len(records),
+        "failed": len(_failed),
+        "failed_symbols": _failed[:50],
+        "summary": (
+            f"财务指标同步完成，"
+            f"写入/更新: {len(records)}, "
+            f"异常: {len(_failed)}"
+        ),
+    }
+
+
+def _run_sync_financial_bg(task_id: str) -> None:
+    """后台执行财务指标同步任务"""
+    logger.info('[SYNC_FINANCIAL_BG] 后台任务启动, task_id=%s', task_id)
+    try:
+        result = _sync_financial_bulk(task_id=task_id)
+        _finish_task(task_id, result=result)
+        logger.info('[SYNC_FINANCIAL_BG] 任务完成, task_id=%s', task_id)
+    except Exception as exc:
+        logger.error('[SYNC_FINANCIAL_BG] 任务异常, task_id=%s, error=%s', task_id, exc)
+        logger.error(traceback.format_exc())
+        _finish_task(task_id, error=str(exc))
+
+
+# 3.6 同步全部股票财务指标（后台异步版）
+@router.post("/financial")
+def post_sync_financial(
+    db: Session = Depends(get_db),
+):
+    """同步全部股票财务指标（后台异步版）"""
+    try:
+        task_id = str(uuid.uuid4())
+        _register_task(task_id, "financial")
+        t = threading.Thread(target=_run_sync_financial_bg, args=(task_id,), daemon=True)
+        t.start()
+        logger.info('[SYNC_FINANCIAL_API] 已提交后台任务, task_id=%s', task_id)
+        return success({
+            "task_id": task_id,
+            "status": "running",
+            "hint": "财务指标同步任务已提交后台执行，约需 3-5 分钟，请稍后刷新页面查看",
+        })
+    except Exception as exc:
+        logger.error('[SYNC_FINANCIAL_API] 提交任务失败: %s', exc)
+        logger.error(traceback.format_exc())
+        raise
+
+
+# 3.6.1 SSE 实时推送财务指标同步进度
+@router.get("/financial/stream")
+async def get_sync_financial_stream():
+    """
+    SSE 实时推送财务指标同步进度
+    前端使用 EventSource('/api/sync/financial/stream') 连接
+    """
+    progress_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=100)
+
+    def run_sync_in_thread():
+        try:
+            result = _sync_financial_bulk(progress_queue=progress_queue)
+            try:
+                progress_queue.put_nowait({"status": "completed", "result": result})
+            except asyncio.QueueFull:
+                pass
+        except Exception as exc:
+            try:
+                progress_queue.put_nowait({"status": "failed", "error": str(exc)})
+            except asyncio.QueueFull:
+                pass
+
+    thread = threading.Thread(target=run_sync_in_thread, daemon=True)
+    thread.start()
+
+    async def event_generator():
+        yield f"data: {json.dumps({'status': 'running', 'message': '开始同步财务指标'})}\n\n"
+
+        while True:
+            try:
+                payload = await asyncio.wait_for(progress_queue.get(), timeout=300)
+            except asyncio.TimeoutError:
+                yield f"event: timeout\ndata: {json.dumps({'message': '同步超时'})}\n\n"
+                break
+
+            yield f"data: {json.dumps(payload)}\n\n"
+
+            if payload.get("status") in ("completed", "failed"):
+                break
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# 3.7 同步单只股票财务指标
+@router.post("/financial/{symbol}")
+def post_sync_financial_by_symbol(
+    symbol: str,
+    db: Session = Depends(get_db),
+):
+    """同步单只股票财务指标"""
+    stock = crud.stock_basic_crud.get_by_symbol(db, symbol)
+    name = stock.name if stock else symbol
+    data = _sync_financial_for_symbol(symbol, name)
+    if not data:
+        raise HTTPException(status_code=404, detail=f"未获取到 {symbol} 的财务指标数据")
+
+    obj_in = schemas.StockFinancialIndicatorCreate(**data)
+    result = crud.stock_financial_indicator_crud.upsert(db, obj_in)
+    return success({
+        "symbol": symbol,
+        "report_date": data.get("report_date").isoformat() if data.get("report_date") else None,
+        "summary": f"同步完成: {symbol}",
     })
