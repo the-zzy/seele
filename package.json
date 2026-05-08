@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently \"npm run dev:back\" \"npm run dev:front\"",
     "dev:front": "cd seele-frontend && npm run serve",
-    "dev:back": "cd seele-backend && .venv/Scripts/python start.py",
+    "dev:back": "cd seele-backend && python start.py",
     "build": "cd seele-frontend && npm run build",
     "lint": "cd seele-frontend && npm run lint"
   },
