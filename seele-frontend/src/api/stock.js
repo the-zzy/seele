@@ -271,6 +271,40 @@ export const stockDailyApi = {
         ...params
       }
     })
+  },
+
+  /**
+   * 主升浪选股
+   * @param {Object} params - 查询参数
+   * @param {string} params.trade_date - 交易日期 (YYYY-MM-DD)
+   * @param {boolean} params.only_s_level - 仅看硬核S级，默认 false
+   * @param {boolean} params.exclude_st - 排除 ST，默认 true
+   * @param {boolean} params.exclude_cyb - 排除创业板，默认 true
+   * @param {boolean} params.exclude_kcb - 排除科创板，默认 true
+   * @param {boolean} params.exclude_bse - 排除北交所，默认 true
+   * @param {string} params.sort_field - 排序字段，默认 level
+   * @param {string} params.sort_order - 排序方向，默认 desc
+   * @param {number} params.page_num - 页码，默认 1
+   * @param {number} params.page_size - 每页条数，默认 20
+   * @returns {Promise<Object>} - {trade_date, total, page_num, page_size, list}
+   */
+  getMainwavePicker (params = {}) {
+    return request({
+      url: '/stock/daily/mainwave-picker',
+      method: 'post',
+      data: {
+        only_s_level: false,
+        exclude_st: true,
+        exclude_cyb: true,
+        exclude_kcb: true,
+        exclude_bse: true,
+        sort_field: 'level',
+        sort_order: 'desc',
+        page_num: 1,
+        page_size: 20,
+        ...params
+      }
+    })
   }
 }
 

@@ -18,6 +18,7 @@ class StockBasic(Base):
     area = Column(String(50), comment="所在地区")
     industry = Column(String(50), comment="所属行业")
     market = Column(String(20), comment="市场板块")
+    float_market_cap = Column(Float, comment="流通市值(亿元)")
     list_date = Column(Date, comment="上市日期")
 
 
@@ -144,4 +145,36 @@ class PortfolioConfig(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     initial_capital = Column(Float, nullable=False, default=35000.0, comment='初始资金')
     created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
+
+
+class StockFinancialIndicator(Base):
+    """股票财务指标表（仅保留最新一期）"""
+    __tablename__ = 'stock_financial_indicator'
+
+    __table_args__ = {
+        'mysql_collate': 'utf8mb4_0900_ai_ci',
+    }
+
+    symbol = Column(String(20), primary_key=True, comment='股票代码')
+    name = Column(String(100), comment='股票名称')
+    report_date = Column(Date, comment='报告期')
+    net_profit = Column(Float, comment='净利润')
+    net_profit_yoy = Column(Float, comment='净利润同比增长率(%)')
+    deduct_net_profit = Column(Float, comment='扣非净利润')
+    total_revenue = Column(Float, comment='营业总收入')
+    revenue_yoy = Column(Float, comment='营收同比增长率(%)')
+    gross_profit_ratio = Column(Float, comment='销售毛利率(%)')
+    net_profit_ratio = Column(Float, comment='销售净利率(%)')
+    roe = Column(Float, comment='净资产收益率(%)')
+    roe_diluted = Column(Float, comment='净资产收益率-摊薄(%)')
+    eps = Column(Float, comment='基本每股收益')
+    bps = Column(Float, comment='每股净资产')
+    ops_cash_flow_per_share = Column(Float, comment='每股经营现金流')
+    current_ratio = Column(Float, comment='流动比率')
+    quick_ratio = Column(Float, comment='速动比率')
+    debt_ratio = Column(Float, comment='资产负债率(%)')
+    total_assets = Column(Float, comment='资产总计(万元)')
+    total_equity = Column(Float, comment='所有者权益合计(万元)')
+    operate_cash_flow = Column(Float, comment='经营活动现金流净额')
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')

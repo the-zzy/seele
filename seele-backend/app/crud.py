@@ -703,3 +703,130 @@ class PortfolioConfigCRUD:
 
 
 portfolio_config_crud = PortfolioConfigCRUD()
+
+
+# ==================== 财务指标 ====================
+
+
+class StockFinancialIndicatorCRUD:
+    """财务指标 CRUD（仅保留最新一期，以 symbol 为唯一键）"""
+
+    def get_by_symbol(self, db: Session, symbol: str) -> Optional[models.StockFinancialIndicator]:
+        """根据股票代码查询"""
+        return (
+            db.query(models.StockFinancialIndicator)
+            .filter(models.StockFinancialIndicator.symbol == symbol)
+            .first()
+        )
+
+    def get_list(
+        self,
+        db: Session,
+        query: schemas.StockFinancialIndicatorQuery,
+    ) -> tuple[List[models.StockFinancialIndicator], int]:
+        """分页查询，支持指标范围过滤"""
+        from sqlalchemy import distinct
+
+        # JOIN stock_basic 以支持 industry / market 过滤
+        stmt = db.query(models.StockFinancialIndicator).join(
+            models.StockBasic,
+            models.StockFinancialIndicator.symbol == models.StockBasic.symbol,
+            isouter=True,
+        )
+
+        filters = []
+        if query.symbol:
+            filters.append(models.StockFinancialIndicator.symbol.like(f"%{query.symbol}%"))
+        if query.name:
+            filters.append(models.StockFinancialIndicator.name.like(f"%{query.name}%"))
+        if query.industry:
+            filters.append(models.StockBasic.industry == query.industry)
+        if query.market:
+            filters.append(models.StockBasic.market == query.market)
+
+        # 指标范围过滤
+        field_map = {
+            "roe": models.StockFinancialIndicator.roe,
+            "gross_profit_ratio": models.StockFinancialIndicator.gross_profit_ratio,
+            "net_profit_ratio": models.StockFinancialIndicator.net_profit_ratio,
+            "net_profit_yoy": models.StockFinancialIndicator.net_profit_yoy,
+            "revenue_yoy": models.StockFinancialIndicator.revenue_yoy,
+            "debt_ratio": models.StockFinancialIndicator.debt_ratio,
+        }
+        range_filters = {
+            "roe": (query.roe_min, query.roe_max),
+            "gross_profit_ratio": (query.gross_profit_ratio_min, query.gross_profit_ratio_max),
+            "net_profit_ratio": (query.net_profit_ratio_min, query.net_profit_ratio_max),
+            "net_profit_yoy": (query.net_profit_yoy_min, query.net_profit_yoy_max),
+            "revenue_yoy": (query.revenue_yoy_min, query.revenue_yoy_max),
+            "debt_ratio": (query.debt_ratio_min, query.debt_ratio_max),
+        }
+        for field, (min_val, max_val) in range_filters.items():
+            col = field_map[field]
+            if min_val is not None:
+                filters.append(col >= min_val)
+            if max_val is not None:
+                filters.append(col <= max_val)
+
+        if filters:
+            stmt = stmt.filter(and_(*filters))
+
+        # 排序
+        sort_col = field_map.get(query.sort_field, models.StockFinancialIndicator.roe)
+        if query.sort_order == "asc":
+            stmt = stmt.order_by(sort_col.asc())
+        else:
+            stmt = stmt.order_by(sort_col.desc())
+
+        total = stmt.with_entities(func.count(distinct(models.StockFinancialIndicator.symbol))).scalar()
+
+        list_data = (
+            stmt.offset((query.page_num - 1) * query.page_size)
+            .limit(query.page_size)
+            .all()
+        )
+        return list_data, total
+
+    def create(self, db: Session, obj_in: schemas.StockFinancialIndicatorCreate) -> models.StockFinancialIndicator:
+        """创建"""
+        db_obj = models.StockFinancialIndicator(**obj_in.model_dump())
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def upsert(self, db: Session, obj_in: schemas.StockFinancialIndicatorCreate) -> models.StockFinancialIndicator:
+        """存在则更新，不存在则插入"""
+        existing = self.get_by_symbol(db, obj_in.symbol)
+        if existing:
+            update_data = obj_in.model_dump(exclude={"symbol"})
+            for key, value in update_data.items():
+                if value is not None:
+                    setattr(existing, key, value)
+            db.commit()
+            db.refresh(existing)
+            return existing
+        else:
+            return self.create(db, obj_in)
+
+    def upsert_batch(self, db: Session, obj_list: list[schemas.StockFinancialIndicatorCreate]) -> dict:
+        """批量 upsert"""
+        created = 0
+        updated = 0
+        for obj in obj_list:
+            existing = self.get_by_symbol(db, obj.symbol)
+            if existing:
+                update_data = obj.model_dump(exclude={"symbol"})
+                for key, value in update_data.items():
+                    if value is not None:
+                        setattr(existing, key, value)
+                updated += 1
+            else:
+                db_obj = models.StockFinancialIndicator(**obj.model_dump())
+                db.add(db_obj)
+                created += 1
+        db.commit()
+        return {"created": created, "updated": updated}
+
+
+stock_financial_indicator_crud = StockFinancialIndicatorCRUD()
