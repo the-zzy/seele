@@ -51,12 +51,23 @@ export const portfolioApi = {
   },
 
   /**
+   * 同步持仓快照
+   */
+  syncPositions () {
+    return request({
+      url: '/portfolio/sync',
+      method: 'post'
+    })
+  },
+
+  /**
    * 获取当前持仓
    */
-  getPositions () {
+  getPositions (group) {
     return request({
       url: '/portfolio/positions',
-      method: 'get'
+      method: 'get',
+      params: group ? { group } : {}
     })
   },
 
@@ -103,6 +114,40 @@ export const portfolioApi = {
     return request({
       url: '/portfolio/distribution',
       method: 'get'
+    })
+  },
+
+  /**
+   * 更新持仓（止损止盈、分组、备注）
+   * @param {string} symbol - 股票代码
+   * @param {Object} data
+   */
+  updatePosition (symbol, data) {
+    return request({
+      url: `/portfolio/positions/${symbol}`,
+      method: 'put',
+      data
+    })
+  },
+
+  /**
+   * 获取持仓预警
+   */
+  getAlerts () {
+    return request({
+      url: '/portfolio/alerts',
+      method: 'get'
+    })
+  },
+
+  /**
+   * 标记预警已处理
+   * @param {number} id
+   */
+  dismissAlert (id) {
+    return request({
+      url: `/portfolio/alerts/${id}/dismiss`,
+      method: 'post'
     })
   },
 

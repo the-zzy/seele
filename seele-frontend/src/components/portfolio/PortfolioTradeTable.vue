@@ -57,7 +57,7 @@ function onDelete (item) {
             <td class="mono">{{ item.symbol }}</td>
             <td>{{ item.name }}</td>
             <td class="num">{{ fmt(item.price) }}</td>
-            <td class="num">{{ item.quantity.toLocaleString() }}</td>
+            <td class="num">{{ item.quantity != null ? item.quantity.toLocaleString() : '-' }}</td>
             <td class="num">{{ fmt(item.amount) }}</td>
             <td class="act">
               <button class="btn-del" @click="onDelete(item)">删除</button>

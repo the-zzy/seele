@@ -4,7 +4,8 @@ import { stockBasicApi } from '@/api/stock'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
-  type: { type: String, default: 'BUY' } // BUY / SELL
+  type: { type: String, default: 'BUY' }, // BUY / SELL
+  positions: { type: Array, default: () => [] }
 })
 
 const emit = defineEmits(['update:visible', 'submit'])
@@ -14,7 +15,10 @@ const form = reactive({
   name: '',
   trade_date: '',
   price: '',
-  quantity: ''
+  quantity: '',
+  fee: '',
+  realizedPnl: '',
+  remark: ''
 })
 
 const showDropdown = ref(false)
@@ -30,6 +34,9 @@ watch(() => props.visible, (val) => {
     form.trade_date = new Date().toISOString().slice(0, 10)
     form.price = ''
     form.quantity = ''
+    form.fee = ''
+    form.realizedPnl = ''
+    form.remark = ''
     closeDropdown()
   }
 })
@@ -37,7 +44,11 @@ watch(() => props.visible, (val) => {
 function openDropdown () {
   showDropdown.value = true
   searchKeyword.value = ''
-  loadDefaultList()
+  if (props.type === 'SELL') {
+    searchResults.value = props.positions
+  } else {
+    loadDefaultList()
+  }
 }
 
 function closeDropdown () {
@@ -66,6 +77,19 @@ async function loadDefaultList () {
 
 function onSearchInput () {
   const kw = searchKeyword.value.trim()
+  if (props.type === 'SELL') {
+    // 本地过滤持仓
+    if (!kw) {
+      searchResults.value = props.positions
+    } else {
+      const lower = kw.toLowerCase()
+      searchResults.value = props.positions.filter(p =>
+        p.symbol.toLowerCase().includes(lower) ||
+        p.name.toLowerCase().includes(lower)
+      )
+    }
+    return
+  }
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => doSearch(kw), 300)
 }
@@ -118,14 +142,19 @@ function onSubmit () {
     alert('请输入有效的成交股数（100股的整数倍）')
     return
   }
-  emit('submit', {
+  const data = {
     symbol: form.symbol.trim(),
     name: form.name.trim(),
     trade_type: props.type,
     trade_date: form.trade_date,
     price: price,
     quantity: qty
-  })
+  }
+  if (props.type === 'SELL' && form.realizedPnl !== '' && form.realizedPnl != null) {
+    data.realized_pnl = Number(form.realizedPnl)
+  }
+  if (form.remark) data.remark = form.remark.trim()
+  emit('submit', data)
 }
 </script>
 
@@ -162,17 +191,32 @@ function onSubmit () {
                 >
               </div>
               <div class="dropdown-list">
-                <div
-                  v-for="item in searchResults"
-                  :key="item.symbol"
-                  class="dropdown-item"
-                  :class="{ selected: form.symbol === item.symbol }"
-                  @click="onSelectStock(item)"
-                >
-                  <span class="symbol">{{ item.symbol }}</span>
-                  <span class="name">{{ item.name }}</span>
-                  <span class="meta">{{ item.industry }}</span>
-                </div>
+                <template v-if="type === 'SELL'">
+                  <div
+                    v-for="item in searchResults"
+                    :key="item.symbol"
+                    class="dropdown-item"
+                    :class="{ selected: form.symbol === item.symbol }"
+                    @click="onSelectStock(item)"
+                  >
+                    <span class="symbol">{{ item.symbol }}</span>
+                    <span class="name">{{ item.name }}</span>
+                    <span class="meta">{{ item.quantity }}股 / 成本{{ Number(item.avg_cost).toFixed(2) }}</span>
+                  </div>
+                </template>
+                <template v-else>
+                  <div
+                    v-for="item in searchResults"
+                    :key="item.symbol"
+                    class="dropdown-item"
+                    :class="{ selected: form.symbol === item.symbol }"
+                    @click="onSelectStock(item)"
+                  >
+                    <span class="symbol">{{ item.symbol }}</span>
+                    <span class="name">{{ item.name }}</span>
+                    <span class="meta">{{ item.industry }}</span>
+                  </div>
+                </template>
                 <div v-if="!searchResults.length" class="dropdown-empty">
                   {{ searchLoading ? '搜索中...' : '无结果' }}
                 </div>
@@ -191,6 +235,14 @@ function onSubmit () {
         <div class="form-row">
           <label>成交股数</label>
           <input v-model="form.quantity" placeholder="100股的整数倍" type="number" step="100">
+        </div>
+        <div v-if="type === 'SELL'" class="form-row">
+          <label>盈亏金额</label>
+          <input v-model="form.realizedPnl" placeholder="元（用于自动计算手续费）" type="number" step="0.01">
+        </div>
+        <div class="form-row">
+          <label>备注</label>
+          <input v-model="form.remark" placeholder="可选" type="text">
         </div>
       </div>
       <div class="modal-footer">

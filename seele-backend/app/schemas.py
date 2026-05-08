@@ -340,6 +340,9 @@ class PortfolioTradeCreate(BaseModel):
     price: float = Field(..., description='成交价格')
     quantity: int = Field(..., description='成交股数')
     amount: Optional[float] = Field(None, description='成交金额（不传则自动计算）')
+    fee: Optional[float] = Field(0, description='交易手续费')
+    realized_pnl: Optional[float] = Field(None, description='实际盈亏金额（卖出时可选，用于自动计算手续费）')
+    remark: Optional[str] = Field(None, description='备注')
 
     @field_validator('trade_date', mode='before')
     @classmethod
@@ -373,6 +376,8 @@ class PortfolioTradeResponse(BaseModel):
     price: float
     quantity: int
     amount: float
+    fee: Optional[float] = 0
+    remark: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -420,6 +425,7 @@ class PortfolioClosedResponse(BaseModel):
     close_date: str
     realized_pnl: float
     pnl_pct: float
+    total_fee: Optional[float] = 0
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -564,6 +570,65 @@ class StockFinancialIndicatorResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class PortfolioPositionResponse(BaseModel):
+    """持仓快照-响应"""
+    id: int
+    symbol: str
+    name: str
+    quantity: int
+    avg_cost: float
+    current_price: Optional[float] = None
+    market_value: Optional[float] = None
+    unrealized_pnl: Optional[float] = None
+    unrealized_pnl_pct: Optional[float] = None
+    stop_loss_price: Optional[float] = None
+    take_profit_price: Optional[float] = None
+    alert_triggered: int = 0
+    group: Optional[str] = 'default'
+    remark: Optional[str] = None
+    first_buy_date: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    @field_validator('first_buy_date', mode='before')
+    @classmethod
+    def validate_date(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d')
+        return str(v)
+
+    @field_validator('updated_at', mode='before')
+    @classmethod
+    def validate_timestamp(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d %H:%M:%S')
+        return str(v)
+
+    class Config:
+        from_attributes = True
+
+
+class PortfolioPositionUpdate(BaseModel):
+    """持仓快照-更新止损止盈等"""
+    stop_loss_price: Optional[float] = Field(None, description='止损价')
+    take_profit_price: Optional[float] = Field(None, description='止盈价')
+    group: Optional[str] = Field(None, description='持仓分组')
+    remark: Optional[str] = Field(None, description='备注')
+
+
+class PortfolioAlertResponse(BaseModel):
+    """持仓预警-响应"""
+    symbol: str
+    name: str
+    current_price: float
+    alert_type: str = Field(..., description='预警类型 stop_loss / take_profit')
+    target_price: float
+    pnl_pct: float
 
 
 class StockFinancialIndicatorQuery(BaseModel):
