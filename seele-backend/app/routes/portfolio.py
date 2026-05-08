@@ -526,6 +526,103 @@ def get_daily_pnl(db: Session = Depends(get_db)):
     return list_success(result)
 
 
+@router.get('/portfolio/daily-pnl/debug')
+def get_daily_pnl_debug(db: Session = Depends(get_db)):
+    """每日盈亏调试接口：输出每天每只持仓股票的详细计算过程"""
+    all_trades = portfolio_trade_crud.get_all(db)
+    if not all_trades:
+        return list_success([])
+
+    trade_dates = stock_daily_crud.get_trade_dates(db)
+    trade_dates.sort()
+
+    symbols = set(t.symbol for t in all_trades)
+    symbol_dailies = {}
+    for symbol in symbols:
+        dailies = stock_daily_crud.get_by_symbol(db, symbol)
+        symbol_dailies[symbol] = {d.trade_date: d.close for d in dailies}
+
+    # 逐 symbol 重建每日持仓明细
+    symbol_day_details = {s: {} for s in symbols}
+    for symbol in symbols:
+        trades = sorted([t for t in all_trades if t.symbol == symbol], key=lambda x: x.trade_date)
+        daily_map = symbol_dailies.get(symbol, {})
+        qty = 0
+        t_idx = 0
+        for d in trade_dates:
+            day_buy = 0.0
+            day_sell = 0.0
+            while t_idx < len(trades) and trades[t_idx].trade_date <= d:
+                t = trades[t_idx]
+                if t.trade_type == 'BUY':
+                    qty += t.quantity
+                    day_buy += t.amount
+                else:
+                    qty -= t.quantity
+                    day_sell += t.amount
+                t_idx += 1
+            prev_qty = qty
+            symbol_day_details[symbol][d] = {
+                'qty': qty,
+                'price': daily_map.get(d),
+                'day_buy': day_buy,
+                'day_sell': day_sell,
+            }
+
+    # 汇总计算
+    result = []
+    prev_mv = 0.0
+    cumulative_pnl = 0.0
+
+    for d in trade_dates:
+        day_symbols = [s for s in symbols if symbol_day_details[s].get(d)]
+        if not day_symbols:
+            continue
+
+        has_position = any(symbol_day_details[s][d]['qty'] > 0 for s in day_symbols)
+        has_trade = any(symbol_day_details[s][d]['day_buy'] > 0 or symbol_day_details[s][d]['day_sell'] > 0 for s in day_symbols)
+
+        if not has_position and not has_trade:
+            continue
+
+        today_mv = 0.0
+        today_buy = 0.0
+        today_sell = 0.0
+        breakdown = []
+
+        for s in day_symbols:
+            det = symbol_day_details[s][d]
+            s_mv = det['qty'] * det['price'] if det['qty'] > 0 and det['price'] else 0.0
+            today_mv += s_mv
+            today_buy += det['day_buy']
+            today_sell += det['day_sell']
+            breakdown.append({
+                'symbol': s,
+                'qty': det['qty'],
+                'price': det['price'],
+                'market_value': round(s_mv, 4),
+                'day_buy': round(det['day_buy'], 4),
+                'day_sell': round(det['day_sell'], 4),
+            })
+
+        daily_pnl = today_mv - prev_mv - today_buy + today_sell
+        cumulative_pnl += daily_pnl
+        prev_mv = today_mv
+
+        result.append({
+            'date': d.strftime('%Y-%m-%d'),
+            'prev_mv': round(prev_mv, 4),
+            'today_mv': round(today_mv, 4),
+            'today_buy': round(today_buy, 4),
+            'today_sell': round(today_sell, 4),
+            'daily_pnl': round(daily_pnl, 4),
+            'cumulative_pnl': round(cumulative_pnl, 4),
+            'breakdown': breakdown,
+        })
+
+    return list_success(result)
+
+
 @router.get('/portfolio/distribution')
 def get_distribution(db: Session = Depends(get_db)):
     """获取当前持仓占总资产分布（用于环形图）"""
