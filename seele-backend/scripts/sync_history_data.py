@@ -27,8 +27,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import Column, Integer, String, Float, Date, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 
-# 并行进程数
-NUM_WORKERS = 16
+# 并行进程数（生产环境限制为 2 核以内，防止低配置服务器 OOM）
+NUM_WORKERS = min(os.cpu_count() or 1, 2)
 # Baostock 查询间隔（秒），避免触发限流
 QUERY_INTERVAL = 2
 
