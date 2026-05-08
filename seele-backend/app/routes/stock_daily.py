@@ -10,7 +10,7 @@ from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app import crud, models, schemas
@@ -518,7 +518,7 @@ def get_stock_daily_by_date(
     return list_success([StockDailyResponse.model_validate(item) for item in objs])
 
 
-# 2.6.1 根据交易日期获取全部A股数据（关联basic表及指标表）
+# 2.6.1 根据交易日期获取全部A股数据（关联basic表及指标表）— 服务端分页
 @router.get("/date/{trade_date}/all")
 def get_stock_daily_all_by_date(
     trade_date: str,
@@ -526,9 +526,15 @@ def get_stock_daily_all_by_date(
     exclude_cyb: bool = Query(False, description="是否过滤创业板"),
     exclude_kcb: bool = Query(False, description="是否过滤科创板"),
     exclude_bse: bool = Query(False, description="是否过滤北交所"),
+    symbol: Optional[str] = Query(None, description="代码或名称模糊搜索"),
+    min_pct_chg: Optional[float] = Query(None, description="最小涨幅百分比过滤"),
+    sort_field: str = Query("symbol", description="排序字段"),
+    sort_order: str = Query("asc", description="排序方向 asc/desc"),
+    page_num: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(100, ge=1, le=500, description="每页条数"),
     db: Session = Depends(get_db),
 ):
-    """根据交易日期获取全部A股数据（关联 stock_basic 及 stock_daily_indicator）"""
+    """根据交易日期分页获取A股数据（关联 stock_basic 及 stock_daily_indicator）"""
     formatted_date = trade_date.replace("-", "")
 
     q = (
@@ -538,13 +544,31 @@ def get_stock_daily_all_by_date(
             models.StockBasic.industry,
             models.StockBasic.market,
             models.StockBasic.area,
+            models.StockDailyIndicator.ma5,
+            models.StockDailyIndicator.ma10,
+            models.StockDailyIndicator.ma20,
+            models.StockDailyIndicator.ma30,
+            models.StockDailyIndicator.ma60,
+            models.StockDailyIndicator.vol_ma5,
+            models.StockDailyIndicator.vol_ma10,
+            models.StockDailyIndicator.turnover_ma5,
+            models.StockDailyIndicator.turnover_ma10,
         )
         .join(models.StockBasic, models.StockDaily.symbol == models.StockBasic.symbol)
+        .outerjoin(
+            models.StockDailyIndicator,
+            and_(
+                models.StockDaily.symbol == models.StockDailyIndicator.symbol,
+                models.StockDaily.trade_date == models.StockDailyIndicator.trade_date,
+            ),
+        )
     )
     q = apply_main_board_filter(q).filter(
         models.StockDaily.trade_date == formatted_date,
     )
 
+    if exclude_st:
+        q = q.filter(~models.StockBasic.name.like('%ST%'))
     if exclude_cyb:
         q = q.filter(
             models.StockBasic.symbol.notlike("300%"),
@@ -560,57 +584,110 @@ def get_stock_daily_all_by_date(
             models.StockBasic.symbol.notlike("4%"),
             models.StockBasic.symbol.notlike("8%"),
         )
+    if symbol:
+        like_pattern = f"%{symbol}%"
+        q = q.filter(
+            or_(
+                models.StockDaily.symbol.like(like_pattern),
+                models.StockBasic.name.like(like_pattern),
+            )
+        )
+    if min_pct_chg is not None:
+        q = q.filter(models.StockDaily.pct_chg > min_pct_chg)
 
-    # 1) 查询日线数据 + 基础信息
-    daily_results = q.all()
+    # 排序映射
+    sort_column_map = {
+        'symbol': models.StockDaily.symbol,
+        'stock_name': models.StockBasic.name,
+        'open': models.StockDaily.open,
+        'high': models.StockDaily.high,
+        'low': models.StockDaily.low,
+        'close': models.StockDaily.close,
+        'volume': models.StockDaily.volume,
+        'amount': models.StockDaily.amount,
+        'amplitude': models.StockDaily.amplitude,
+        'pct_chg': models.StockDaily.pct_chg,
+        'price_change': models.StockDaily.price_change,
+        'turnover': models.StockDaily.turnover,
+        'ma5': models.StockDailyIndicator.ma5,
+        'ma10': models.StockDailyIndicator.ma10,
+        'ma20': models.StockDailyIndicator.ma20,
+        'ma30': models.StockDailyIndicator.ma30,
+        'ma60': models.StockDailyIndicator.ma60,
+        'vol_ma5': models.StockDailyIndicator.vol_ma5,
+        'vol_ma10': models.StockDailyIndicator.vol_ma10,
+        'turnover_ma5': models.StockDailyIndicator.turnover_ma5,
+        'turnover_ma10': models.StockDailyIndicator.turnover_ma10,
+    }
+    sort_column = sort_column_map.get(sort_field, models.StockDaily.symbol)
+    if sort_order == 'desc':
+        q = q.order_by(sort_column.desc())
+    else:
+        q = q.order_by(sort_column.asc())
 
-    # 2) 查询指标数据（独立查询避免 collation 冲突）
-    indicator_map = {}
-    indicators = (
-        db.query(models.StockDailyIndicator)
-        .filter(models.StockDailyIndicator.trade_date == formatted_date)
+    # 总数
+    total = q.with_entities(func.count(models.StockDaily.id)).scalar() or 0
+
+    # 分页
+    results = (
+        q.offset((page_num - 1) * page_size)
+        .limit(page_size)
         .all()
     )
-    for ind in indicators:
-        indicator_map[ind.symbol] = ind
 
     data_list = []
-    for daily, stock_name, industry, market, area in daily_results:
-        ind = indicator_map.get(daily.symbol)
+    for (
+        daily,
+        stock_name,
+        industry,
+        market,
+        area,
+        ma5,
+        ma10,
+        ma20,
+        ma30,
+        ma60,
+        vol_ma5,
+        vol_ma10,
+        turnover_ma5,
+        turnover_ma10,
+    ) in results:
         data_list.append({
-            "id": daily.id,
-            "trade_date": str(daily.trade_date),
-            "symbol": daily.symbol,
-            "stock_name": stock_name or "",
-            "industry": industry or "",
-            "market": market or "",
-            "area": area or "",
-            "open": daily.open,
-            "high": daily.high,
-            "low": daily.low,
-            "close": daily.close,
-            "volume": daily.volume,
-            "amount": daily.amount,
-            "amplitude": daily.amplitude,
-            "pct_chg": daily.pct_chg,
-            "price_change": daily.price_change,
-            "turnover": daily.turnover,
-            "ma5": ind.ma5 if ind else None,
-            "ma10": ind.ma10 if ind else None,
-            "ma20": ind.ma20 if ind else None,
-            "ma30": ind.ma30 if ind else None,
-            "ma60": ind.ma60 if ind else None,
-            "vol_ma5": ind.vol_ma5 if ind else None,
-            "vol_ma10": ind.vol_ma10 if ind else None,
-            "turnover_ma5": ind.turnover_ma5 if ind else None,
-            "turnover_ma10": ind.turnover_ma10 if ind else None,
+            'id': daily.id,
+            'trade_date': str(daily.trade_date),
+            'symbol': daily.symbol,
+            'stock_name': stock_name or '',
+            'industry': industry or '',
+            'market': market or '',
+            'area': area or '',
+            'open': daily.open,
+            'high': daily.high,
+            'low': daily.low,
+            'close': daily.close,
+            'volume': daily.volume,
+            'amount': daily.amount,
+            'amplitude': daily.amplitude,
+            'pct_chg': daily.pct_chg,
+            'price_change': daily.price_change,
+            'turnover': daily.turnover,
+            'ma5': ma5,
+            'ma10': ma10,
+            'ma20': ma20,
+            'ma30': ma30,
+            'ma60': ma60,
+            'vol_ma5': vol_ma5,
+            'vol_ma10': vol_ma10,
+            'turnover_ma5': turnover_ma5,
+            'turnover_ma10': turnover_ma10,
         })
 
-    return success({
-        "trade_date": trade_date,
-        "total": len(data_list),
-        "list": data_list,
-    })
+    return page_success(
+        items=data_list,
+        total=total,
+        page_num=page_num,
+        page_size=page_size,
+        trade_date=trade_date,
+    )
 
 
 # 2.7 获取交易日列表

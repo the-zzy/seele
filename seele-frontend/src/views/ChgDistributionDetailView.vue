@@ -19,9 +19,6 @@ const pageSize = ref(100)
 // totalPages removed; BasePagination computes internally
 const sortedStockList = computed(() => stockList.value || [])
 
-const cacheKey = ref(null)
-const cachedList = ref([])
-
 const syncing = ref(false)
 const syncProgress = ref({
   visible: false,
@@ -46,27 +43,6 @@ let filterForm = reactive({
 })
 
 const tradeDate = computed(() => filterForm.tradeDate || '')
-
-function buildCacheKey (params) {
-  return JSON.stringify({
-    tradeDate: params.tradeDate,
-    excludeSt: params.excludeSt,
-    excludeCyb: params.excludeCyb,
-    excludeKcb: params.excludeKcb,
-    excludeBse: params.excludeBse,
-    symbol: params.symbol
-  })
-}
-
-function compareForSort (a, b) {
-  if (a == null && b == null) return 0
-  if (a == null) return 1
-  if (b == null) return -1
-  if (typeof a === 'number' && typeof b === 'number') {
-    return a - b
-  }
-  return String(a).localeCompare(String(b), undefined, { numeric: true })
-}
 
 function handleSort (field) {
   if (sortField.value === field) {
@@ -118,83 +94,38 @@ async function loadStockData (params = {}) {
       return
     }
 
-    const currentKey = buildCacheKey(params)
-    let list = cachedList.value
-
-    if (cacheKey.value !== currentKey) {
-      const data = await stockDailyApi.getAllByTradeDate(params.tradeDate, {
-        exclude_st: params.excludeSt || false,
-        exclude_cyb: params.excludeCyb || false,
-        exclude_kcb: params.excludeKcb || false,
-        exclude_bse: params.excludeBse || false
-      })
-      list = (data?.list || []).map(item => ({
-        id: item.id,
-        symbol: item.symbol,
-        name: item.stock_name || item.name || '-',
-        area: item.area || '-',
-        industry: item.industry || '-',
-        market: item.market || '-',
-        tradeDate: item.trade_date,
-        open: item.open,
-        high: item.high,
-        low: item.low,
-        close: item.close,
-        volume: item.volume,
-        amount: item.amount,
-        amplitude: item.amplitude,
-        pctChg: item.pct_chg,
-        priceChange: item.price_change,
-        turnover: item.turnover
-      }))
-
-      if (params.excludeSt) {
-        list = list.filter(item => !item.name?.includes('ST'))
-      }
-      if (params.excludeCyb) {
-        list = list.filter(item =>
-          !item.symbol?.startsWith('300') &&
-          !item.symbol?.startsWith('301')
-        )
-      }
-      if (params.excludeKcb) {
-        list = list.filter(item =>
-          !item.symbol?.startsWith('688') &&
-          !item.symbol?.startsWith('689')
-        )
-      }
-      if (params.excludeBse) {
-        list = list.filter(item =>
-          !item.symbol?.startsWith('4') &&
-          !item.symbol?.startsWith('8')
-        )
-      }
-
-      if (params.symbol) {
-        const symbolFilter = params.symbol.trim()
-        list = list.filter(item =>
-          item.symbol?.includes(symbolFilter) ||
-          item.name?.includes(symbolFilter)
-        )
-      }
-
-      list = list.filter(item => item.pctChg > 2)
-
-      cachedList.value = list
-      cacheKey.value = currentKey
-    }
-
-    const sf = params.sortField || 'symbol'
-    const so = params.sortOrder || 'asc'
-    list.sort((a, b) => {
-      const result = compareForSort(a[sf], b[sf])
-      return so === 'asc' ? result : -result
+    const data = await stockDailyApi.getAllByTradeDate(params.tradeDate, {
+      exclude_st: params.excludeSt || false,
+      exclude_cyb: params.excludeCyb || false,
+      exclude_kcb: params.excludeKcb || false,
+      exclude_bse: params.excludeBse || false,
+      symbol: params.symbol || undefined,
+      sort_field: params.sortField || 'symbol',
+      sort_order: params.sortOrder || 'asc',
+      page_num: pageNum.value,
+      page_size: pageSize.value,
+      min_pct_chg: 2
     })
-
-    total.value = list.length
-    const start = (pageNum.value - 1) * pageSize.value
-    const end = start + pageSize.value
-    stockList.value = list.slice(start, end)
+    stockList.value = (data?.list || []).map(item => ({
+      id: item.id,
+      symbol: item.symbol,
+      name: item.stock_name || item.name || '-',
+      area: item.area || '-',
+      industry: item.industry || '-',
+      market: item.market || '-',
+      tradeDate: item.trade_date,
+      open: item.open,
+      high: item.high,
+      low: item.low,
+      close: item.close,
+      volume: item.volume,
+      amount: item.amount,
+      amplitude: item.amplitude,
+      pctChg: item.pct_chg,
+      priceChange: item.price_change,
+      turnover: item.turnover
+    }))
+    total.value = data?.total || 0
   } catch (error) {
     console.error('加载股票数据失败:', error)
     stockList.value = []
@@ -206,8 +137,6 @@ async function loadStockData (params = {}) {
 
 async function handleSearch () {
   pageNum.value = 1
-  cacheKey.value = null
-  cachedList.value = []
   await loadStockData(getQueryParams())
 }
 
@@ -288,8 +217,6 @@ function handleFetchData () {
         es.close()
         syncEventSource = null
         syncing.value = false
-        cacheKey.value = null
-        cachedList.value = []
         handleSearch()
         setTimeout(() => {
           syncProgress.value.visible = false
