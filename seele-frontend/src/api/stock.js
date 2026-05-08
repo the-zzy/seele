@@ -75,14 +75,19 @@ export const stockDailyApi = {
   },
 
   /**
-   * 根据交易日期获取全部A股数据（关联basic表）
+   * 根据交易日期分页获取A股数据（关联basic表）
    * @param {string} tradeDate - 交易日期 (YYYY-MM-DD)
    * @param {Object} query - 查询参数
    * @param {boolean} query.exclude_st - 是否过滤ST股票
    * @param {boolean} query.exclude_cyb - 是否过滤创业板
    * @param {boolean} query.exclude_kcb - 是否过滤科创板
    * @param {boolean} query.exclude_bse - 是否过滤北交所
-   * @returns {Promise<Object>} - {trade_date, total, list}
+   * @param {string} query.symbol - 代码或名称模糊搜索
+   * @param {string} query.sort_field - 排序字段
+   * @param {string} query.sort_order - 排序方向 asc/desc
+   * @param {number} query.page_num - 页码
+   * @param {number} query.page_size - 每页条数
+   * @returns {Promise<Object>} - {trade_date, total, page_num, page_size, list}
    */
   getAllByTradeDate (tradeDate, query = {}) {
     return request({
