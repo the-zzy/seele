@@ -1,8 +1,10 @@
 <script setup>
+/* eslint-disable */
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useEChart } from '@/composables/useEChart'
 import { stockDailyApi } from '@/api/stock'
+import { financialApi } from '@/api/financial'
 
 const route = useRoute()
 const router = useRouter()
@@ -15,8 +17,24 @@ const loading = ref(false)
 const dataReady = ref(false)
 const latestQuote = ref(null)
 
+const financialData = ref(null)
+const financialLoading = ref(false)
+const financialReady = ref(false)
+
 function goBack () {
   router.back()
+}
+
+function formatNumber (val) {
+  if (val == null || val === undefined) return '—'
+  return Number(val).toLocaleString('zh-CN', { maximumFractionDigits: 2 })
+}
+
+function formatPercent (val) {
+  if (val == null || val === undefined) return '—'
+  const num = Number(val)
+  const sign = num > 0 ? '+' : ''
+  return `${sign}${num.toFixed(2)}%`
 }
 
 function calculateMa (dayCount, data) {
@@ -33,6 +51,22 @@ function calculateMa (dayCount, data) {
     result.push((sum / dayCount).toFixed(2))
   }
   return result
+}
+
+async function loadFinancial () {
+  if (!symbol.value) return
+  financialLoading.value = true
+  try {
+    const res = await financialApi.getBySymbol(symbol.value)
+    financialData.value = res
+    financialReady.value = true
+  } catch (error) {
+    console.error('加载财务数据失败:', error)
+    financialData.value = null
+    financialReady.value = false
+  } finally {
+    financialLoading.value = false
+  }
 }
 
 async function loadData () {
@@ -77,6 +111,7 @@ async function loadData () {
   } finally {
     loading.value = false
   }
+  loadFinancial()
 }
 
 function initChart (dates, data, volumes, list, indicatorMap) {
@@ -339,6 +374,55 @@ onMounted(() => {
       <div v-if="loading" class="kline-loading">载入图表…</div>
       <div v-else-if="!dataReady" class="kline-empty">暂无数据</div>
     </div>
+
+    <div v-if="financialReady" class="financial-panel">
+      <div class="fin-header">
+        <span class="fin-title">财务指标</span>
+        <span class="fin-meta">报告期 {{ financialData.report_date }}</span>
+      </div>
+      <div class="fin-grid">
+        <div class="fin-item">
+          <span class="fin-label">净利润</span>
+          <span class="fin-value">{{ formatNumber(financialData.net_profit) }}</span>
+          <span
+            class="fin-badge"
+            :class="financialData.net_profit_yoy >= 0 ? 'up' : 'down'"
+          >{{ formatPercent(financialData.net_profit_yoy) }}</span>
+        </div>
+        <div class="fin-item">
+          <span class="fin-label">营业收入</span>
+          <span class="fin-value">{{ formatNumber(financialData.total_revenue) }}</span>
+          <span
+            class="fin-badge"
+            :class="financialData.revenue_yoy >= 0 ? 'up' : 'down'"
+          >{{ formatPercent(financialData.revenue_yoy) }}</span>
+        </div>
+        <div class="fin-item">
+          <span class="fin-label">ROE</span>
+          <span class="fin-value">{{ formatPercent(financialData.roe) }}</span>
+        </div>
+        <div class="fin-item">
+          <span class="fin-label">EPS</span>
+          <span class="fin-value">{{ financialData.eps?.toFixed(2) || '—' }}</span>
+        </div>
+        <div class="fin-item">
+          <span class="fin-label">毛利率</span>
+          <span class="fin-value">{{ formatPercent(financialData.gross_profit_ratio) }}</span>
+        </div>
+        <div class="fin-item">
+          <span class="fin-label">净利率</span>
+          <span class="fin-value">{{ formatPercent(financialData.net_profit_ratio) }}</span>
+        </div>
+        <div class="fin-item">
+          <span class="fin-label">资产负债率</span>
+          <span class="fin-value">{{ formatPercent(financialData.debt_ratio) }}</span>
+        </div>
+        <div class="fin-item">
+          <span class="fin-label">每股净资产</span>
+          <span class="fin-value">{{ financialData.bps?.toFixed(2) || '—' }}</span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -349,7 +433,7 @@ onMounted(() => {
   height: 100%;
   padding: 4px 28px 18px;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 .detail-bar {
@@ -491,5 +575,103 @@ onMounted(() => {
   font-family: var(--font-body);
   font-size: 13px;
   color: var(--text-faint);
+}
+
+.financial-panel {
+  flex-shrink: 0;
+  margin-top: 12px;
+  padding: 16px 20px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+}
+
+.fin-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.fin-title {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+}
+
+.fin-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  letter-spacing: 0.08em;
+}
+
+.fin-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.fin-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 12px 16px;
+  position: relative;
+
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    background: var(--accent);
+    border-radius: 0 1px 1px 0;
+    opacity: 0.6;
+  }
+}
+
+.fin-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.fin-value {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.fin-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  width: fit-content;
+  padding: 1px 6px;
+  border-radius: 2px;
+  letter-spacing: 0.02em;
+
+  &.up {
+    color: var(--up);
+    background: rgba(239, 68, 68, 0.12);
+  }
+
+  &.down {
+    color: var(--down);
+    background: rgba(34, 197, 94, 0.12);
+  }
 }
 </style>

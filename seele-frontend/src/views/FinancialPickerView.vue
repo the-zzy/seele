@@ -5,6 +5,7 @@ import { financialApi } from '@/api/financial'
 import { useStockPicker } from '@/composables/useStockPicker'
 import BasePagination from '@/components/common/BasePagination.vue'
 import PageHero from '@/components/common/PageHero.vue'
+import SyncProgress from '@/components/common/SyncProgress.vue'
 
 const router = useRouter()
 
@@ -23,8 +24,15 @@ const filters = ref({
   sort_order: 'desc'
 })
 
-const syncLoading = ref(false)
-const syncMessage = ref('')
+const syncing = ref(false)
+const syncProgress = ref({
+  visible: false,
+  percent: 0,
+  current: 0,
+  total: 0,
+  message: ''
+})
+let syncEventSource = null
 
 const {
   loading,
@@ -58,19 +66,81 @@ function handleSearch () {
 }
 
 function handleSync () {
-  syncLoading.value = true
-  syncMessage.value = '同步中...'
-  financialApi.syncAll()
-    .then(res => {
-      syncMessage.value = res.data?.hint || '同步任务已提交'
-    })
-    .catch(err => {
-      syncMessage.value = '同步失败: ' + (err.message || '未知错误')
-    })
-    .finally(() => {
-      syncLoading.value = false
-      setTimeout(() => { syncMessage.value = '' }, 5000)
-    })
+  if (!confirm('确定要同步全部股票的财务指标数据吗？\n同步任务将在后台异步执行，可实时查看进度。')) {
+    return
+  }
+
+  if (syncEventSource) {
+    syncEventSource.close()
+    syncEventSource = null
+  }
+
+  syncing.value = true
+  syncProgress.value = {
+    visible: true,
+    percent: 0,
+    current: 0,
+    total: 0,
+    message: '正在连接...'
+  }
+
+  const es = financialApi.createFinancialSyncStream()
+  syncEventSource = es
+
+  es.onmessage = (event) => {
+    try {
+      const payload = JSON.parse(event.data)
+      if (payload.status === 'running') {
+        const current = payload.current || 0
+        const total = payload.total || 0
+        syncProgress.value = {
+          visible: true,
+          percent: total ? Math.round(current / total * 100) : 0,
+          current,
+          total,
+          message: payload.symbol
+            ? `正在同步: ${payload.symbol}`
+            : '正在同步财务数据...'
+        }
+      } else if (payload.status === 'completed') {
+        const result = payload.result || {}
+        syncProgress.value = {
+          visible: true,
+          percent: 100,
+          current: result.upserted || 0,
+          total: result.total_stocks || 0,
+          message: result.summary || '同步完成'
+        }
+        es.close()
+        syncEventSource = null
+        syncing.value = false
+        search({})
+        setTimeout(() => {
+          syncProgress.value.visible = false
+        }, 3000)
+      } else if (payload.status === 'failed') {
+        syncProgress.value = {
+          visible: true,
+          percent: 0,
+          current: 0,
+          total: 0,
+          message: '同步失败: ' + (payload.error || '未知错误')
+        }
+        es.close()
+        syncEventSource = null
+        syncing.value = false
+      }
+    } catch (e) {
+      console.error('解析进度消息失败:', e)
+    }
+  }
+
+  es.onerror = () => {
+    syncProgress.value.message = '连接异常，请刷新页面查看结果'
+    es.close()
+    syncEventSource = null
+    syncing.value = false
+  }
 }
 
 function handleRowDblClick (item) {
@@ -141,11 +211,17 @@ function getSortIcon (field) {
       </div>
       <div class="filter-actions">
         <button class="btn-primary" @click="handleSearch">筛选</button>
-        <button class="btn-secondary" :disabled="syncLoading" @click="handleSync">
-          {{ syncLoading ? '同步中...' : '同步财务数据' }}
+        <button class="btn-secondary" :disabled="syncing" @click="handleSync">
+          {{ syncing ? '同步中...' : '同步财务数据' }}
         </button>
-        <span v-if="syncMessage" class="sync-msg">{{ syncMessage }}</span>
       </div>
+      <SyncProgress
+        :visible="syncProgress.visible"
+        :percent="syncProgress.percent"
+        :current="syncProgress.current"
+        :total="syncProgress.total"
+        :message="syncProgress.message"
+      />
     </div>
 
     <div class="result-bar">共 {{ total }} 只</div>
@@ -212,11 +288,12 @@ function getSortIcon (field) {
 @import '~@/styles/picker';
 
 .filter-panel {
-  background: #fff;
-  border-radius: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
   padding: 16px 20px;
   margin-bottom: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-soft);
 }
 
 .filter-row {
@@ -236,34 +313,63 @@ function getSortIcon (field) {
   gap: 8px;
 
   label {
-    font-size: 13px;
-    color: #666;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-faint);
     white-space: nowrap;
   }
 
   input[type="number"] {
     width: 80px;
     padding: 6px 8px;
-    border: 1px solid #ddd;
+    background: var(--bg-input);
+    border: 1px solid var(--border-default);
     border-radius: 4px;
     font-size: 13px;
+    color: var(--text-primary);
+    transition: border-color 0.2s;
 
     &:focus {
       outline: none;
-      border-color: #409eff;
+      border-color: var(--accent);
+    }
+
+    &::placeholder {
+      color: var(--text-faint);
     }
   }
 
   &.checkbox label {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
     cursor: pointer;
     font-size: 13px;
-    color: #333;
+    color: var(--text-secondary);
+    padding: 4px 10px;
+    border: 1px solid var(--rule);
+    border-radius: 999px;
+    transition: all 0.18s;
 
     input {
       cursor: pointer;
+      width: 12px;
+      height: 12px;
+      margin: 0;
+      accent-color: var(--accent);
+    }
+
+    &:hover {
+      border-color: var(--text-faint);
+      color: var(--text-primary);
+    }
+
+    &:has(input:checked) {
+      background: var(--accent-subtle);
+      border-color: rgba(59, 130, 246, 0.35);
+      color: var(--text-primary);
     }
   }
 }
@@ -274,36 +380,46 @@ function getSortIcon (field) {
   gap: 12px;
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--rule);
 }
 
 .btn-primary {
-  padding: 8px 20px;
-  background: #409eff;
+  padding: 8px 18px;
+  background: var(--accent);
   color: #fff;
   border: none;
   border-radius: 4px;
-  font-size: 13px;
   cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  transition: background 0.2s;
 
   &:hover {
-    background: #66b1ff;
+    background: var(--accent-hover);
   }
 }
 
 .btn-secondary {
-  padding: 8px 20px;
-  background: #f5f7fa;
-  color: #606266;
-  border: 1px solid #dcdfe6;
+  padding: 8px 18px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-default);
   border-radius: 4px;
-  font-size: 13px;
   cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  transition: all 0.2s;
 
   &:hover:not(:disabled) {
-    background: #ecf5ff;
-    color: #409eff;
-    border-color: #c6e2ff;
+    background: var(--accent-subtle);
+    color: var(--accent);
+    border-color: var(--accent);
   }
 
   &:disabled {
@@ -312,33 +428,48 @@ function getSortIcon (field) {
   }
 }
 
-.sync-msg {
-  font-size: 13px;
-  color: #67c23a;
-}
-
 .table-wrapper {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--bg-secondary);
   position: relative;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-radius: 4px;
+    box-shadow: var(--shadow-soft);
+  }
 }
 
 .data-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
-  background: #fff;
-  border-radius: 8px;
-  overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 
   th {
-    background: #f5f7fa;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--bg-primary);
     padding: 12px 10px;
     text-align: right;
     font-weight: 600;
-    color: #606266;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-faint);
     cursor: pointer;
     user-select: none;
     white-space: nowrap;
+    border-bottom: 1px solid var(--rule);
 
     &:first-child {
       text-align: left;
@@ -350,14 +481,15 @@ function getSortIcon (field) {
     }
 
     &:hover {
-      background: #e4e7ed;
+      color: var(--text-secondary);
     }
   }
 
   td {
     padding: 10px;
     text-align: right;
-    border-bottom: 1px solid #ebeef5;
+    border-bottom: 1px solid var(--rule);
+    color: var(--text-primary);
 
     &:first-child {
       text-align: left;
@@ -369,8 +501,13 @@ function getSortIcon (field) {
     }
   }
 
-  tr:hover td {
-    background: #f5f7fa;
+  tbody tr {
+    cursor: pointer;
+    transition: background 0.12s;
+
+    &:hover td {
+      background: var(--bg-tertiary);
+    }
   }
 }
 
@@ -381,36 +518,38 @@ function getSortIcon (field) {
 
   .symbol {
     font-weight: 600;
-    color: #303133;
+    color: var(--text-primary);
+    letter-spacing: 0.04em;
   }
 
   .name {
+    font-family: var(--font-body);
     font-size: 12px;
-    color: #606266;
+    color: var(--text-secondary);
   }
 
   .industry {
     font-size: 11px;
-    color: #909399;
+    color: var(--text-muted);
   }
 }
 
 .highlight {
-  color: #e6a23c;
+  color: var(--accent);
   font-weight: 600;
 }
 
 .up {
-  color: #f56c6c;
+  color: var(--up);
 }
 
 .down {
-  color: #67c23a;
+  color: var(--down);
 }
 
 .empty {
   text-align: center;
-  color: #909399;
+  color: var(--text-faint);
   padding: 40px 0;
 }
 
@@ -420,11 +559,12 @@ function getSortIcon (field) {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(255, 255, 255, 0.8);
+  background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 14px;
-  color: #909399;
+  color: var(--text-muted);
+  z-index: 2;
 }
 </style>

@@ -674,3 +674,140 @@ def post_financial_picker(
         "page_size": page_size,
         "list": result_list,
     })
+
+
+# 2.16 主升浪选股
+@router.post("/mainwave-picker")
+def post_mainwave_picker(
+    query: schemas.MainwavePickerQuery,
+    db: Session = Depends(get_db),
+):
+    """主升浪选股 - 5条门槛 + 3条主升浪标准 + 级别评分"""
+    trade_date = query.trade_date.replace("-", "")
+    page_size = min(query.page_size, 100)
+    exclude_sql = build_exclude_sql(query)
+
+    only_s_level_sql = ""
+    if query.only_s_level:
+        only_s_level_sql = "    AND fi.net_profit_yoy > 0"
+
+    base_where = f"""
+        sd.trade_date = :trade_date
+    AND sb.market = '主板'
+    AND sb.float_market_cap > 200
+    AND sd.close < 300
+    AND sdi.turnover_ma10 > 2
+    AND sdi.amount_ma10 > 200000000
+    AND sd.close > sdi.ma5
+    AND sdi.ma5 > sdi.ma10
+    AND sd.close > (
+        SELECT close FROM stock_daily
+        WHERE symbol = sd.symbol AND trade_date < :trade_date
+        ORDER BY trade_date DESC
+        LIMIT 1 OFFSET 9
+    )
+{exclude_sql}
+{only_s_level_sql}"""
+
+    count_sql = f"""
+    SELECT COUNT(*)
+    FROM stock_daily sd
+    JOIN stock_basic sb ON sd.symbol = sb.symbol
+    JOIN stock_daily_indicator sdi ON sd.symbol = sdi.symbol AND sd.trade_date = sdi.trade_date
+    LEFT JOIN stock_financial_indicator fi ON sd.symbol = fi.symbol
+    WHERE {base_where}
+    """
+
+    sort_field = query.sort_field if query.sort_field in {
+        "pct_chg", "turnover", "amount", "symbol", "name",
+    } else "level"
+    sort_order = "DESC" if query.sort_order.lower() == "desc" else "ASC"
+
+    if sort_field == "level":
+        order_sql = "ORDER BY (fi.net_profit_yoy > 0) DESC, sd.pct_chg DESC"
+    else:
+        order_sql = f"ORDER BY sd.{sort_field} {sort_order}"
+
+    list_sql = f"""
+    SELECT
+        sd.symbol,
+        sb.name,
+        sb.industry,
+        sb.market,
+        sb.float_market_cap,
+        sd.trade_date,
+        sd.open,
+        sd.close,
+        sd.high,
+        sd.low,
+        sd.volume,
+        sd.amount,
+        sd.turnover,
+        sd.pct_chg,
+        sdi.ma5,
+        sdi.ma10,
+        sdi.turnover_ma10,
+        sdi.amount_ma10,
+        fi.net_profit_yoy
+    FROM stock_daily sd
+    JOIN stock_basic sb ON sd.symbol = sb.symbol
+    JOIN stock_daily_indicator sdi ON sd.symbol = sdi.symbol AND sd.trade_date = sdi.trade_date
+    LEFT JOIN stock_financial_indicator fi ON sd.symbol = fi.symbol
+    WHERE {base_where}
+    {order_sql}
+    LIMIT :limit OFFSET :offset
+    """
+
+    params = {
+        "trade_date": trade_date,
+        "limit": page_size,
+        "offset": (query.page_num - 1) * page_size,
+    }
+
+    total_result = db.execute(text(count_sql), params).scalar() or 0
+    rows = db.execute(text(list_sql), params).all()
+
+    result_list = []
+    for row in rows:
+        signals = []
+        if row.close and row.ma5 and row.close > row.ma5:
+            signals.append("价在MA5上")
+        if row.ma5 and row.ma10 and row.ma5 > row.ma10:
+            signals.append("MA5>MA10")
+        if row.net_profit_yoy is not None and row.net_profit_yoy > 0:
+            level = "S"
+            signals.append("业绩正增长")
+        else:
+            level = "博弈"
+
+        result_list.append({
+            "symbol": row.symbol,
+            "name": row.name,
+            "industry": row.industry,
+            "market": row.market,
+            "trade_date": query.trade_date,
+            "open": row.open,
+            "close": row.close,
+            "high": row.high,
+            "low": row.low,
+            "volume": row.volume,
+            "amount": row.amount,
+            "turnover": row.turnover,
+            "pct_chg": row.pct_chg,
+            "ma5": round(row.ma5, 4) if row.ma5 else None,
+            "ma10": round(row.ma10, 4) if row.ma10 else None,
+            "float_market_cap": round(row.float_market_cap, 2) if row.float_market_cap else None,
+            "turnover_ma10": round(row.turnover_ma10, 2) if row.turnover_ma10 else None,
+            "amount_ma10": row.amount_ma10,
+            "level": level,
+            "net_profit_yoy": round(row.net_profit_yoy, 2) if row.net_profit_yoy is not None else None,
+            "signals": " | ".join(signals),
+        })
+
+    return success({
+        "trade_date": query.trade_date,
+        "total": total_result,
+        "page_num": query.page_num,
+        "page_size": page_size,
+        "list": result_list,
+    })

@@ -18,6 +18,7 @@ class StockBasic(Base):
     area = Column(String(50), comment="所在地区")
     industry = Column(String(50), comment="所属行业")
     market = Column(String(20), comment="市场板块")
+    float_market_cap = Column(Float, comment="流通市值(亿元)")
     list_date = Column(Date, comment="上市日期")
 
 

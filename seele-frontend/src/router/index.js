@@ -11,6 +11,7 @@ import ShrinkingVolumePickerView from '../views/ShrinkingVolumePickerView.vue'
 import BreakoutVolumePickerView from '../views/BreakoutVolumePickerView.vue'
 import PortfolioView from '../views/PortfolioView.vue'
 import FinancialPickerView from '../views/FinancialPickerView.vue'
+import MainwavePickerView from '../views/MainwavePickerView.vue'
 
 // nav 顺序：股票基本信息 → 股票日线数据(基本数据/指标数据) → 选股策略
 const routes = [
@@ -79,6 +80,12 @@ const routes = [
     name: 'financial-picker',
     component: FinancialPickerView,
     meta: { title: '财务选股', nav: true, navOrder: 35, group: '选股策略' }
+  },
+  {
+    path: '/mainwave-picker',
+    name: 'mainwave-picker',
+    component: MainwavePickerView,
+    meta: { title: '主升浪选股', nav: true, navOrder: 36, group: '选股策略' }
   },
   {
     path: '/kline/:symbol',

@@ -271,7 +271,11 @@ def get_summary(db: Session = Depends(get_db)):
 
 @router.get('/portfolio/daily-pnl')
 def get_daily_pnl(db: Session = Depends(get_db)):
-    """获取每日盈亏时间序列（用于折线图和柱状图）"""
+    """获取每日盈亏时间序列（用于折线图和柱状图）
+
+    计算逻辑：每日盈亏 = (当天收盘持仓市值 + 当天卖出金额 - 当天买入金额) - 前一天收盘持仓市值
+    这等价于「当天结束总资产 - 前一天结束总资产」，已自然包含卖出已实现盈亏。
+    """
     all_trades = portfolio_trade_crud.get_all(db)
     if not all_trades:
         return list_success([])
@@ -285,52 +289,58 @@ def get_daily_pnl(db: Session = Depends(get_db)):
         dailies = stock_daily_crud.get_by_symbol(db, symbol)
         symbol_dailies[symbol] = {d.trade_date: d.close for d in dailies}
 
-    # 构建每日持仓
+    # 构建每日持仓及当日买卖金额
     date_positions = {}
+    date_buys = {}
+    date_sells = {}
+
     for symbol in symbols:
         trades = sorted([t for t in all_trades if t.symbol == symbol], key=lambda x: x.trade_date)
         daily_map = symbol_dailies.get(symbol, {})
         qty = 0
         t_idx = 0
         for d in trade_dates:
+            day_buy = 0.0
+            day_sell = 0.0
             while t_idx < len(trades) and trades[t_idx].trade_date <= d:
                 t = trades[t_idx]
                 if t.trade_type == 'BUY':
                     qty += t.quantity
+                    day_buy += t.amount
                 else:
                     qty -= t.quantity
+                    day_sell += t.amount
                 t_idx += 1
             if qty > 0 and d in daily_map:
                 date_positions.setdefault(d, {})[symbol] = (qty, daily_map[d])
+            if day_buy:
+                date_buys[d] = date_buys.get(d, 0) + day_buy
+            if day_sell:
+                date_sells[d] = date_sells.get(d, 0) + day_sell
 
-    # 计算每日总市值和盈亏（基于成本）
+    # 按总资产变化计算每日盈亏
     result = []
-    prev_cumulative_pnl = None
+    prev_mv = 0.0
+    cumulative_pnl = 0.0
 
     for d in trade_dates:
-        if d not in date_positions:
+        if d not in date_positions and d not in date_buys and d not in date_sells:
             continue
-        mv = sum(q * p for q, p in date_positions[d].values())
 
-        # 计算当日持仓成本（FIFO）
-        daily_cost = 0.0
-        for symbol in date_positions[d]:
-            symbol_trades = [t for t in all_trades if t.symbol == symbol and t.trade_date <= d]
-            _, cost = _calc_fifo_position(symbol_trades)
-            daily_cost += cost
+        today_mv = sum(q * p for q, p in date_positions.get(d, {}).values())
+        today_buy = date_buys.get(d, 0)
+        today_sell = date_sells.get(d, 0)
 
-        cumulative_pnl = mv - daily_cost
-
-        if prev_cumulative_pnl is not None:
-            daily_pnl = cumulative_pnl - prev_cumulative_pnl
-        else:
-            # 首次有持仓的日期，盈亏即当日累计盈亏
-            daily_pnl = cumulative_pnl
-        prev_cumulative_pnl = cumulative_pnl
+        # 当天盈亏 = 当天收盘总资产 - 前一天收盘总资产
+        # 其中：当天收盘总资产 = today_mv + today_sell - today_buy（现金变动已内化）
+        # 前一天收盘总资产 = prev_mv（前一天的持仓按前一天收盘价估值 + 对应现金）
+        daily_pnl = today_mv - prev_mv - today_buy + today_sell
+        cumulative_pnl += daily_pnl
+        prev_mv = today_mv
 
         result.append({
             'date': d.strftime('%Y-%m-%d'),
-            'market_value': round(mv, 4),
+            'market_value': round(today_mv, 4),
             'daily_pnl': round(daily_pnl, 4),
             'cumulative_pnl': round(cumulative_pnl, 4),
         })

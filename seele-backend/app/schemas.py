@@ -34,6 +34,7 @@ class StockBasicCreate(BaseModel):
     area: Optional[str] = Field(None, description="所在地区")
     industry: Optional[str] = Field(None, description="所属行业")
     market: Optional[str] = Field(None, description="市场板块")
+    float_market_cap: Optional[float] = Field(None, description="流通市值(亿元)")
     list_date: Optional[date] = Field(None, description="上市日期")
 
 
@@ -44,6 +45,7 @@ class StockBasicUpdate(BaseModel):
     area: Optional[str] = Field(None, description="所在地区")
     industry: Optional[str] = Field(None, description="所属行业")
     market: Optional[str] = Field(None, description="市场板块")
+    float_market_cap: Optional[float] = Field(None, description="流通市值(亿元)")
     list_date: Optional[date] = Field(None, description="上市日期")
 
 
@@ -55,6 +57,7 @@ class StockBasicResponse(BaseModel):
     area: Optional[str]
     industry: Optional[str]
     market: Optional[str]
+    float_market_cap: Optional[float]
     list_date: Optional[str]
 
     @field_validator('list_date', mode='before')
@@ -600,6 +603,20 @@ class FinancialPickerQuery(BaseModel):
     exclude_kcb: bool = Field(default=True, description='排除科创板，默认true')
     exclude_bse: bool = Field(default=True, description='排除北交所，默认true')
     sort_field: str = Field(default='roe', description='排序字段，默认roe')
+    sort_order: str = Field(default='desc', description='排序方向，asc/desc，默认desc')
+    page_num: int = Field(default=1, description='页码，默认1')
+    page_size: int = Field(default=100, ge=1, le=100, description='每页条数，默认100，最大100')
+
+
+class MainwavePickerQuery(BaseModel):
+    """主升浪选股-查询参数"""
+    trade_date: str = Field(..., description='交易日期，格式 YYYY-MM-DD 或 YYYYMMDD')
+    only_s_level: bool = Field(default=False, description='仅看硬核S级，默认false')
+    exclude_st: bool = Field(default=True, description='排除ST，默认true')
+    exclude_cyb: bool = Field(default=True, description='排除创业板，默认true')
+    exclude_kcb: bool = Field(default=True, description='排除科创板，默认true')
+    exclude_bse: bool = Field(default=True, description='排除北交所，默认true')
+    sort_field: str = Field(default='level', description='排序字段，默认level')
     sort_order: str = Field(default='desc', description='排序方向，asc/desc，默认desc')
     page_num: int = Field(default=1, description='页码，默认1')
     page_size: int = Field(default=100, ge=1, le=100, description='每页条数，默认100，最大100')

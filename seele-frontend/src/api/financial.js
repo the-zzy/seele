@@ -54,6 +54,17 @@ export const financialApi = {
   },
 
   /**
+   * 创建财务指标同步 SSE 实时进度流
+   * @returns {EventSource}
+   */
+  createFinancialSyncStream () {
+    const base = process.env.NODE_ENV === 'production'
+      ? (process.env.VUE_APP_BASE_API || '/api')
+      : 'http://localhost:9000/api'
+    return new EventSource(`${base}/sync/financial/stream`)
+  },
+
+  /**
    * 同步单只股票财务指标
    * @param {string} symbol
    */
