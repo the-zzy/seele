@@ -189,7 +189,7 @@ async function loadDistribution () {
 function renderTrendChart (list, initialCapital) {
   if (!list.length) return
   const dates = list.map(i => i.date)
-  const totalAssets = list.map(i => Number((initialCapital || 0) + i.cumulative_pnl).toFixed(2))
+  const totalAssets = list.map(i => Number(i.total_asset || ((initialCapital || 0) + i.cumulative_pnl)).toFixed(2))
 
   trendRef.init({
     tooltip: {

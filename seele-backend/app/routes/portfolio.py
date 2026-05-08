@@ -424,11 +424,9 @@ def get_summary(db: Session = Depends(get_db)):
     realized_pnl = sum(c.realized_pnl for c in closed_data)
     total_pnl = unrealized_pnl + realized_pnl
 
-    total_pnl_pct = 0.0
-    if total_invested > 0:
-        total_pnl_pct = total_pnl / total_invested * 100
-    elif realized_pnl != 0:
-        total_pnl_pct = None
+    # 历史总投入（含已清仓股票的买入成本）
+    total_historical_invested = total_invested + sum(c.total_buy_amount for c in closed_data)
+    total_pnl_pct = total_pnl / total_historical_invested * 100 if total_historical_invested > 0 else None
 
     total_return_pct = None
     if config.initial_capital > 0:
@@ -444,6 +442,7 @@ def get_summary(db: Session = Depends(get_db)):
         'position_count': len(positions),
         'initial_capital': round(config.initial_capital, 4),
         'total_return_pct': round(total_return_pct, 4) if total_return_pct is not None else None,
+        'total_historical_invested': round(total_historical_invested, 4),
     })
 
 
@@ -467,10 +466,11 @@ def get_daily_pnl(db: Session = Depends(get_db)):
         dailies = stock_daily_crud.get_by_symbol(db, symbol)
         symbol_dailies[symbol] = {d.trade_date: d.close for d in dailies}
 
-    # 构建每日持仓及当日买卖金额
+    # 构建每日持仓及当日买卖金额、手续费
     date_positions = {}
     date_buys = {}
     date_sells = {}
+    date_fees = {}
 
     for symbol in symbols:
         trades = sorted([t for t in all_trades if t.symbol == symbol], key=lambda x: x.trade_date)
@@ -480,6 +480,7 @@ def get_daily_pnl(db: Session = Depends(get_db)):
         for d in trade_dates:
             day_buy = 0.0
             day_sell = 0.0
+            day_fee = 0.0
             while t_idx < len(trades) and trades[t_idx].trade_date <= d:
                 t = trades[t_idx]
                 if t.trade_type == 'BUY':
@@ -488,6 +489,7 @@ def get_daily_pnl(db: Session = Depends(get_db)):
                 else:
                     qty -= t.quantity
                     day_sell += t.amount
+                day_fee += t.fee or 0
                 t_idx += 1
             if qty > 0 and d in daily_map:
                 date_positions.setdefault(d, {})[symbol] = (qty, daily_map[d])
@@ -495,11 +497,14 @@ def get_daily_pnl(db: Session = Depends(get_db)):
                 date_buys[d] = date_buys.get(d, 0) + day_buy
             if day_sell:
                 date_sells[d] = date_sells.get(d, 0) + day_sell
+            if day_fee:
+                date_fees[d] = date_fees.get(d, 0) + day_fee
 
     # 按总资产变化计算每日盈亏
     result = []
     prev_mv = 0.0
     cumulative_pnl = 0.0
+    config = portfolio_config_crud.get_or_create(db)
 
     for d in trade_dates:
         if d not in date_positions and d not in date_buys and d not in date_sells:
@@ -508,11 +513,12 @@ def get_daily_pnl(db: Session = Depends(get_db)):
         today_mv = sum(q * p for q, p in date_positions.get(d, {}).values())
         today_buy = date_buys.get(d, 0)
         today_sell = date_sells.get(d, 0)
+        today_fee = date_fees.get(d, 0)
 
         # 当天盈亏 = 当天收盘总资产 - 前一天收盘总资产
-        # 其中：当天收盘总资产 = today_mv + today_sell - today_buy（现金变动已内化）
+        # 其中：当天收盘总资产 = today_mv + today_sell - today_buy - today_fee（现金变动已内化）
         # 前一天收盘总资产 = prev_mv（前一天的持仓按前一天收盘价估值 + 对应现金）
-        daily_pnl = today_mv - prev_mv - today_buy + today_sell
+        daily_pnl = today_mv - prev_mv - today_buy + today_sell - today_fee
         cumulative_pnl += daily_pnl
         prev_mv = today_mv
 
@@ -521,6 +527,7 @@ def get_daily_pnl(db: Session = Depends(get_db)):
             'market_value': round(today_mv, 4),
             'daily_pnl': round(daily_pnl, 4),
             'cumulative_pnl': round(cumulative_pnl, 4),
+            'total_asset': round(config.initial_capital + cumulative_pnl, 4),
         })
 
     return list_success(result)

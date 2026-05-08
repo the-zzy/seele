@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "preserve": "powershell -Command \"$c = netstat -ano | findstr ':8000'; if ($c) { $id = ($c -split '\\s+')[-1]; if ($id -ne '') { taskkill /PID $id /F } }\"",
+    "preserve": "powershell -Command \"$c = netstat -ano | findstr '0.0.0.0:8000' | findstr 'LISTENING'; if ($c) { $id = ($c -split '\\s+')[-1]; if ($id -ne '') { taskkill /PID $id /F } }\"",
     "serve": "vue-cli-service serve --port 8000",
     "build": "vue-cli-service build",
     "lint": "vue-cli-service lint"
