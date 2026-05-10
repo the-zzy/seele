@@ -33,7 +33,7 @@ export const portfolioApi = {
       method: 'get',
       params: {
         page_num: 1,
-        page_size: 20,
+        page_size: 10,
         ...params
       }
     })
@@ -81,7 +81,7 @@ export const portfolioApi = {
       method: 'get',
       params: {
         page_num: 1,
-        page_size: 20,
+        page_size: 10,
         ...params
       }
     })

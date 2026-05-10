@@ -10,7 +10,7 @@ from app import crud, schemas
 from app.database import get_db
 from app.filters import filter_main_board_non_st, is_main_board_non_st
 from app.response import list_success, page_success, success
-from app.schemas import StockBasicResponse
+from app.schemas import StockBasicResponse, StockBasicWithFinancialResponse
 
 router = APIRouter(prefix="/stock/basic", tags=["股票基础数据"])
 
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/stock/basic", tags=["股票基础数据"])
 @router.get("/list")
 def get_stock_basic_list(
     page_num: int = Query(1, description="页码"),
-    page_size: int = Query(100, description="每页条数"),
+    page_size: int = Query(10, description="每页条数"),
     sort_field: str = Query(None, description="排序字段"),
     sort_order: str = Query("asc", description="排序方向"),
     symbol: str = Query(None, description="股票代码"),
@@ -49,7 +49,7 @@ def get_stock_basic_list(
     )
     list_data, total = crud.stock_basic_crud.get_list(db, query)
     return page_success(
-        items=[StockBasicResponse.model_validate(item) for item in list_data],
+        items=[StockBasicWithFinancialResponse.model_validate(item) for item in list_data],
         total=total,
         page_num=page_num,
         page_size=page_size,
@@ -67,7 +67,7 @@ def post_stock_basic_page(
     query.exclude_st = True
     list_data, total = crud.stock_basic_crud.get_list(db, query)
     return page_success(
-        items=[StockBasicResponse.model_validate(item) for item in list_data],
+        items=[StockBasicWithFinancialResponse.model_validate(item) for item in list_data],
         total=total,
         page_num=query.page_num,
         page_size=query.page_size,

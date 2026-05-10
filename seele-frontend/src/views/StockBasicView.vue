@@ -1,16 +1,19 @@
 <script setup>
 import { reactive, ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { stockBasicApi } from '@/api/stock'
 import StockBasicFilter from '@/components/stock/StockBasicFilter.vue'
 import StockBasicTable from '@/components/stock/StockBasicTable.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
 import PageHero from '@/components/common/PageHero.vue'
 
+const router = useRouter()
+
 const loading = ref(false)
 const stockList = ref([])
 const total = ref(0)
 const pageNum = ref(1)
-const pageSize = ref(20)
+const pageSize = ref(10)
 
 const filterForm = reactive({
   symbol: '',
@@ -62,7 +65,12 @@ async function loadData () {
       industry: item.industry,
       area: item.area,
       market: item.market,
-      listDate: item.list_date
+      listDate: item.list_date,
+      roe: item.roe,
+      grossProfitRatio: item.gross_profit_ratio,
+      netProfitRatio: item.net_profit_ratio,
+      netProfitYoy: item.net_profit_yoy,
+      revenueYoy: item.revenue_yoy
     }))
     total.value = res?.total || 0
   } catch (error) {
@@ -101,6 +109,14 @@ async function handlePageSizeChange (newSize) {
   await loadData()
 }
 
+function handleRowDblClick (item) {
+  router.push({
+    name: 'stock-financial',
+    params: { symbol: item.symbol },
+    query: { name: item.name }
+  })
+}
+
 onMounted(() => {
   loadData()
 })
@@ -128,6 +144,7 @@ onMounted(() => {
       :sort-order="sortOrder"
       :loading="loading"
       @sort="handleSort"
+      @row-dblclick="handleRowDblClick"
     />
 
     <BasePagination

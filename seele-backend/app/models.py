@@ -64,6 +64,18 @@ class StockDailyIndicator(Base):
     amount_ma10 = Column(BigInteger, comment="10日平均成交额")
     turnover_ma5 = Column(Float, comment="5日平均换手率(%)")
     turnover_ma10 = Column(Float, comment="10日平均换手率(%)")
+    macd_dif = Column(Float, comment="MACD DIF")
+    macd_dea = Column(Float, comment="MACD DEA")
+    macd_hist = Column(Float, comment="MACD 柱状图")
+    rsi_6 = Column(Float, comment="RSI 6日")
+    rsi_12 = Column(Float, comment="RSI 12日")
+    rsi_24 = Column(Float, comment="RSI 24日")
+    kdj_k = Column(Float, comment="KDJ K值")
+    kdj_d = Column(Float, comment="KDJ D值")
+    kdj_j = Column(Float, comment="KDJ J值")
+    boll_upper = Column(Float, comment="布林上轨")
+    boll_middle = Column(Float, comment="布林中轨")
+    boll_lower = Column(Float, comment="布林下轨")
     created_at = Column(TIMESTAMP, server_default=func.now(), comment="创建时间")
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment="更新时间")
 
@@ -138,6 +150,45 @@ class PortfolioClosed(Base):
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
 
 
+class PortfolioDailyPosition(Base):
+    """每日持仓明细表：记录每天每只股票的持仓状态"""
+    __tablename__ = 'portfolio_daily_position'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    trade_date = Column(Date, nullable=False, index=True, comment='交易日期')
+    symbol = Column(String(20), nullable=False, index=True, comment='股票代码')
+    name = Column(String(100), nullable=False, comment='股票名称')
+    quantity = Column(Integer, nullable=False, default=0, comment='当日收盘持仓股数')
+    avg_cost = Column(Float, nullable=False, default=0, comment='平均成本')
+    close_price = Column(Float, comment='当日收盘价')
+    market_value = Column(Float, default=0, comment='当日市值')
+    day_buy = Column(Float, default=0, comment='当日买入金额')
+    day_sell = Column(Float, default=0, comment='当日卖出金额')
+    unrealized_pnl = Column(Float, default=0, comment='当日浮动盈亏')
+    created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
+
+    __table_args__ = (
+        UniqueConstraint('trade_date', 'symbol', name='uq_daily_position_date_symbol'),
+    )
+
+
+class PortfolioDailySummary(Base):
+    """每日资产汇总表：记录每天的整体资产状态"""
+    __tablename__ = 'portfolio_daily_summary'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    trade_date = Column(Date, nullable=False, unique=True, index=True, comment='交易日期')
+    total_invested = Column(Float, default=0, comment='总投入成本')
+    total_market_value = Column(Float, default=0, comment='当日收盘总市值')
+    daily_pnl = Column(Float, default=0, comment='当日盈亏')
+    cumulative_pnl = Column(Float, default=0, comment='累计盈亏')
+    realized_pnl = Column(Float, default=0, comment='已实现盈亏')
+    unrealized_pnl = Column(Float, default=0, comment='浮动盈亏')
+    created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
+
+
 class PortfolioConfig(Base):
     """持仓配置表"""
     __tablename__ = 'portfolio_config'
@@ -148,9 +199,51 @@ class PortfolioConfig(Base):
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
 
 
+class MarketSentimentDaily(Base):
+    """每日市场情绪统计表"""
+    __tablename__ = 'market_sentiment_daily'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    trade_date = Column(Date, nullable=False, unique=True, index=True, comment='交易日期')
+    total_stocks = Column(Integer, nullable=False, default=0, comment='当日参与统计的总股票数')
+    up_count = Column(Integer, nullable=False, default=0, comment='上涨家数')
+    down_count = Column(Integer, nullable=False, default=0, comment='下跌家数')
+    flat_count = Column(Integer, nullable=False, default=0, comment='平盘家数')
+    avg_pct_chg = Column(Float, comment='平均涨跌幅')
+    strong_count = Column(Integer, nullable=False, default=0, comment='涨幅>=阈值的家数')
+    strong_threshold = Column(Float, nullable=False, default=2.0, comment='强势阈值%')
+    strong_percent = Column(Float, comment='强势占比%')
+    created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
+
+
+class IndustrySentimentDaily(Base):
+    """每日板块情绪统计表"""
+    __tablename__ = 'industry_sentiment_daily'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    trade_date = Column(Date, nullable=False, index=True, comment='交易日期')
+    industry = Column(String(50), nullable=False, comment='行业名称')
+    stock_count = Column(Integer, nullable=False, default=0, comment='板块内股票总数')
+    up_count = Column(Integer, default=0, comment='上涨家数')
+    down_count = Column(Integer, default=0, comment='下跌家数')
+    flat_count = Column(Integer, default=0, comment='平盘家数')
+    avg_pct_chg = Column(Float, comment='板块平均涨跌幅')
+    max_pct_chg = Column(Float, comment='板块最大涨幅')
+    min_pct_chg = Column(Float, comment='板块最大跌幅')
+    strong_count = Column(Integer, default=0, comment='强势家数（涨幅>=阈值）')
+    amount_sum = Column(Float, comment='板块总成交额')
+    created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
+
+    __table_args__ = (
+        UniqueConstraint('trade_date', 'industry', name='uq_industry_sentiment_date_industry'),
+    )
+
+
 class StockFinancialIndicator(Base):
     """股票财务指标表（仅保留最新一期）"""
-    __tablename__ = 'stock_financial_indicator'
+    __tablename__ = "stock_financial_indicator"
 
     __table_args__ = {
         'mysql_collate': 'utf8mb4_0900_ai_ci',
@@ -178,3 +271,23 @@ class StockFinancialIndicator(Base):
     total_equity = Column(Float, comment='所有者权益合计(万元)')
     operate_cash_flow = Column(Float, comment='经营活动现金流净额')
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
+
+
+class SyncJobLog(Base):
+    """同步任务执行日志表"""
+    __tablename__ = 'sync_job_log'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    job_type = Column(String(50), nullable=False, index=True, comment='任务类型: stock_basic / daily / financial / indicator')
+    trigger_type = Column(String(20), nullable=False, default='scheduled', comment='触发方式: scheduled / manual')
+    status = Column(String(20), nullable=False, default='running', comment='状态: running / success / failed / skipped')
+    started_at = Column(TIMESTAMP, server_default=func.now(), nullable=False, comment='开始时间')
+    ended_at = Column(TIMESTAMP, nullable=True, comment='结束时间')
+    duration_seconds = Column(Integer, nullable=True, comment='执行耗时(秒)')
+    success_count = Column(Integer, nullable=True, default=0, comment='成功处理数')
+    failed_count = Column(Integer, nullable=True, default=0, comment='失败/异常数')
+    skipped_count = Column(Integer, nullable=True, default=0, comment='跳过数')
+    total_count = Column(Integer, nullable=True, default=0, comment='总处理数')
+    trade_date = Column(String(8), nullable=True, comment='关联交易日')
+    error_message = Column(String(2000), nullable=True, comment='错误信息')
+    extra_info = Column(String(1000), nullable=True, comment='额外信息')

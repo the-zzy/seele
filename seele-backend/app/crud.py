@@ -3,7 +3,7 @@
 """
 
 from typing import List, Optional
-from datetime import date
+from datetime import date, datetime
 from sqlalchemy import func, and_, or_
 from sqlalchemy.orm import Session
 
@@ -33,7 +33,7 @@ class StockBasicCRUD:
         db: Session,
         query: schemas.StockBasicQuery,
     ) -> tuple[List[models.StockBasic], int]:
-        """分页查询"""
+        """分页查询（关联财务指标）"""
         # 构建查询条件
         filters = []
         if query.symbol and query.name:
@@ -74,10 +74,27 @@ class StockBasicCRUD:
                 "market": models.StockBasic.market,
                 "area": models.StockBasic.area,
                 "listDate": models.StockBasic.list_date,
+                "roe": models.StockFinancialIndicator.roe,
+                "gross_profit_ratio": models.StockFinancialIndicator.gross_profit_ratio,
+                "grossProfitRatio": models.StockFinancialIndicator.gross_profit_ratio,
+                "net_profit_ratio": models.StockFinancialIndicator.net_profit_ratio,
+                "netProfitRatio": models.StockFinancialIndicator.net_profit_ratio,
+                "net_profit_yoy": models.StockFinancialIndicator.net_profit_yoy,
+                "netProfitYoy": models.StockFinancialIndicator.net_profit_yoy,
+                "revenue_yoy": models.StockFinancialIndicator.revenue_yoy,
+                "revenueYoy": models.StockFinancialIndicator.revenue_yoy,
+                "eps": models.StockFinancialIndicator.eps,
+                "debt_ratio": models.StockFinancialIndicator.debt_ratio,
             }
             order_column = field_map.get(query.sort_field, models.StockBasic.symbol)
 
         order = order_column.asc() if query.sort_order == "asc" else order_column.desc()
+
+        # JOIN 财务指标表
+        stmt = db.query(models.StockBasic, models.StockFinancialIndicator).outerjoin(
+            models.StockFinancialIndicator,
+            models.StockBasic.symbol == models.StockFinancialIndicator.symbol,
+        )
 
         # 查询总数
         total = db.query(func.count(models.StockBasic.id))
@@ -86,13 +103,239 @@ class StockBasicCRUD:
         total = total.scalar()
 
         # 查询列表
-        stmt = db.query(models.StockBasic)
         if filters:
             stmt = stmt.filter(and_(*filters))
         stmt = stmt.order_by(order).offset((query.page_num - 1) * query.page_size).limit(query.page_size)
-        list_data = stmt.all()
+        results = stmt.all()
+
+        # 组装结果
+        list_data = []
+        for basic, financial in results:
+            basic.roe = financial.roe if financial else None
+            basic.gross_profit_ratio = financial.gross_profit_ratio if financial else None
+            basic.net_profit_ratio = financial.net_profit_ratio if financial else None
+            basic.net_profit_yoy = financial.net_profit_yoy if financial else None
+            basic.revenue_yoy = financial.revenue_yoy if financial else None
+            basic.eps = financial.eps if financial else None
+            basic.debt_ratio = financial.debt_ratio if financial else None
+            list_data.append(basic)
 
         return list_data, total
+
+    def get_mainwave_list(
+        self,
+        db: Session,
+        query: schemas.MainwavePickerQuery,
+    ) -> tuple[List[dict], int, str]:
+        """主升浪选股查询（关联日线及指标表）
+
+        返回: (数据列表, 总数, 实际使用的交易日期)
+        """
+        # 确定交易日期：优先使用传入的日期，否则取 indicator 表最新有数据的交易日
+        trade_date = query.trade_date
+        if not trade_date:
+            from sqlalchemy import distinct
+            latest_indicator_date = (
+                db.query(distinct(models.StockDailyIndicator.trade_date))
+                .order_by(models.StockDailyIndicator.trade_date.desc())
+                .first()
+            )
+            if latest_indicator_date:
+                trade_date = str(latest_indicator_date[0])
+            else:
+                latest_dates = stock_daily_crud.get_trade_dates(db)
+                if latest_dates:
+                    trade_date = str(latest_dates[0])
+                else:
+                    trade_date = date.today().strftime("%Y-%m-%d")
+        else:
+            # 检查传入的日期是否有 indicator 数据，如果没有则 fallback
+            formatted_check = trade_date.replace("-", "")
+            has_indicator = (
+                db.query(models.StockDailyIndicator)
+                .filter(models.StockDailyIndicator.trade_date == formatted_check)
+                .first()
+            )
+            if not has_indicator:
+                from sqlalchemy import distinct
+                latest_indicator_date = (
+                    db.query(distinct(models.StockDailyIndicator.trade_date))
+                    .order_by(models.StockDailyIndicator.trade_date.desc())
+                    .first()
+                )
+                if latest_indicator_date:
+                    trade_date = str(latest_indicator_date[0])
+        formatted_date = trade_date.replace("-", "")
+
+        # 基础查询：StockDaily JOIN StockBasic LEFT JOIN StockDailyIndicator
+        q = (
+            db.query(
+                models.StockDaily,
+                models.StockBasic.name.label("stock_name"),
+                models.StockBasic.industry,
+                models.StockBasic.market,
+                models.StockBasic.area,
+                models.StockBasic.float_market_cap,
+                models.StockDailyIndicator.ma5,
+                models.StockDailyIndicator.ma10,
+                models.StockDailyIndicator.ma20,
+                models.StockDailyIndicator.ma30,
+                models.StockDailyIndicator.ma60,
+                models.StockDailyIndicator.vol_ma5,
+                models.StockDailyIndicator.vol_ma10,
+                models.StockDailyIndicator.amount_ma5,
+                models.StockDailyIndicator.amount_ma10,
+                models.StockDailyIndicator.turnover_ma5,
+                models.StockDailyIndicator.turnover_ma10,
+            )
+            .join(models.StockBasic, models.StockDaily.symbol == models.StockBasic.symbol)
+            .outerjoin(
+                models.StockDailyIndicator,
+                and_(
+                    models.StockDaily.symbol == models.StockDailyIndicator.symbol,
+                    models.StockDaily.trade_date == models.StockDailyIndicator.trade_date,
+                ),
+            )
+        )
+
+        # 强制条件1：主板、非ST、非创业板、非科创板
+        q = q.filter(
+            models.StockBasic.market == "主板",
+            models.StockBasic.name.notlike("%ST%"),
+            models.StockDaily.trade_date == formatted_date,
+        )
+        q = q.filter(
+            models.StockBasic.symbol.notlike("300%"),
+            models.StockBasic.symbol.notlike("301%"),
+            models.StockBasic.symbol.notlike("688%"),
+            models.StockBasic.symbol.notlike("689%"),
+        )
+
+        # 文本筛选
+        if query.symbol and query.name:
+            q = q.filter(
+                or_(
+                    models.StockBasic.symbol.like(f"%{query.symbol}%"),
+                    models.StockBasic.name.like(f"%{query.name}%"),
+                )
+            )
+        else:
+            if query.symbol:
+                q = q.filter(models.StockBasic.symbol.like(f"%{query.symbol}%"))
+            if query.name:
+                q = q.filter(models.StockBasic.name.like(f"%{query.name}%"))
+        # 数值筛选（条件2-5）
+        if query.float_market_cap_min is not None:
+            q = q.filter(models.StockBasic.float_market_cap >= query.float_market_cap_min)
+        if query.close_max is not None:
+            q = q.filter(models.StockDaily.close <= query.close_max)
+        if query.avg_turnover_min is not None:
+            q = q.filter(models.StockDailyIndicator.turnover_ma10 >= query.avg_turnover_min)
+        if query.avg_amount_min is not None:
+            q = q.filter(models.StockDailyIndicator.amount_ma10 >= query.avg_amount_min)
+
+        # 排序映射
+        sort_column_map = {
+            "symbol": models.StockDaily.symbol,
+            "stock_name": models.StockBasic.name,
+            "name": models.StockBasic.name,
+            "open": models.StockDaily.open,
+            "high": models.StockDaily.high,
+            "low": models.StockDaily.low,
+            "close": models.StockDaily.close,
+            "volume": models.StockDaily.volume,
+            "amount": models.StockDaily.amount,
+            "amplitude": models.StockDaily.amplitude,
+            "pct_chg": models.StockDaily.pct_chg,
+            "pctChg": models.StockDaily.pct_chg,
+            "price_change": models.StockDaily.price_change,
+            "priceChange": models.StockDaily.price_change,
+            "turnover": models.StockDaily.turnover,
+            "ma5": models.StockDailyIndicator.ma5,
+            "ma10": models.StockDailyIndicator.ma10,
+            "ma20": models.StockDailyIndicator.ma20,
+            "ma30": models.StockDailyIndicator.ma30,
+            "ma60": models.StockDailyIndicator.ma60,
+            "vol_ma5": models.StockDailyIndicator.vol_ma5,
+            "volMa5": models.StockDailyIndicator.vol_ma5,
+            "vol_ma10": models.StockDailyIndicator.vol_ma10,
+            "volMa10": models.StockDailyIndicator.vol_ma10,
+            "turnover_ma5": models.StockDailyIndicator.turnover_ma5,
+            "turnoverMa5": models.StockDailyIndicator.turnover_ma5,
+            "turnover_ma10": models.StockDailyIndicator.turnover_ma10,
+            "turnoverMa10": models.StockDailyIndicator.turnover_ma10,
+            "float_market_cap": models.StockBasic.float_market_cap,
+        }
+        sort_column = sort_column_map.get(query.sort_field, models.StockDaily.symbol)
+        if query.sort_order == "desc":
+            q = q.order_by(sort_column.desc())
+        else:
+            q = q.order_by(sort_column.asc())
+
+        # 总数
+        total = q.with_entities(func.count(models.StockDaily.id)).scalar() or 0
+
+        # 分页
+        results = (
+            q.offset((query.page_num - 1) * query.page_size)
+            .limit(query.page_size)
+            .all()
+        )
+
+        data_list = []
+        for (
+            daily,
+            stock_name,
+            industry,
+            market,
+            area,
+            float_market_cap,
+            ma5,
+            ma10,
+            ma20,
+            ma30,
+            ma60,
+            vol_ma5,
+            vol_ma10,
+            amount_ma5,
+            amount_ma10,
+            turnover_ma5,
+            turnover_ma10,
+        ) in results:
+            data_list.append({
+                "id": daily.id,
+                "trade_date": str(daily.trade_date),
+                "symbol": daily.symbol,
+                "stock_name": stock_name or "",
+                "name": stock_name or "",
+                "industry": industry or "",
+                "market": market or "",
+                "area": area or "",
+                "float_market_cap": float_market_cap,
+                "open": daily.open,
+                "high": daily.high,
+                "low": daily.low,
+                "close": daily.close,
+                "volume": daily.volume,
+                "amount": daily.amount,
+                "amplitude": daily.amplitude,
+                "pct_chg": daily.pct_chg,
+                "price_change": daily.price_change,
+                "turnover": daily.turnover,
+                "ma5": ma5,
+                "ma10": ma10,
+                "ma20": ma20,
+                "ma30": ma30,
+                "ma60": ma60,
+                "vol_ma5": vol_ma5,
+                "vol_ma10": vol_ma10,
+                "amount_ma5": amount_ma5,
+                "amount_ma10": amount_ma10,
+                "turnover_ma5": turnover_ma5,
+                "turnover_ma10": turnover_ma10,
+            })
+
+        return data_list, total, trade_date
 
     def get_batch(self, db: Session, symbols: List[str]) -> List[models.StockBasic]:
         """批量查询"""
@@ -459,19 +702,49 @@ class StockDailyIndicatorCRUD:
             return db_obj
 
     def create_or_update_batch(
-        self, db: Session, items: List[dict]
+        self, db: Session, items: List[dict], batch_size: int = 500
     ) -> dict:
-        """批量创建或更新"""
+        """批量创建或更新（使用 INSERT ... ON DUPLICATE KEY UPDATE，分批写入）"""
+        if not items:
+            return {"success": 0, "failed": 0}
+
+        from sqlalchemy.dialects.mysql import insert
+
+        records = []
+        for item in items:
+            record = {
+                "symbol": item.pop("symbol"),
+                "trade_date": item.pop("trade_date"),
+                **item,
+            }
+            records.append(record)
+
+        total = len(records)
         success = 0
         failed = 0
-        for item in items:
+
+        for i in range(0, total, batch_size):
+            chunk = records[i:i + batch_size]
             try:
-                symbol = item.pop("symbol")
-                trade_date = item.pop("trade_date")
-                self.create_or_update(db, symbol, trade_date, item)
-                success += 1
-            except Exception:
-                failed += 1
+                upsert_stmt = insert(models.StockDailyIndicator).values(chunk)
+                update_dict = {
+                    k: upsert_stmt.inserted[k]
+                    for k in upsert_stmt.inserted.keys()
+                    if k not in ("id", "symbol", "trade_date", "created_at", "updated_at")
+                }
+                upsert_stmt = upsert_stmt.on_duplicate_key_update(**update_dict)
+                db.execute(upsert_stmt)
+                db.commit()
+                success += len(chunk)
+            except Exception as exc:
+                import logging, traceback
+                logging.getLogger(__name__).error(
+                    '[INDICATOR_BATCH] 批量写入失败 (batch %d-%d): %s', i, i + len(chunk), exc
+                )
+                logging.getLogger(__name__).error(traceback.format_exc())
+                db.rollback()
+                failed += len(chunk)
+
         return {"success": success, "failed": failed}
 
 
@@ -563,7 +836,7 @@ class PortfolioClosedCRUD:
         self,
         db: Session,
         page_num: int = 1,
-        page_size: int = 20,
+        page_size: int = 10,
     ) -> tuple[List[models.PortfolioClosed], int]:
         """分页查询"""
         total = db.query(func.count(models.PortfolioClosed.id)).scalar()
@@ -596,6 +869,106 @@ class PortfolioClosedCRUD:
 
 
 portfolio_closed_crud = PortfolioClosedCRUD()
+
+
+# ==================== 每日持仓明细 ====================
+
+
+class PortfolioDailyPositionCRUD:
+    """每日持仓明细 CRUD"""
+
+    def get_list(self, db: Session) -> List[models.PortfolioDailyPosition]:
+        """查询全部，按日期和代码排序"""
+        return (
+            db.query(models.PortfolioDailyPosition)
+            .order_by(
+                models.PortfolioDailyPosition.trade_date.asc(),
+                models.PortfolioDailyPosition.symbol.asc(),
+            )
+            .all()
+        )
+
+    def get_by_date(self, db: Session, trade_date: date) -> List[models.PortfolioDailyPosition]:
+        """根据日期查询当日所有持仓"""
+        return (
+            db.query(models.PortfolioDailyPosition)
+            .filter(models.PortfolioDailyPosition.trade_date == trade_date)
+            .all()
+        )
+
+    def get_latest_date(self, db: Session) -> Optional[date]:
+        """获取最新记录的日期"""
+        row = (
+            db.query(models.PortfolioDailyPosition.trade_date)
+            .order_by(models.PortfolioDailyPosition.trade_date.desc())
+            .first()
+        )
+        return row[0] if row else None
+
+    def create_batch(self, db: Session, items: List[dict]) -> int:
+        """批量创建，先清空再插入"""
+        db.query(models.PortfolioDailyPosition).delete()
+        db_objs = [models.PortfolioDailyPosition(**item) for item in items]
+        db.add_all(db_objs)
+        db.commit()
+        return len(db_objs)
+
+    def delete_all(self, db: Session) -> bool:
+        """清空全部记录"""
+        db.query(models.PortfolioDailyPosition).delete()
+        db.commit()
+        return True
+
+
+portfolio_daily_position_crud = PortfolioDailyPositionCRUD()
+
+
+# ==================== 每日资产汇总 ====================
+
+
+class PortfolioDailySummaryCRUD:
+    """每日资产汇总 CRUD"""
+
+    def get_list(self, db: Session) -> List[models.PortfolioDailySummary]:
+        """查询全部，按日期升序"""
+        return (
+            db.query(models.PortfolioDailySummary)
+            .order_by(models.PortfolioDailySummary.trade_date.asc())
+            .all()
+        )
+
+    def get_by_date(self, db: Session, trade_date: date) -> Optional[models.PortfolioDailySummary]:
+        """根据日期查询"""
+        return (
+            db.query(models.PortfolioDailySummary)
+            .filter(models.PortfolioDailySummary.trade_date == trade_date)
+            .first()
+        )
+
+    def get_latest(self, db: Session) -> Optional[models.PortfolioDailySummary]:
+        """获取最新一天的汇总"""
+        return (
+            db.query(models.PortfolioDailySummary)
+            .order_by(models.PortfolioDailySummary.trade_date.desc())
+            .first()
+        )
+
+    def create_batch(self, db: Session, items: List[dict]) -> int:
+        """批量创建，先清空再插入"""
+        db.query(models.PortfolioDailySummary).delete()
+        db_objs = [models.PortfolioDailySummary(**item) for item in items]
+        db.add_all(db_objs)
+        db.commit()
+        return len(db_objs)
+
+    def delete_all(self, db: Session) -> bool:
+        """清空全部记录"""
+        db.query(models.PortfolioDailySummary).delete()
+        db.commit()
+        return True
+
+
+portfolio_daily_summary_crud = PortfolioDailySummaryCRUD()
 
 
 # ==================== 持仓快照 ====================
@@ -728,7 +1101,7 @@ class StockFinancialIndicatorCRUD:
         from sqlalchemy import distinct
 
         # JOIN stock_basic 以支持 industry / market 过滤
-        stmt = db.query(models.StockFinancialIndicator).join(
+        stmt = db.query(models.StockFinancialIndicator, models.StockBasic).join(
             models.StockBasic,
             models.StockFinancialIndicator.symbol == models.StockBasic.symbol,
             isouter=True,
@@ -780,11 +1153,18 @@ class StockFinancialIndicatorCRUD:
 
         total = stmt.with_entities(func.count(distinct(models.StockFinancialIndicator.symbol))).scalar()
 
-        list_data = (
+        results = (
             stmt.offset((query.page_num - 1) * query.page_size)
             .limit(query.page_size)
             .all()
         )
+
+        list_data = []
+        for fin, basic in results:
+            fin.industry = basic.industry if basic else None
+            fin.market = basic.market if basic else None
+            list_data.append(fin)
+
         return list_data, total
 
     def create(self, db: Session, obj_in: schemas.StockFinancialIndicatorCreate) -> models.StockFinancialIndicator:
@@ -830,3 +1210,105 @@ class StockFinancialIndicatorCRUD:
 
 
 stock_financial_indicator_crud = StockFinancialIndicatorCRUD()
+
+
+# ==================== 同步任务日志 ====================
+
+
+class SyncJobLogCRUD:
+    """同步任务日志 CRUD"""
+
+    def create(self, db: Session, obj_in: schemas.SyncJobLogCreate) -> models.SyncJobLog:
+        db_obj = models.SyncJobLog(
+            job_type=obj_in.job_type,
+            trigger_type=obj_in.trigger_type,
+            status='running',
+            trade_date=obj_in.trade_date,
+        )
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def get_by_id(self, db: Session, id: int) -> Optional[models.SyncJobLog]:
+        return db.query(models.SyncJobLog).filter(models.SyncJobLog.id == id).first()
+
+    def get_list(
+        self,
+        db: Session,
+        query: schemas.SyncJobLogQuery,
+    ) -> tuple[List[models.SyncJobLog], int]:
+        from datetime import timedelta
+        from sqlalchemy import and_
+
+        filters = []
+        if query.job_type:
+            filters.append(models.SyncJobLog.job_type == query.job_type)
+        if query.status:
+            filters.append(models.SyncJobLog.status == query.status)
+        if query.trigger_type:
+            filters.append(models.SyncJobLog.trigger_type == query.trigger_type)
+        if query.days:
+            cutoff = datetime.now() - timedelta(days=query.days)
+            filters.append(models.SyncJobLog.started_at >= cutoff)
+
+        total = db.query(func.count(models.SyncJobLog.id))
+        if filters:
+            total = total.filter(and_(*filters))
+        total = total.scalar()
+
+        stmt = db.query(models.SyncJobLog)
+        if filters:
+            stmt = stmt.filter(and_(*filters))
+        stmt = stmt.order_by(models.SyncJobLog.started_at.desc()).offset(
+            (query.page_num - 1) * query.page_size
+        ).limit(query.page_size)
+        return stmt.all(), total
+
+    def update(self, db: Session, obj_in: schemas.SyncJobLogUpdate) -> Optional[models.SyncJobLog]:
+        db_obj = self.get_by_id(db, obj_in.id)
+        if not db_obj:
+            return None
+        update_data = obj_in.model_dump(exclude={'id'}, exclude_none=True)
+        for key, value in update_data.items():
+            setattr(db_obj, key, value)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def finish(
+        self,
+        db: Session,
+        log_id: int,
+        status: str,
+        success_count: int = 0,
+        failed_count: int = 0,
+        skipped_count: int = 0,
+        total_count: int = 0,
+        trade_date: Optional[str] = None,
+        error_message: Optional[str] = None,
+        extra_info: Optional[str] = None,
+    ) -> Optional[models.SyncJobLog]:
+        db_obj = self.get_by_id(db, log_id)
+        if not db_obj:
+            return None
+        db_obj.status = status
+        db_obj.ended_at = datetime.now()
+        if db_obj.started_at:
+            db_obj.duration_seconds = int((db_obj.ended_at - db_obj.started_at).total_seconds())
+        db_obj.success_count = success_count
+        db_obj.failed_count = failed_count
+        db_obj.skipped_count = skipped_count
+        db_obj.total_count = total_count
+        if trade_date is not None:
+            db_obj.trade_date = trade_date
+        if error_message is not None:
+            db_obj.error_message = error_message
+        if extra_info is not None:
+            db_obj.extra_info = extra_info
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+
+sync_job_log_crud = SyncJobLogCRUD()

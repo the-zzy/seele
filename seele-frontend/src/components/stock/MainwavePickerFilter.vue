@@ -33,12 +33,24 @@ function onReset () {
         <input v-model="form.name" type="text" placeholder="输入名称" @keyup.enter="onSearch" />
       </label>
       <label class="field">
-        <span class="field-label">行业</span>
-        <input v-model="form.industry" type="text" placeholder="输入行业" @keyup.enter="onSearch" />
+        <span class="field-label">交易日</span>
+        <input v-model="form.tradeDate" type="date" @change="onSearch" />
       </label>
       <label class="field">
-        <span class="field-label">地区</span>
-        <input v-model="form.area" type="text" placeholder="输入地区" @keyup.enter="onSearch" />
+        <span class="field-label">市值≥(亿)</span>
+        <input v-model.number="form.floatMarketCapMin" type="number" placeholder="200" @keyup.enter="onSearch" />
+      </label>
+      <label class="field">
+        <span class="field-label">股价≤(元)</span>
+        <input v-model.number="form.closeMax" type="number" placeholder="300" @keyup.enter="onSearch" />
+      </label>
+      <label class="field">
+        <span class="field-label">换手≥(%)</span>
+        <input v-model.number="form.avgTurnoverMin" type="number" placeholder="2" @keyup.enter="onSearch" />
+      </label>
+      <label class="field">
+        <span class="field-label">成交额≥(亿)</span>
+        <input v-model.number="form.avgAmountMin" type="number" placeholder="2" @keyup.enter="onSearch" />
       </label>
     </div>
 
@@ -72,7 +84,7 @@ function onReset () {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 160px;
+  min-width: 140px;
   flex: 1;
 
   .field-label {
@@ -81,7 +93,7 @@ function onReset () {
     color: var(--text-secondary);
     white-space: nowrap;
     flex-shrink: 0;
-    width: 28px;
+    width: auto;
     text-align: right;
   }
 

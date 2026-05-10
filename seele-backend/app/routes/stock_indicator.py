@@ -7,9 +7,13 @@
 from datetime import date
 from typing import List, Optional
 
+import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
+from ta.momentum import RSIIndicator
+from ta.trend import MACD
+from ta.volatility import BollingerBands
 
 from app import crud, models, schemas
 from app.database import get_db
@@ -55,6 +59,7 @@ def _build_indicator_for_symbol(
     )
 
     if not rows:
+        print(f'[_build_indicator] {symbol} rows empty, trade_date={trade_date}')
         return None
 
     closes = [r.close for r in rows if r.close is not None]
@@ -63,9 +68,10 @@ def _build_indicator_for_symbol(
     turnovers = [r.turnover for r in rows if r.turnover is not None]
 
     if not closes:
+        print(f'[_build_indicator] {symbol} closes empty, rows={len(rows)}')
         return None
 
-    return {
+    result = {
         "ma5": _compute_ma(closes, 5),
         "ma10": _compute_ma(closes, 10),
         "ma20": _compute_ma(closes, 20),
@@ -77,7 +83,80 @@ def _build_indicator_for_symbol(
         "amount_ma10": int(_compute_avg(amounts, 10)) if len(amounts) >= 10 else None,
         "turnover_ma5": _compute_avg(turnovers, 5) if len(turnovers) >= 5 else None,
         "turnover_ma10": _compute_avg(turnovers, 10) if len(turnovers) >= 10 else None,
+        "macd_dif": None,
+        "macd_dea": None,
+        "macd_hist": None,
+        "rsi_6": None,
+        "rsi_12": None,
+        "rsi_24": None,
+        "kdj_k": None,
+        "kdj_d": None,
+        "kdj_j": None,
+        "boll_upper": None,
+        "boll_middle": None,
+        "boll_lower": None,
     }
+
+    # 使用 ta 库计算高级指标（需要至少 26 条数据）
+    if len(closes) >= 26:
+        df = pd.DataFrame({
+            'close': closes[::-1],  # 转为升序
+            'high': [r.high for r in rows[::-1] if r.high is not None],
+            'low': [r.low for r in rows[::-1] if r.low is not None],
+        })
+
+        if len(df) >= 26 and df['close'].notna().all():
+            # MACD
+            try:
+                macd = MACD(close=df['close'], window_slow=26, window_fast=12, window_sign=9)
+                result['macd_dif'] = float(round(macd.macd().iloc[-1], 4))
+                result['macd_dea'] = float(round(macd.macd_signal().iloc[-1], 4))
+                result['macd_hist'] = float(round(macd.macd_diff().iloc[-1], 4))
+            except Exception:
+                pass
+
+            # RSI
+            try:
+                rsi_6 = RSIIndicator(close=df['close'], window=6)
+                rsi_12 = RSIIndicator(close=df['close'], window=12)
+                rsi_24 = RSIIndicator(close=df['close'], window=24)
+                result['rsi_6'] = float(round(rsi_6.rsi().iloc[-1], 2))
+                result['rsi_12'] = float(round(rsi_12.rsi().iloc[-1], 2))
+                result['rsi_24'] = float(round(rsi_24.rsi().iloc[-1], 2))
+            except Exception:
+                pass
+
+            # BOLL
+            try:
+                bb = BollingerBands(close=df['close'], window=20, window_dev=2)
+                result['boll_upper'] = float(round(bb.bollinger_hband().iloc[-1], 2))
+                result['boll_middle'] = float(round(bb.bollinger_mavg().iloc[-1], 2))
+                result['boll_lower'] = float(round(bb.bollinger_lband().iloc[-1], 2))
+            except Exception:
+                pass
+
+            # KDJ
+            try:
+                if len(df) >= 9 and df['high'].notna().all() and df['low'].notna().all():
+                    low_list = df['low'].rolling(window=9, min_periods=9).min()
+                    high_list = df['high'].rolling(window=9, min_periods=9).max()
+                    rsv = (df['close'] - low_list) / (high_list - low_list) * 100
+                    k = rsv.ewm(com=2, adjust=False).mean()
+                    d = k.ewm(com=2, adjust=False).mean()
+                    j = 3 * k - 2 * d
+                    result['kdj_k'] = float(round(k.iloc[-1], 2))
+                    result['kdj_d'] = float(round(d.iloc[-1], 2))
+                    result['kdj_j'] = float(round(j.iloc[-1], 2))
+            except Exception:
+                pass
+
+    # 将 NaN 替换为 None，避免 MySQL 写入失败
+    for key in list(result.keys()):
+        val = result[key]
+        if val is not None and isinstance(val, float) and (val != val):  # NaN 的唯一特性：NaN != NaN
+            result[key] = None
+
+    return result
 
 
 # 3.0 计算指定日期的指标数据
@@ -98,13 +177,14 @@ def compute_indicators(
     if not exists:
         raise HTTPException(status_code=404, detail=f"交易日期 {trade_date} 无数据")
 
-    # 获取该日期所有主板股票代码
-    q = (
+    # 获取该日期所有股票代码
+    symbols = [
+        row[0] for row in
         db.query(models.StockDaily.symbol)
-        .join(models.StockBasic, models.StockDaily.symbol == models.StockBasic.symbol)
         .filter(models.StockDaily.trade_date == formatted_date)
-    )
-    symbols = [row[0] for row in apply_main_board_filter(q).distinct().all()]
+        .distinct()
+        .all()
+    ]
 
     if not symbols:
         return success({
