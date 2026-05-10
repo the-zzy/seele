@@ -115,125 +115,17 @@ function getChgBgClass (val) {
 </template>
 
 <style scoped lang="scss">
-.table-section {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  background: var(--bg-secondary);
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  margin-top: 12px;
-  position: relative;
-
-  &::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    border-radius: 4px;
-    box-shadow: var(--shadow-soft);
-  }
-}
-
-.state {
-  text-align: center;
-  padding: 60px 20px;
-  font-family: var(--font-body);
-  font-size: 13px;
-  color: var(--text-faint);
-}
-
 .stock-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-family: var(--font-mono);
-  font-size: 14px;
-  font-variant-numeric: tabular-nums;
-
-  th,
-  td {
-    padding: 11px 13px;
-    text-align: right;
-    border-bottom: 1px solid var(--rule);
-    white-space: nowrap;
-  }
-
   th {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    background: var(--bg-primary);
-    font-family: var(--font-mono);
-    font-weight: 600;
-    font-size: 12px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--text-faint);
-    border-bottom: 1px solid var(--rule);
-
-    &.sortable {
-      cursor: pointer;
-      user-select: none;
-      transition: color 0.15s;
-
-      &:hover { color: var(--text-secondary); }
-
-      .sort-icon {
-        margin-left: 6px;
-        font-size: 11px;
-        opacity: 0.5;
-      }
-    }
-
-    /* 分组色调，让指标块区分开 */
     &.g-ma { color: var(--accent); }
-    &.g-vol { color: #d97757; }   /* 暖橙：量能 */
-    &.g-turn { color: #b46cd8; }  /* 紫：换手 */
-  }
-
-  tbody tr {
-    cursor: pointer;
-    transition: background 0.12s;
-
-    &:hover { background: var(--bg-tertiary); }
+    &.g-vol { color: #d97757; }
+    &.g-turn { color: #b46cd8; }
   }
 
   td {
-    color: var(--text-primary);
-
-    &.td-center { text-align: center; }
-
-    /* 指标分组的细微背景区分 */
     &.g-ma { background: rgba(59, 130, 246, 0.025); }
     &.g-vol { background: rgba(217, 119, 87, 0.025); }
     &.g-turn { background: rgba(180, 108, 216, 0.025); }
-  }
-
-  .code {
-    text-align: left;
-    font-weight: 600;
-    color: var(--text-primary);
-    letter-spacing: 0.04em;
-  }
-
-  .name {
-    text-align: left;
-    font-family: var(--font-body);
-    font-weight: 500;
-    color: var(--text-primary);
-  }
-
-  .up { color: var(--up); }
-  .down { color: var(--down); }
-
-  .up-bg {
-    color: var(--up);
-    box-shadow: inset 2px 0 0 var(--up);
-  }
-
-  .down-bg {
-    color: var(--down);
-    box-shadow: inset 2px 0 0 var(--down);
   }
 }
 </style>

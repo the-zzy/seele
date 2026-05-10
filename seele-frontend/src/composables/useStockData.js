@@ -12,7 +12,7 @@ export function useStockData () {
   const stockList = ref([])
   const total = ref(0)
   const pageNum = ref(1)
-  const pageSize = ref(100)
+  const pageSize = ref(10)
 
   // 总页数
   const totalPages = computed(() => Math.ceil(total.value / pageSize.value))

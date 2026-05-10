@@ -3,12 +3,10 @@
 """
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app import crud, models, schemas
 from app.database import get_db
-from app.filters import build_exclude_sql
 from app.response import success
 
 router = APIRouter(prefix="/financial", tags=["财务指标"])
@@ -42,6 +40,8 @@ def get_financial_list(
         result_list.append({
             "symbol": item.symbol,
             "name": item.name,
+            "industry": getattr(item, "industry", None),
+            "market": getattr(item, "market", None),
             "report_date": item.report_date.strftime("%Y-%m-%d") if item.report_date else None,
             "net_profit": item.net_profit,
             "net_profit_yoy": item.net_profit_yoy,
@@ -103,100 +103,3 @@ def get_financial_by_symbol(
     })
 
 
-@router.post("/picker")
-def post_financial_picker(
-    query: schemas.FinancialPickerQuery,
-    db: Session = Depends(get_db),
-):
-    """财务选股 - 基于盈利能力与成长性指标筛选"""
-    page_size = min(query.page_size, 100)
-    exclude_sql = build_exclude_sql(query)
-
-    count_sql = f"""
-    SELECT COUNT(*)
-    FROM stock_financial_indicator fi
-    JOIN stock_basic sb ON fi.symbol = sb.symbol
-    WHERE fi.roe >= :roe_min
-        AND fi.gross_profit_ratio >= :gross_profit_ratio_min
-        AND fi.net_profit_yoy >= :net_profit_yoy_min
-        AND fi.revenue_yoy >= :revenue_yoy_min
-        AND fi.debt_ratio <= :debt_ratio_max
-        {exclude_sql}
-        {("AND fi.net_profit_ratio >= :net_profit_ratio_min" if query.net_profit_ratio_min is not None else "")}
-    """
-
-    list_sql = f"""
-    SELECT
-        fi.symbol,
-        fi.name,
-        sb.industry,
-        sb.market,
-        fi.report_date,
-        fi.net_profit,
-        fi.net_profit_yoy,
-        fi.total_revenue,
-        fi.revenue_yoy,
-        fi.gross_profit_ratio,
-        fi.net_profit_ratio,
-        fi.roe,
-        fi.roe_diluted,
-        fi.eps,
-        fi.bps,
-        fi.debt_ratio,
-        fi.operate_cash_flow
-    FROM stock_financial_indicator fi
-    JOIN stock_basic sb ON fi.symbol = sb.symbol
-    WHERE fi.roe >= :roe_min
-        AND fi.gross_profit_ratio >= :gross_profit_ratio_min
-        AND fi.net_profit_yoy >= :net_profit_yoy_min
-        AND fi.revenue_yoy >= :revenue_yoy_min
-        AND fi.debt_ratio <= :debt_ratio_max
-        {exclude_sql}
-        {("AND fi.net_profit_ratio >= :net_profit_ratio_min" if query.net_profit_ratio_min is not None else "")}
-    ORDER BY {query.sort_field} {query.sort_order.upper()}
-    LIMIT :limit OFFSET :offset
-    """
-
-    params = {
-        "roe_min": query.roe_min,
-        "gross_profit_ratio_min": query.gross_profit_ratio_min,
-        "net_profit_yoy_min": query.net_profit_yoy_min,
-        "revenue_yoy_min": query.revenue_yoy_min,
-        "debt_ratio_max": query.debt_ratio_max,
-        "limit": page_size,
-        "offset": (query.page_num - 1) * page_size,
-    }
-    if query.net_profit_ratio_min is not None:
-        params["net_profit_ratio_min"] = query.net_profit_ratio_min
-
-    total_result = db.execute(text(count_sql), params).scalar() or 0
-    rows = db.execute(text(list_sql), params).all()
-
-    result_list = []
-    for row in rows:
-        result_list.append({
-            "symbol": row.symbol,
-            "name": row.name,
-            "industry": row.industry,
-            "market": row.market,
-            "report_date": row.report_date.strftime("%Y-%m-%d") if row.report_date else None,
-            "net_profit": row.net_profit,
-            "net_profit_yoy": row.net_profit_yoy,
-            "total_revenue": row.total_revenue,
-            "revenue_yoy": row.revenue_yoy,
-            "gross_profit_ratio": row.gross_profit_ratio,
-            "net_profit_ratio": row.net_profit_ratio,
-            "roe": row.roe,
-            "roe_diluted": row.roe_diluted,
-            "eps": row.eps,
-            "bps": row.bps,
-            "debt_ratio": row.debt_ratio,
-            "operate_cash_flow": row.operate_cash_flow,
-        })
-
-    return success({
-        "total": total_result,
-        "page_num": query.page_num,
-        "page_size": page_size,
-        "list": result_list,
-    })

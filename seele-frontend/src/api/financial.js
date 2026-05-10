@@ -14,7 +14,7 @@ export const financialApi = {
       method: 'get',
       params: {
         page_num: 1,
-        page_size: 20,
+        page_size: 10,
         ...params
       }
     })
@@ -28,18 +28,6 @@ export const financialApi = {
     return request({
       url: `/financial/${symbol}`,
       method: 'get'
-    })
-  },
-
-  /**
-   * 财务选股
-   * @param {Object} data
-   */
-  picker (data = {}) {
-    return request({
-      url: '/financial/picker',
-      method: 'post',
-      data
     })
   },
 

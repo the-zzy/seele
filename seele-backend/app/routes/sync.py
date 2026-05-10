@@ -24,6 +24,7 @@ from app import crud, models, schemas
 from app.database import SessionLocal, get_db
 from app.filters import get_baostock_code
 from app.response import success
+from app.routes.stock_indicator import _build_indicator_for_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -286,8 +287,12 @@ def post_sync_daily(
     # 获取所有股票代码（仅沪深主板且非ST）
     all_stocks = crud.stock_basic_crud.get_list(
         db,
-        schemas.StockBasicQuery(page_num=1, page_size=10000, market="主板", exclude_st=True)
+        schemas.StockBasicQuery(page_num=1, page_size=10000)
     )[0]
+
+    log = crud.sync_job_log_crud.create(
+        db, schemas.SyncJobLogCreate(job_type='daily', trigger_type='manual')
+    )
 
     success_count = 0
     failed_count = 0
@@ -302,6 +307,13 @@ def post_sync_daily(
         else:
             failed_count += 1
         time.sleep(0.03)
+
+    crud.sync_job_log_crud.finish(
+        db, log.id, 'success',
+        success_count=success_count,
+        failed_count=failed_count,
+        total_count=len(all_stocks),
+    )
 
     return success(f"同步完成，成功: {success_count}, 失败: {failed_count}")
 
@@ -354,7 +366,7 @@ def _sync_daily_bulk(trade_date: str, source: str = 'baostock', task_id: str | N
     try:
         all_stocks = crud.stock_basic_crud.get_list(
             db,
-            schemas.StockBasicQuery(page_num=1, page_size=10000, market="主板", exclude_st=True)
+            schemas.StockBasicQuery(page_num=1, page_size=10000)
         )[0]
     finally:
         db.close()
@@ -508,11 +520,11 @@ def get_sync_compare(
     # 获取沪深主板且非ST的股票代码列表
     all_stocks = crud.stock_basic_crud.get_list(
         db,
-        schemas.StockBasicQuery(page_num=1, page_size=10000, market="主板", exclude_st=True)
+        schemas.StockBasicQuery(page_num=1, page_size=10000)
     )[0]
     all_symbols = {s.symbol for s in all_stocks}
 
-    # 获取数据库数据（仅保留主板非ST）
+    # 获取数据库数据
     db_data = crud.stock_daily_crud.get_by_date(db, trade_date)
     db_data = [d for d in db_data if d.symbol in all_symbols]
     db_count = len(db_data)
@@ -636,7 +648,7 @@ def _parse_list_date(val) -> Optional[date]:
         return None
 
 
-def _sync_stock_basic_from_akshare(db: Session) -> dict:
+def _sync_stock_basic_from_akshare(db: Session, task_id: str | None = None, total_estimate: int = 5500) -> dict:
     """从 AkShare 同步股票基础信息（上交所 + 深交所 + 北交所）"""
     import akshare as ak
 
@@ -704,6 +716,8 @@ def _sync_stock_basic_from_akshare(db: Session) -> dict:
 
     records = [schemas.StockBasicCreate(**d) for d in records_map.values()]
     result = crud.stock_basic_crud.upsert_batch(db, records)
+    if task_id:
+        _update_task_progress(task_id, total_estimate, total_estimate)
     return {
         'total': len(records),
         'created': result['created'],
@@ -711,7 +725,7 @@ def _sync_stock_basic_from_akshare(db: Session) -> dict:
     }
 
 
-def _sync_stock_basic_from_baostock(db: Session) -> dict:
+def _sync_stock_basic_from_baostock(db: Session, task_id: str | None = None, total_estimate: int = 5500) -> dict:
     """从 Baostock 同步股票基础信息"""
     lg = bs.login()
     if lg.error_code != '0':
@@ -765,6 +779,8 @@ def _sync_stock_basic_from_baostock(db: Session) -> dict:
 
         # 4. 批量写入
         result = crud.stock_basic_crud.upsert_batch(db, records)
+        if task_id:
+            _update_task_progress(task_id, total_estimate, total_estimate)
         return {
             'total': len(records),
             'created': result['created'],
@@ -774,23 +790,64 @@ def _sync_stock_basic_from_baostock(db: Session) -> dict:
         bs.logout()
 
 
-# 3.5 同步股票基础信息
+def _run_sync_stock_basic_bg(task_id: str, log_id: int) -> None:
+    """后台执行股票基础信息同步任务"""
+    db = SessionLocal()
+    try:
+        from sqlalchemy import func
+        total_estimate = db.query(func.count(models.StockBasic.id)).scalar() or 5500
+        _update_task_progress(task_id, 0, total_estimate)
+        try:
+            result = _sync_stock_basic_from_akshare(db, task_id=task_id, total_estimate=total_estimate)
+            source = 'akshare'
+            extra = f'source={source}'
+        except Exception as exc:
+            result = _sync_stock_basic_from_baostock(db, task_id=task_id, total_estimate=total_estimate)
+            source = 'baostock'
+            extra = f'source={source}, fallback_reason={str(exc)[:200]}'
+
+        crud.sync_job_log_crud.finish(
+            db, log_id, 'success',
+            success_count=result.get('updated', 0) + result.get('created', 0),
+            total_count=result.get('total', 0),
+            extra_info=extra,
+        )
+        _update_task_progress(task_id, total_estimate, total_estimate)
+        _finish_task(task_id, result={
+            'summary': f"同步完成（{source}），共 {result['total']} 条，新增 {result['created']} 条，更新 {result['updated']} 条",
+            **result,
+            'log_id': log_id,
+        })
+    except Exception as exc:
+        logger.error('[SYNC_STOCK_BASIC_BG] 任务异常, log_id=%s, error=%s', log_id, exc)
+        logger.error(traceback.format_exc())
+        crud.sync_job_log_crud.finish(
+            db, log_id, 'failed', error_message=str(exc)[:2000]
+        )
+        _finish_task(task_id, error=str(exc))
+    finally:
+        db.close()
+
+
+# 3.5 同步股票基础信息（后台异步版）
 @router.post("/stock-basic")
 def post_sync_stock_basic(
     db: Session = Depends(get_db),
 ):
     """同步股票基础信息（优先 akshare，失败回退 baostock）"""
-    try:
-        result = _sync_stock_basic_from_akshare(db)
-        result['source'] = 'akshare'
-    except Exception as exc:
-        result = _sync_stock_basic_from_baostock(db)
-        result['source'] = 'baostock'
-        result['fallback_reason'] = str(exc)
-
+    log = crud.sync_job_log_crud.create(
+        db, schemas.SyncJobLogCreate(job_type='stock_basic', trigger_type='manual')
+    )
+    task_id = str(uuid.uuid4())
+    _register_task(task_id, "stock_basic")
+    t = threading.Thread(target=_run_sync_stock_basic_bg, args=(task_id, log.id), daemon=True)
+    t.start()
+    logger.info('[SYNC_STOCK_BASIC_API] 已提交后台任务, log_id=%s', log.id)
     return success({
-        'summary': f"同步完成（{result['source']}），共 {result['total']} 条，新增 {result['created']} 条，更新 {result['updated']} 条",
-        **result,
+        "task_id": task_id,
+        "log_id": log.id,
+        "status": "running",
+        "hint": "股票基础信息同步任务已提交后台执行，约需 10-30 秒，请稍后刷新页面查看",
     })
 
 
@@ -822,8 +879,8 @@ def _parse_financial_value(val):
 
 
 def _sync_financial_for_symbol(symbol: str, name: str) -> Optional[dict]:
-    """同步单只股票财务指标，返回解析后的数据字典"""
-    try:
+    """同步单只股票财务指标，返回解析后的数据字典（带 15 秒超时）"""
+    def _fetch():
         import akshare as ak
         df = ak.stock_financial_abstract_ths(symbol, indicator='按报告期')
         if df is None or df.empty:
@@ -852,6 +909,14 @@ def _sync_financial_for_symbol(symbol: str, name: str) -> Optional[dict]:
             'total_equity': _parse_financial_value(row.get('所有者权益（或股东权益）合计')),
             'operate_cash_flow': _parse_financial_value(row.get('经营活动产生的现金流量净额')),
         }
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_fetch)
+            return future.result(timeout=15)
+    except concurrent.futures.TimeoutError:
+        logger.warning('[SYNC_FINANCIAL] 获取 %s 财务数据超时', symbol)
+        return None
     except Exception:
         return None
 
@@ -970,21 +1035,64 @@ def post_sync_financial(
     db: Session = Depends(get_db),
 ):
     """同步全部股票财务指标（后台异步版）"""
+    log = crud.sync_job_log_crud.create(
+        db, schemas.SyncJobLogCreate(job_type='financial', trigger_type='manual')
+    )
     try:
         task_id = str(uuid.uuid4())
         _register_task(task_id, "financial")
-        t = threading.Thread(target=_run_sync_financial_bg, args=(task_id,), daemon=True)
+        # 在后台线程中执行，但需要把 log_id 传进去以便更新
+        def _run_with_log():
+            db2 = SessionLocal()
+            try:
+                result = _sync_financial_bulk()
+                crud.sync_job_log_crud.finish(
+                    db2, log.id, 'success',
+                    success_count=result.get('upserted', 0),
+                    failed_count=result.get('failed', 0),
+                    total_count=result.get('total_stocks', 0),
+                    extra_info='source=akshare_ths',
+                )
+                _finish_task(task_id, result=result)
+            except Exception as exc:
+                logger.error('[SYNC_FINANCIAL_BG] 任务异常, log_id=%s, error=%s', log.id, exc)
+                logger.error(traceback.format_exc())
+                crud.sync_job_log_crud.finish(
+                    db2, log.id, 'failed', error_message=str(exc)[:2000]
+                )
+                _finish_task(task_id, error=str(exc))
+            finally:
+                db2.close()
+
+        t = threading.Thread(target=_run_with_log, daemon=True)
         t.start()
-        logger.info('[SYNC_FINANCIAL_API] 已提交后台任务, task_id=%s', task_id)
+        logger.info('[SYNC_FINANCIAL_API] 已提交后台任务, log_id=%s', log.id)
         return success({
             "task_id": task_id,
+            "log_id": log.id,
             "status": "running",
             "hint": "财务指标同步任务已提交后台执行，约需 3-5 分钟，请稍后刷新页面查看",
         })
     except Exception as exc:
         logger.error('[SYNC_FINANCIAL_API] 提交任务失败: %s', exc)
         logger.error(traceback.format_exc())
+        crud.sync_job_log_crud.finish(db, log.id, 'failed', error_message=str(exc)[:2000])
         raise
+
+
+@router.get("/job-logs")
+def get_sync_job_logs(
+    days: int = Query(5, description="最近N天"),
+    job_type: Optional[str] = Query(None, description="任务类型过滤"),
+    db: Session = Depends(get_db),
+):
+    """查询同步任务执行日志"""
+    query = schemas.SyncJobLogQuery(page_num=1, page_size=1000, days=days, job_type=job_type)
+    list_data, total = crud.sync_job_log_crud.get_list(db, query)
+    return success({
+        "list": list_data,
+        "total": total,
+    })
 
 
 # 3.6.1 SSE 实时推送财务指标同步进度
@@ -1057,4 +1165,287 @@ def post_sync_financial_by_symbol(
         "symbol": symbol,
         "report_date": data.get("report_date").isoformat() if data.get("report_date") else None,
         "summary": f"同步完成: {symbol}",
+    })
+
+
+# 3.7.1 后台执行指标计算任务
+def _run_sync_indicator_bg(task_id: str, trade_date: str, log_id: int) -> None:
+    """后台执行日线指标计算任务（基于全A股股票列表）"""
+    db = SessionLocal()
+    try:
+        formatted_date = trade_date.replace("-", "")
+
+        # 验证交易日期是否存在
+        exists = (
+            db.query(models.StockDaily)
+            .filter(models.StockDaily.trade_date == formatted_date)
+            .first()
+        )
+        if not exists:
+            msg = f"交易日期 {trade_date} 无数据"
+            crud.sync_job_log_crud.finish(db, log_id, 'failed', error_message=msg)
+            _finish_task(task_id, error=msg)
+            return
+
+        # 从 stock_basic 获取全A股列表，确保 total 是全部股票数
+        all_stocks = crud.stock_basic_crud.get_list(
+            db, schemas.StockBasicQuery(page_num=1, page_size=10000)
+        )[0]
+        symbols = [s.symbol for s in all_stocks]
+        total = len(symbols)
+
+        if total == 0:
+            crud.sync_job_log_crud.finish(
+                db, log_id, 'success',
+                success_count=0, failed_count=0, total_count=0,
+                trade_date=formatted_date,
+                extra_info=f'no symbols for {trade_date}',
+            )
+            _finish_task(task_id, result={"trade_date": trade_date, "total": 0, "success": 0, "failed": 0})
+            return
+
+        _update_task_progress(task_id, 0, total)
+        success_count = 0
+        failed_count = 0
+        items = []
+
+        for i, symbol in enumerate(symbols, 1):
+            indicator_data = _build_indicator_for_symbol(db, symbol, formatted_date)
+            if indicator_data is None:
+                failed_count += 1
+            else:
+                indicator_data["symbol"] = symbol
+                indicator_data["trade_date"] = formatted_date
+                items.append(indicator_data)
+                success_count += 1
+
+            if i % 50 == 0:
+                _update_task_progress(task_id, i, total)
+
+        if items:
+            result = crud.stock_daily_indicator_crud.create_or_update_batch(db, items)
+            success_count = result['success']
+            failed_count = result['failed']
+
+        _update_task_progress(task_id, total, total)
+        crud.sync_job_log_crud.finish(
+            db, log_id, 'success',
+            success_count=success_count,
+            failed_count=failed_count,
+            total_count=total,
+            trade_date=formatted_date,
+            extra_info=f'indicators for {trade_date}',
+        )
+        _finish_task(task_id, result={
+            "trade_date": trade_date,
+            "total": total,
+            "success": success_count,
+            "failed": failed_count,
+        })
+    except Exception as exc:
+        logger.error('[SYNC_INDICATOR_BG] 任务异常, log_id=%s, error=%s', log_id, exc)
+        logger.error(traceback.format_exc())
+        crud.sync_job_log_crud.finish(
+            db, log_id, 'failed', error_message=str(exc)[:2000]
+        )
+        _finish_task(task_id, error=str(exc))
+    finally:
+        db.close()
+
+
+# 3.7.2 计算指定交易日指标（后台异步版）
+@router.post("/indicator")
+def post_sync_indicator(
+    trade_date: str = Query(..., description="交易日期，格式 YYYY-MM-DD"),
+    db: Session = Depends(get_db),
+):
+    """计算指定交易日所有主板的日线指标（后台异步版）"""
+    log = crud.sync_job_log_crud.create(
+        db, schemas.SyncJobLogCreate(job_type='indicator', trigger_type='manual', trade_date=trade_date.replace("-", ""))
+    )
+    task_id = str(uuid.uuid4())
+    _register_task(task_id, trade_date)
+    t = threading.Thread(target=_run_sync_indicator_bg, args=(task_id, trade_date, log.id), daemon=True)
+    t.start()
+    logger.info('[SYNC_INDICATOR_API] 已提交后台任务, log_id=%s, trade_date=%s', log.id, trade_date)
+    return success({
+        "task_id": task_id,
+        "log_id": log.id,
+        "status": "running",
+        "hint": "指标计算任务已提交后台执行，约需 1-3 分钟，请稍后刷新页面查看",
+    })
+
+
+# 3.8 查询最近交易日
+@router.get("/latest-trade-date")
+def get_latest_trade_date(db: Session = Depends(get_db)):
+    """查询数据库中最新一个交易日"""
+    dates = crud.stock_daily_crud.get_trade_dates(db)
+    if dates:
+        return success(str(dates[0]))
+    return success(None)
+
+
+# 3.9 查询数据库概览状态
+@router.get("/db-status")
+def get_db_status(db: Session = Depends(get_db)):
+    """查询数据库各表数据概览"""
+    from sqlalchemy import func
+
+    stock_basic_count = db.query(func.count(models.StockBasic.id)).scalar()
+    stock_daily_count = db.query(func.count(models.StockDaily.id)).scalar()
+    indicator_count = db.query(func.count(models.StockDailyIndicator.id)).scalar()
+    financial_count = db.query(func.count(models.StockFinancialIndicator.symbol)).scalar()
+    sync_log_count = db.query(func.count(models.SyncJobLog.id)).scalar()
+
+    latest_trade_date = db.query(models.StockDaily.trade_date).order_by(
+        models.StockDaily.trade_date.desc()
+    ).first()
+    latest_indicator_date = db.query(models.StockDailyIndicator.trade_date).order_by(
+        models.StockDailyIndicator.trade_date.desc()
+    ).first()
+
+    return success({
+        "stock_basic_count": stock_basic_count,
+        "stock_daily_count": stock_daily_count,
+        "indicator_count": indicator_count,
+        "financial_count": financial_count,
+        "sync_log_count": sync_log_count,
+        "latest_trade_date": latest_trade_date[0].isoformat() if latest_trade_date else None,
+        "latest_indicator_date": latest_indicator_date[0].isoformat() if latest_indicator_date else None,
+    })
+
+
+# 3.10 查询详细同步状态
+@router.get("/detailed-status")
+def get_detailed_status(db: Session = Depends(get_db)):
+    """查询同步任务详细数据库状态"""
+    from sqlalchemy import func
+
+    # 1. 股票基本信息统计
+    total_basic = db.query(func.count(models.StockBasic.id)).scalar() or 0
+    st_count = db.query(func.count(models.StockBasic.id)).filter(
+        models.StockBasic.name.like('%ST%')
+    ).scalar() or 0
+    delisted_count = db.query(func.count(models.StockBasic.id)).filter(
+        models.StockBasic.name.like('%退%')
+    ).scalar() or 0
+    last_basic_sync = (
+        db.query(models.SyncJobLog.started_at)
+        .filter(models.SyncJobLog.job_type == 'stock_basic')
+        .order_by(models.SyncJobLog.started_at.desc())
+        .first()
+    )
+    market_dist = (
+        db.query(models.StockBasic.market, func.count(models.StockBasic.id))
+        .group_by(models.StockBasic.market)
+        .all()
+    )
+
+    # 2. 最近5个交易日的日线/指标状态
+    trade_dates = (
+        db.query(models.StockDaily.trade_date)
+        .distinct()
+        .order_by(models.StockDaily.trade_date.desc())
+        .limit(5)
+        .all()
+    )
+    daily_status = []
+    for (td,) in trade_dates:
+        td_str = td.strftime('%Y%m%d')
+        daily_cnt = db.query(func.count(models.StockDaily.id)).filter(
+            models.StockDaily.trade_date == td
+        ).scalar() or 0
+        indicator_cnt = db.query(func.count(models.StockDailyIndicator.id)).filter(
+            models.StockDailyIndicator.trade_date == td
+        ).scalar() or 0
+        daily_log = (
+            db.query(
+                models.SyncJobLog.status,
+                models.SyncJobLog.success_count,
+                models.SyncJobLog.failed_count,
+                models.SyncJobLog.total_count,
+                models.SyncJobLog.started_at,
+            )
+            .filter(
+                models.SyncJobLog.job_type == 'daily',
+                models.SyncJobLog.trade_date == td_str,
+            )
+            .order_by(models.SyncJobLog.started_at.desc())
+            .first()
+        )
+        indicator_log = (
+            db.query(
+                models.SyncJobLog.status,
+                models.SyncJobLog.success_count,
+                models.SyncJobLog.failed_count,
+                models.SyncJobLog.total_count,
+                models.SyncJobLog.started_at,
+            )
+            .filter(
+                models.SyncJobLog.job_type == 'indicator',
+                models.SyncJobLog.trade_date == td_str,
+            )
+            .order_by(models.SyncJobLog.started_at.desc())
+            .first()
+        )
+        daily_status.append({
+            'date': td.isoformat(),
+            'daily_count': daily_cnt,
+            'indicator_count': indicator_cnt,
+            'daily_log': {
+                'status': daily_log[0],
+                'success': daily_log[1],
+                'failed': daily_log[2],
+                'total': daily_log[3],
+                'started_at': daily_log[4].isoformat() if daily_log[4] else None,
+            } if daily_log else None,
+            'indicator_log': {
+                'status': indicator_log[0],
+                'success': indicator_log[1],
+                'failed': indicator_log[2],
+                'total': indicator_log[3],
+                'started_at': indicator_log[4].isoformat() if indicator_log[4] else None,
+            } if indicator_log else None,
+        })
+
+    # 3. 财报指标统计
+    financial_total = db.query(func.count(models.StockFinancialIndicator.symbol)).scalar() or 0
+    last_financial_sync = (
+        db.query(models.SyncJobLog.started_at)
+        .filter(models.SyncJobLog.job_type == 'financial')
+        .order_by(models.SyncJobLog.started_at.desc())
+        .first()
+    )
+    report_dist = (
+        db.query(
+            models.StockFinancialIndicator.report_date,
+            func.count(models.StockFinancialIndicator.symbol),
+        )
+        .filter(models.StockFinancialIndicator.report_date.isnot(None))
+        .group_by(models.StockFinancialIndicator.report_date)
+        .order_by(models.StockFinancialIndicator.report_date.desc())
+        .all()
+    )
+
+    return success({
+        'stock_basic': {
+            'total': total_basic,
+            'st_count': st_count,
+            'delisted_count': delisted_count,
+            'valid_count': total_basic - st_count - delisted_count,
+            'last_sync': last_basic_sync[0].isoformat() if last_basic_sync else None,
+            'market_distribution': {m: c for m, c in market_dist},
+        },
+        'daily': daily_status,
+        'financial': {
+            'total': financial_total,
+            'expected': total_basic,
+            'missing': total_basic - financial_total,
+            'last_sync': last_financial_sync[0].isoformat() if last_financial_sync else None,
+            'report_distribution': [
+                {'date': d.isoformat() if d else None, 'count': c}
+                for d, c in report_dist
+            ],
+        },
     })

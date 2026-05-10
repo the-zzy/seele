@@ -171,246 +171,170 @@ function holdingDays (firstBuyDate) {
 </template>
 
 <style scoped lang="scss">
-.table-section {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 16px;
-}
-
-.section-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.section-count {
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-}
-
 .table-wrap {
   overflow: auto;
-  border: 1px solid var(--rule);
-  border-radius: 8px;
 }
 
-.stock-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
+.num {
+  text-align: right;
+}
 
-  th, td {
-    padding: 10px 12px;
-    text-align: left;
-    border-bottom: 1px solid var(--rule);
-    white-space: nowrap;
-  }
+.alert-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--up);
+}
 
-  th {
+.alert-stop-loss {
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.alert-take-profit {
+  background: rgba(16, 185, 129, 0.06);
+}
+
+.warning {
+  background: rgba(234, 179, 8, 0.06);
+}
+
+.profit {
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.group-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+
+  &.default {
     background: var(--bg-tertiary);
-    color: var(--text-faint);
-    font-family: var(--font-mono);
-    font-size: 9px;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    font-weight: 500;
-    position: sticky;
-    top: 0;
-    z-index: 1;
+    color: var(--text-muted);
   }
+
+  &.core {
+    background: rgba(59, 130, 246, 0.12);
+    color: var(--accent);
+  }
+
+  &.watch {
+    background: rgba(234, 179, 8, 0.12);
+    color: #eab308;
+  }
+
+  &.trial {
+    background: rgba(168, 85, 247, 0.12);
+    color: #a855f7;
+  }
+}
+
+.remark {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.edit-row {
+  background: var(--bg-tertiary);
 
   td {
-    color: var(--text-secondary);
+    padding: 12px 14px;
   }
+}
 
-  tr:hover td {
-    background: var(--bg-tertiary);
-  }
+.edit-form {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
 
-  tr.alert-stop-loss {
-    background: rgba(239, 68, 68, 0.06);
-  }
+.edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 
-  tr.alert-take-profit {
-    background: rgba(16, 185, 129, 0.06);
-  }
-
-  tr.warning {
-    background: rgba(245, 158, 11, 0.04);
-  }
-
-  tr.profit {
-    background: rgba(16, 185, 129, 0.04);
-  }
-
-  .num {
-    text-align: right;
+  label {
     font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-faint);
   }
 
-  .mono {
-    font-family: var(--font-mono);
-  }
-
-  .up {
-    color: var(--up);
-  }
-
-  .down {
-    color: var(--down);
-  }
-
-  .empty {
-    text-align: center;
-    color: var(--text-muted);
-    padding: 28px;
-  }
-
-  .alert-badge {
-    display: inline-block;
-    margin-left: 4px;
-    padding: 1px 5px;
-    border-radius: 3px;
-    font-size: 10px;
-    font-weight: 600;
-    color: #fff;
-    background: var(--up);
-  }
-
-  .group-tag {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-family: var(--font-mono);
-    background: var(--bg-tertiary);
-    color: var(--text-muted);
-
-    &.core {
-      background: rgba(59, 130, 246, 0.12);
-      color: #3b82f6;
-    }
-
-    &.watch {
-      background: rgba(245, 158, 11, 0.12);
-      color: #f59e0b;
-    }
-
-    &.trial {
-      background: rgba(139, 92, 246, 0.12);
-      color: #8b5cf6;
-    }
-  }
-
-  .remark {
-    max-width: 120px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .btn-edit {
-    padding: 3px 10px;
+  input,
+  select {
+    padding: 6px 8px;
+    background: var(--bg-input);
+    color: var(--text-primary);
     border: 1px solid var(--rule);
     border-radius: 4px;
-    font-size: 11px;
-    cursor: pointer;
-    color: var(--text-secondary);
-    background: transparent;
+    font-size: 12px;
+    outline: none;
+    width: 110px;
 
-    &:hover {
+    &:focus {
       border-color: var(--accent);
-      color: var(--accent);
     }
   }
+}
 
-  .edit-row {
-    td {
-      padding: 8px 12px;
-      background: var(--bg-tertiary);
-    }
+.edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.btn-edit {
+  padding: 4px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--text-muted);
+  background: transparent;
+
+  &:hover {
+    border-color: var(--accent);
+    color: var(--accent);
   }
+}
 
-  .edit-form {
-    display: flex;
-    align-items: flex-end;
-    gap: 12px;
-    flex-wrap: wrap;
+.btn-link {
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+
+  &:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
   }
+}
 
-  .edit-field {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+.btn-primary {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  color: #fff;
+  background: var(--accent);
 
-    label {
-      font-family: var(--font-mono);
-      font-size: 9px;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: var(--text-faint);
-    }
-
-    input, select {
-      padding: 6px 8px;
-      background: var(--bg-input);
-      color: var(--text-primary);
-      border: 1px solid var(--rule);
-      border-radius: 4px;
-      font-size: 12px;
-      outline: none;
-      width: 100px;
-
-      &:focus {
-        border-color: var(--border-focus);
-      }
-    }
-
-    input[type="text"] {
-      width: 140px;
-    }
-  }
-
-  .edit-actions {
-    display: flex;
-    gap: 8px;
-    margin-left: auto;
-  }
-
-  .btn-link {
-    padding: 6px 12px;
-    background: transparent;
-    color: var(--text-muted);
-    border: none;
-    font-size: 12px;
-    cursor: pointer;
-    border-radius: 4px;
-
-    &:hover {
-      color: var(--text-primary);
-      background: var(--bg-secondary);
-    }
-  }
-
-  .btn-primary {
-    padding: 6px 14px;
-    border: none;
-    border-radius: 4px;
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    color: #fff;
-    background: var(--accent);
-
-    &:hover {
-      background: var(--accent-hover);
-    }
+  &:hover {
+    background: var(--accent-hover);
   }
 }
 </style>

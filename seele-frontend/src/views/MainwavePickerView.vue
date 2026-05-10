@@ -1,58 +1,155 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { reactive, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { stockDailyApi } from '@/api/stock'
-import { useStockPicker } from '@/composables/useStockPicker'
-import { getLatestTradeDate } from '@/utils/date'
-import { formatNumber, formatPctChg, formatAmount, formatTurnover, getPctChgClass } from '@/utils/formatters'
+import MainwavePickerFilter from '@/components/stock/MainwavePickerFilter.vue'
+import StockDataTable from '@/components/stock/StockDataTable.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
 import PageHero from '@/components/common/PageHero.vue'
 
 const router = useRouter()
 
-const filters = ref({
-  trade_date: '',
-  only_s_level: false,
-  exclude_st: true,
-  exclude_cyb: true,
-  exclude_kcb: true,
-  exclude_bse: true,
-  sort_field: 'level',
-  sort_order: 'desc'
+const loading = ref(false)
+const stockList = ref([])
+const total = ref(0)
+const pageNum = ref(1)
+const pageSize = ref(10)
+
+const filterForm = reactive({
+  symbol: '',
+  name: '',
+  tradeDate: '',
+  floatMarketCapMin: 200,
+  closeMax: 300,
+  avgTurnoverMin: 2,
+  avgAmountMin: 2
 })
 
-const {
-  loading,
-  total,
-  pageNum,
-  pageSize,
-  sortField,
-  sortOrder,
-  displayList,
-  search,
-  handleSort,
-  handlePageChange,
-  handlePageSizeChange
-} = useStockPicker({
-  fetcher: (params) => stockDailyApi.getMainwavePicker(params).then(res => res.data),
-  defaultSortField: 'level',
-  defaultSortOrder: 'desc',
-  serverSort: true,
-  defaultPageSize: 20
-})
+const sortField = ref('symbol')
+const sortOrder = ref('asc')
 
-onMounted(async () => {
-  const latestDate = await getLatestTradeDate()
-  filters.value.trade_date = latestDate
-  handleSearch()
-})
-
-function handleSearch () {
-  const params = { ...filters.value }
-  if (!params.trade_date) {
-    delete params.trade_date
+function handleSort (field) {
+  if (sortField.value === field) {
+    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortField.value = field
+    sortOrder.value = 'asc'
   }
-  search(params)
+  loadData()
+}
+
+async function loadLatestTradeDate () {
+  try {
+    const dates = await stockDailyApi.getTradeDates()
+    if (Array.isArray(dates) && dates.length > 0) {
+      const latestDate = dates[0]
+      filterForm.tradeDate = latestDate
+      return latestDate
+    }
+  } catch (error) {
+    console.error('获取最近交易日失败:', error)
+  }
+  return ''
+}
+
+async function loadData () {
+  loading.value = true
+  try {
+    const params = {
+      page_num: pageNum.value,
+      page_size: pageSize.value,
+      sort_field: sortField.value,
+      sort_order: sortOrder.value
+    }
+    if (filterForm.symbol?.trim()) {
+      params.symbol = filterForm.symbol.trim()
+    }
+    if (filterForm.name?.trim()) {
+      params.name = filterForm.name.trim()
+    }
+    if (filterForm.tradeDate) {
+      params.trade_date = filterForm.tradeDate
+    }
+    if (filterForm.floatMarketCapMin != null) {
+      params.float_market_cap_min = filterForm.floatMarketCapMin
+    }
+    if (filterForm.closeMax != null) {
+      params.close_max = filterForm.closeMax
+    }
+    if (filterForm.avgTurnoverMin != null) {
+      params.avg_turnover_min = filterForm.avgTurnoverMin
+    }
+    if (filterForm.avgAmountMin != null) {
+      params.avg_amount_min = filterForm.avgAmountMin * 100000000
+    }
+
+    const res = await stockDailyApi.getMainwavePicker(params)
+    // 如果后端返回了实际使用的交易日期，同步更新前端日期选择器
+    if (res?.trade_date) {
+      filterForm.tradeDate = res.trade_date
+    }
+    stockList.value = (res?.list || []).map(item => ({
+      id: item.id,
+      symbol: item.symbol,
+      name: item.stock_name || item.name || '-',
+      tradeDate: item.trade_date,
+      open: item.open,
+      high: item.high,
+      low: item.low,
+      close: item.close,
+      volume: item.volume,
+      amount: item.amount,
+      amplitude: item.amplitude,
+      pctChg: item.pct_chg,
+      priceChange: item.price_change,
+      turnover: item.turnover,
+      ma5: item.ma5,
+      ma10: item.ma10,
+      ma20: item.ma20,
+      ma30: item.ma30,
+      ma60: item.ma60,
+      volMa5: item.vol_ma5,
+      volMa10: item.vol_ma10,
+      turnoverMa5: item.turnover_ma5,
+      turnoverMa10: item.turnover_ma10
+    }))
+    total.value = res?.total || 0
+  } catch (error) {
+    console.error('加载主升浪选股数据失败:', error)
+    stockList.value = []
+    total.value = 0
+  } finally {
+    loading.value = false
+  }
+}
+
+async function handleSearch () {
+  pageNum.value = 1
+  await loadData()
+}
+
+async function handleReset () {
+  filterForm.symbol = ''
+  filterForm.name = ''
+  filterForm.floatMarketCapMin = 200
+  filterForm.closeMax = 300
+  filterForm.avgTurnoverMin = 2
+  filterForm.avgAmountMin = 2
+  sortField.value = 'symbol'
+  sortOrder.value = 'asc'
+  pageNum.value = 1
+  await loadData()
+}
+
+async function handlePageChange (newPage) {
+  pageNum.value = newPage
+  await loadData()
+}
+
+async function handlePageSizeChange (newSize) {
+  pageSize.value = newSize
+  pageNum.value = 1
+  await loadData()
 }
 
 function handleRowDblClick (item) {
@@ -64,109 +161,36 @@ function handleRowDblClick (item) {
   })
 }
 
-function getSortIcon (field) {
-  if (sortField.value !== field) return '⇅'
-  return sortOrder.value === 'asc' ? '▲' : '▼'
-}
-
-function getLevelClass (level) {
-  if (level === 'S') return 'level-s'
-  return 'level-gamble'
-}
+onMounted(async () => {
+  await loadLatestTradeDate()
+  await loadData()
+})
 </script>
 
 <template>
-  <div class="picker-page">
+  <div class="stock-basic page">
     <PageHero
       section="选股策略"
       number="03.7"
       title="主升浪选股"
-      description="基于5条硬性门槛 + 3条主升浪判定标准 + 级别评分的选股策略。"
-      meta="技术面"
+      description="基于交易日期筛选符合主升浪门槛的主板标的：流通市值≥200亿、股价≤300元、10日换手≥2%、10日成交额≥2亿。双击行跳转K线图。"
+      meta="选股门槛"
     />
 
-    <div class="filter-panel">
-      <div class="filter-row">
-        <div class="filter-item">
-          <label>交易日期</label>
-          <input v-model="filters.trade_date" type="date" />
-        </div>
-        <div class="filter-item checkbox">
-          <label><input v-model="filters.only_s_level" type="checkbox" /> 仅看硬核S级</label>
-        </div>
-        <div class="filter-item checkbox">
-          <label><input v-model="filters.exclude_st" type="checkbox" /> 排除ST</label>
-        </div>
-        <div class="filter-item checkbox">
-          <label><input v-model="filters.exclude_cyb" type="checkbox" /> 排除创业板</label>
-        </div>
-        <div class="filter-item checkbox">
-          <label><input v-model="filters.exclude_kcb" type="checkbox" /> 排除科创板</label>
-        </div>
-        <div class="filter-item checkbox">
-          <label><input v-model="filters.exclude_bse" type="checkbox" /> 排除北交所</label>
-        </div>
-      </div>
-      <div class="filter-actions">
-        <button class="btn-primary" @click="handleSearch">筛选</button>
-      </div>
-    </div>
+    <MainwavePickerFilter
+      v-model="filterForm"
+      @search="handleSearch"
+      @reset="handleReset"
+    />
 
-    <div class="result-bar">共 {{ total }} 只</div>
-
-    <div class="table-wrapper">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>股票</th>
-            <th>级别</th>
-            <th @click="handleSort('pct_chg')">收盘价 / 涨幅 {{ getSortIcon('pct_chg') }}</th>
-            <th>MA5</th>
-            <th>MA10</th>
-            <th>流通市值</th>
-            <th>10日换手</th>
-            <th>10日成交额</th>
-            <th>净利润同比</th>
-            <th>信号</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="item in displayList" :key="item.symbol" @dblclick="handleRowDblClick(item)">
-            <td>
-              <div class="stock-name">
-                <span class="symbol">{{ item.symbol }}</span>
-                <span class="name">{{ item.name }}</span>
-                <span v-if="item.industry" class="industry">{{ item.industry }}</span>
-              </div>
-            </td>
-            <td>
-              <span class="level-tag" :class="getLevelClass(item.level)">
-                {{ item.level === 'S' ? '硬核S级' : '博弈级' }}
-              </span>
-            </td>
-            <td>
-              <div class="price-col">
-                <span>{{ formatNumber(item.close) }}</span>
-                <span :class="getPctChgClass(item.pct_chg)">{{ formatPctChg(item.pct_chg) }}</span>
-              </div>
-            </td>
-            <td>{{ formatNumber(item.ma5) }}</td>
-            <td>{{ formatNumber(item.ma10) }}</td>
-            <td>{{ item.float_market_cap ? item.float_market_cap.toFixed(2) + '亿' : '-' }}</td>
-            <td>{{ formatTurnover(item.turnover_ma10) }}</td>
-            <td>{{ formatAmount(item.amount_ma10) }}</td>
-            <td :class="{ 'up': item.net_profit_yoy > 0, 'down': item.net_profit_yoy < 0 }">
-              {{ item.net_profit_yoy !== null ? item.net_profit_yoy.toFixed(2) + '%' : '-' }}
-            </td>
-            <td class="signals">{{ item.signals }}</td>
-          </tr>
-          <tr v-if="!loading && displayList.length === 0">
-            <td colspan="10" class="empty">暂无数据，请调整筛选条件</td>
-          </tr>
-        </tbody>
-      </table>
-      <div v-if="loading" class="loading-mask">加载中...</div>
-    </div>
+    <StockDataTable
+      :list="stockList"
+      :sort-field="sortField"
+      :sort-order="sortOrder"
+      :loading="loading"
+      @sort="handleSort"
+      @row-dblclick="handleRowDblClick"
+    />
 
     <BasePagination
       v-if="total > 0"
@@ -180,46 +204,12 @@ function getLevelClass (level) {
 </template>
 
 <style scoped lang="scss">
-@import '~@/styles/picker';
-
-.level-tag {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-
-  &.level-s {
-    background: rgba(34, 197, 94, 0.15);
-    color: #22c55e;
-    border: 1px solid rgba(34, 197, 94, 0.3);
-  }
-
-  &.level-gamble {
-    background: rgba(234, 179, 8, 0.15);
-    color: #eab308;
-    border: 1px solid rgba(234, 179, 8, 0.3);
-  }
-}
-
-.price-col {
+.stock-basic {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  align-items: flex-end;
-
-  span:first-child {
-    color: var(--text-primary);
-  }
-}
-
-.signals {
-  font-size: 11px;
-  color: var(--text-secondary);
-  max-width: 160px;
-  white-space: nowrap;
+  height: 100%;
+  padding: 4px 28px 18px;
+  box-sizing: border-box;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 </style>

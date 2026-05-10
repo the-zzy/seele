@@ -19,60 +19,66 @@ src/
 ├── main.js              # 应用入口
 ├── App.vue              # 根组件
 ├── api/
-│   └── stock.js         # 股票 API 请求封装
+│   ├── financial.js     # 财务指标 API
+│   ├── portfolio.js     # 持仓管理 API
+│   └── stock.js         # 股票数据 API
 ├── components/
 │   ├── common/          # 通用组件
 │   │   ├── BasePagination.vue
+│   │   ├── PageHero.vue
 │   │   └── SyncProgress.vue
+│   ├── portfolio/       # 持仓相关组件
+│   │   ├── PortfolioPositionTable.vue
+│   │   ├── PortfolioStatsCards.vue
+│   │   ├── PortfolioTradeModal.vue
+│   │   └── PortfolioTradeTable.vue
 │   └── stock/           # 股票相关组件
+│       ├── FinancialListTable.vue
+│       ├── StockBasicFilter.vue
+│       ├── StockBasicTable.vue
 │       ├── StockDataTable.vue
 │       ├── StockFilterPanel.vue
-│       ├── BreakoutPickerFilter.vue
-│       ├── BreakoutPickerTable.vue
-│       ├── RangePickerFilter.vue
-│       ├── RangePickerTable.vue
-│       ├── ShrinkingPickerFilter.vue
-│       ├── ShrinkingPickerTable.vue
-│       ├── TrendPickerFilter.vue
-│       └── TrendPickerTable.vue
+│       └── StockIndicatorTable.vue
 ├── composables/         # 组合式函数
 │   ├── useEChart.js
 │   ├── useStockData.js
-│   ├── useStockPicker.js
 │   └── useTheme.js
 ├── router/
-│   └── index.js         # 路由配置（8 个页面）
+│   └── index.js         # 路由配置
 ├── styles/
 │   ├── global.scss
-│   ├── variables.scss
-│   └── _picker.scss
+│   └── variables.scss
 ├── utils/
 │   ├── date.js
 │   ├── formatters.js
 │   └── request.js
 └── views/               # 页面视图
-    ├── StockListView.vue
+    ├── ChgDistributionView.vue
+    ├── FinancialListView.vue
+    ├── IndustrySentimentView.vue
+    ├── MainwavePickerView.vue
+    ├── PortfolioView.vue
+    ├── StockBasicView.vue
+    ├── StockFinancialView.vue
+    ├── StockIndicatorView.vue
     ├── StockKLineView.vue
-    ├── ClosingStockPickerView.vue
-    ├── ClosingStockPickerDetailView.vue
-    ├── RangeStockPickerView.vue
-    ├── TrendStockPickerView.vue
-    ├── ShrinkingVolumePickerView.vue
-    └── BreakoutVolumePickerView.vue
+    └── StockListView.vue
 ```
 
 ## 页面路由
 
 | 路径 | 页面 |
 |------|------|
-| `/` | 股票数据列表 |
-| `/closing-picker` | 尾盘选股法 |
-| `/closing-picker/detail` | 尾盘选股详情 |
-| `/range-picker` | 震荡选股策略 |
-| `/trend-picker` | 趋势选股策略 |
+| `/` | 股票基本信息 |
+| `/financial` | 财务指标 |
+| `/daily/basic` | 基本数据 |
+| `/daily/indicator` | 指标数据 |
+| `/chg-distribution` | 涨幅分布统计 |
+| `/industry-sentiment` | 板块情绪分布 |
+| `/portfolio` | 持仓管理 |
+| `/mainwave-picker` | 主升浪选股 |
 | `/kline/:symbol` | K 线图 |
-| `/shrinking-volume` | 缩量选股 |
-| `/breakout-volume` | 倍量突破选股 |
+| `/financial/:symbol` | 财务分析 |
 
 ## 开发规范
 

@@ -30,12 +30,12 @@ const loading = ref(false)
 
 // 交易记录分页
 const tradePageNum = ref(1)
-const tradePageSize = ref(20)
+const tradePageSize = ref(10)
 const tradeTotal = ref(0)
 
 // 已清仓分页
 const closedPageNum = ref(1)
-const closedPageSize = ref(20)
+const closedPageSize = ref(10)
 const closedTotal = ref(0)
 
 // 标签页
@@ -1080,60 +1080,4 @@ onMounted(() => {
   }
 }
 
-.stock-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-
-  th, td {
-    padding: 10px 12px;
-    text-align: left;
-    border-bottom: 1px solid var(--rule);
-    white-space: nowrap;
-  }
-
-  th {
-    background: var(--bg-tertiary);
-    color: var(--text-faint);
-    font-family: var(--font-mono);
-    font-size: 9px;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    font-weight: 500;
-    position: sticky;
-    top: 0;
-    z-index: 1;
-  }
-
-  td {
-    color: var(--text-secondary);
-  }
-
-  tr:hover td {
-    background: var(--bg-tertiary);
-  }
-
-  .num {
-    text-align: right;
-    font-family: var(--font-mono);
-  }
-
-  .mono {
-    font-family: var(--font-mono);
-  }
-
-  .up {
-    color: var(--up);
-  }
-
-  .down {
-    color: var(--down);
-  }
-
-  .empty {
-    text-align: center;
-    color: var(--text-muted);
-    padding: 28px;
-  }
-}
 </style>
