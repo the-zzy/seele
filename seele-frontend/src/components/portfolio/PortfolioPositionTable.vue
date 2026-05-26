@@ -8,6 +8,7 @@ defineProps({
 
 const emit = defineEmits(['edit', 'update-position'])
 
+const pnlMode = ref('history') // 'history' | 'current'
 const editingSymbol = ref(null)
 const editForm = ref({})
 
@@ -77,9 +78,22 @@ function holdingDays (firstBuyDate) {
 
 <template>
   <div class="table-section">
-    <div class="section-title">
-      当前持仓
-      <span v-if="list.length" class="section-count">{{ list.length }} 只</span>
+    <div class="pnl-toggle">
+      <span class="pnl-toggle-label">盈亏显示</span>
+      <button
+        class="pnl-toggle-btn"
+        :class="{ active: pnlMode === 'history' }"
+        @click="pnlMode = 'history'"
+      >
+        历史盈亏
+      </button>
+      <button
+        class="pnl-toggle-btn"
+        :class="{ active: pnlMode === 'current' }"
+        @click="pnlMode = 'current'"
+      >
+        当前盈亏
+      </button>
     </div>
     <div class="table-wrap">
       <table class="stock-table">
@@ -91,7 +105,7 @@ function holdingDays (firstBuyDate) {
             <th class="num">平均成本</th>
             <th class="num">最新价</th>
             <th class="num">市值</th>
-            <th class="num">浮动盈亏</th>
+            <th class="num">{{ pnlMode === 'history' ? '历史盈亏' : '当前盈亏' }}</th>
             <th class="num">盈亏比例</th>
             <th>持仓天数</th>
             <th>分组</th>
@@ -117,11 +131,17 @@ function holdingDays (firstBuyDate) {
               <td class="num">{{ fmt(item.avg_cost) }}</td>
               <td class="num">{{ fmt(item.current_price) }}</td>
               <td class="num">{{ fmt(item.market_value) }}</td>
-              <td class="num" :class="pnlClass(item.unrealized_pnl)">
-                {{ fmt(item.unrealized_pnl) }}
+              <td
+                class="num"
+                :class="pnlClass(pnlMode === 'history' ? item.history_pnl : item.unrealized_pnl)"
+              >
+                {{ fmt(pnlMode === 'history' ? item.history_pnl : item.unrealized_pnl) }}
               </td>
-              <td class="num" :class="pnlClass(item.unrealized_pnl_pct)">
-                {{ fmt(item.unrealized_pnl_pct) }}%
+              <td
+                class="num"
+                :class="pnlClass(pnlMode === 'history' ? item.history_pnl_pct : item.unrealized_pnl_pct)"
+              >
+                {{ fmt(pnlMode === 'history' ? item.history_pnl_pct : item.unrealized_pnl_pct) }}%
               </td>
               <td class="num">{{ holdingDays(item.first_buy_date) }}</td>
               <td>
@@ -171,8 +191,48 @@ function holdingDays (firstBuyDate) {
 </template>
 
 <style scoped lang="scss">
+.pnl-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.pnl-toggle-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+}
+
+.pnl-toggle-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--text-muted);
+  background: transparent;
+  transition: all 0.2s;
+
+  &.active {
+    color: #fff;
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  &:hover:not(.active) {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+}
+
 .table-wrap {
   overflow: auto;
+}
+
+.stock-table {
+  min-width: 960px;
 }
 
 .num {

@@ -23,37 +23,38 @@ function onReset () {
 
 <template>
   <div class="filter-section">
-    <div class="filter-fields">
-      <label class="field">
-        <span class="field-label">代码</span>
-        <input v-model="form.symbol" type="text" placeholder="600519" @keyup.enter="onSearch" />
-      </label>
-      <label class="field">
-        <span class="field-label">名称</span>
-        <input v-model="form.name" type="text" placeholder="输入名称" @keyup.enter="onSearch" />
-      </label>
-      <label class="field">
-        <span class="field-label">交易日</span>
-        <input v-model="form.tradeDate" type="date" @change="onSearch" />
-      </label>
-      <label class="field">
-        <span class="field-label">市值≥(亿)</span>
-        <input v-model.number="form.floatMarketCapMin" type="number" placeholder="200" @keyup.enter="onSearch" />
-      </label>
-      <label class="field">
-        <span class="field-label">股价≤(元)</span>
-        <input v-model.number="form.closeMax" type="number" placeholder="300" @keyup.enter="onSearch" />
-      </label>
-      <label class="field">
-        <span class="field-label">换手≥(%)</span>
-        <input v-model.number="form.avgTurnoverMin" type="number" placeholder="2" @keyup.enter="onSearch" />
-      </label>
-      <label class="field">
-        <span class="field-label">成交额≥(亿)</span>
-        <input v-model.number="form.avgAmountMin" type="number" placeholder="2" @keyup.enter="onSearch" />
-      </label>
-    </div>
-
+    <label class="field">
+      <span class="field-label">代码</span>
+      <input v-model="form.symbol" type="text" placeholder="600519" @keyup.enter="onSearch" />
+    </label>
+    <label class="field">
+      <span class="field-label">名称</span>
+      <input v-model="form.name" type="text" placeholder="输入名称" @keyup.enter="onSearch" />
+    </label>
+    <label class="field">
+      <span class="field-label">交易日</span>
+      <input v-model="form.tradeDate" type="date" @change="onSearch" />
+    </label>
+    <label class="field">
+      <span class="field-label">市值≥(亿)</span>
+      <input v-model.number="form.floatMarketCapMin" type="number" placeholder="200" @keyup.enter="onSearch" />
+    </label>
+    <label class="field">
+      <span class="field-label">股价≤(元)</span>
+      <input v-model.number="form.closeMax" type="number" placeholder="300" @keyup.enter="onSearch" />
+    </label>
+    <label class="field">
+      <span class="field-label">换手≥(%)</span>
+      <input v-model.number="form.avgTurnoverMin" type="number" placeholder="2" @keyup.enter="onSearch" />
+    </label>
+    <label class="field">
+      <span class="field-label">成交额≥(亿)</span>
+      <input v-model.number="form.avgAmountMin" type="number" placeholder="2" @keyup.enter="onSearch" />
+    </label>
+    <label class="field checkbox-field">
+      <span class="field-label">均线多头</span>
+      <input v-model="form.maBull" type="checkbox" @change="onSearch" />
+    </label>
     <div class="filter-actions">
       <button class="btn-link" @click="onReset">重置</button>
       <button class="btn-primary" @click="onSearch">检索</button>
@@ -63,9 +64,9 @@ function onReset () {
 
 <style scoped lang="scss">
 .filter-section {
-  display: flex;
-  align-items: center;
-  gap: 16px;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px 12px;
   padding: 12px 14px;
   background: var(--bg-secondary);
   border: 1px solid var(--rule);
@@ -73,19 +74,27 @@ function onReset () {
   margin-bottom: 12px;
 }
 
-.filter-fields {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  flex: 1;
-}
-
 .field {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 140px;
-  flex: 1;
+  min-width: 0;
+
+  &.checkbox-field {
+    gap: 6px;
+    cursor: pointer;
+
+    input[type='checkbox'] {
+      width: 14px;
+      height: 14px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .field-label {
+      width: auto;
+    }
+  }
 
   .field-label {
     font-size: 12px;
@@ -99,6 +108,7 @@ function onReset () {
 
   input {
     flex: 1;
+    width: 0;
     padding: 7px 12px;
     background: var(--bg-input);
     border: 1px solid var(--rule);
@@ -123,8 +133,9 @@ function onReset () {
 .filter-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
-  flex-shrink: 0;
+  grid-column: span 2;
 }
 
 .btn-primary {

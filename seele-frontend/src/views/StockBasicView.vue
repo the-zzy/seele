@@ -15,7 +15,7 @@ const total = ref(0)
 const pageNum = ref(1)
 const pageSize = ref(10)
 
-const filterForm = reactive({
+let filterForm = reactive({
   symbol: '',
   name: '',
   industry: '',
@@ -58,7 +58,7 @@ async function loadData () {
     }
 
     const res = await stockBasicApi.pageQuery(params)
-    stockList.value = (res?.list || []).map(item => ({
+    const list = (res?.list || []).map(item => ({
       id: item.id,
       symbol: item.symbol,
       name: item.name,
@@ -72,6 +72,13 @@ async function loadData () {
       netProfitYoy: item.net_profit_yoy,
       revenueYoy: item.revenue_yoy
     }))
+
+    // 批量加载所属板块（boardApi 已废弃，后端 board 模块已移除）
+    for (const item of list) {
+      item.boards = null
+    }
+
+    stockList.value = list
     total.value = res?.total || 0
   } catch (error) {
     console.error('加载股票基本信息失败:', error)
@@ -166,5 +173,9 @@ onMounted(() => {
   padding: 4px 28px 18px;
   box-sizing: border-box;
   overflow: hidden;
+
+  @media (max-width: 768px) {
+    padding: 4px 16px 12px;
+  }
 }
 </style>

@@ -110,5 +110,11 @@ function getChgBgClass (val) {
 </template>
 
 <style scoped lang="scss">
-/* 组件特有样式 */
+.table-section {
+  overflow-x: auto;
+}
+
+.stock-table {
+  min-width: 1100px;
+}
 </style>

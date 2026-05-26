@@ -84,16 +84,3 @@ export function formatTurnover (turnover) {
   if (turnover === null || turnover === undefined) return '-'
   return parseFloat(turnover).toFixed(2) + '%'
 }
-
-/**
- * 获取涨跌幅样式类
- * @param {number} pctChg - 涨跌幅
- * @returns {string} 'up' | 'down' | ''
- */
-export function getPctChgClass (pctChg) {
-  if (!pctChg) return ''
-  const value = parseFloat(pctChg)
-  if (value > 0) return 'up'
-  if (value < 0) return 'down'
-  return ''
-}

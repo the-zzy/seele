@@ -853,31 +853,37 @@ DELETE /api/stock/daily/{id}
 
 > 这些接口用于**从 Baostock 拉取数据并写入数据库**，通常由后台/管理员调用。
 
-### 4.1 同步所有股票日线数据
+### 4.1 同步所有股票日线数据（已废弃）
 ```
 POST /api/sync/daily
 ```
+> **废弃**：此同步端点为同步阻塞模式，执行时间长且不可中断，已废弃。  
+> **替代**：请使用 **4.3 按日期同步全部 A 股日线数据（后台异步）** + **4.5 查询同步任务状态** 轮询。
+
 **响应示例**
 ```json
 {
-  "code": 200,
-  "message": "success",
-  "data": "同步完成，成功: 125000, 失败: 23"
+  "code": 410,
+  "message": "此同步端点已废弃，请使用 POST /api/sync/daily/date/{trade_date} 异步任务模式",
+  "data": null
 }
 ```
 
 ---
 
-### 4.2 同步单只股票日线数据
+### 4.2 同步单只股票日线数据（已废弃）
 ```
 POST /api/sync/daily/{symbol}
 ```
+> **废弃**：此同步端点为同步阻塞模式，已废弃。  
+> **替代**：请使用 **4.3 按日期同步全部 A 股日线数据（后台异步）**。
+
 **响应示例**
 ```json
 {
-  "code": 200,
-  "message": "success",
-  "data": "同步完成: 000001, 更新 512 条"
+  "code": 410,
+  "message": "此同步端点已废弃，请使用 POST /api/sync/daily/date/{trade_date} 异步任务模式",
+  "data": null
 }
 ```
 
@@ -972,7 +978,7 @@ GET /api/sync/task/{task_id}
 
 ---
 
-### 4.6 按日期同步全部 A 股日线数据（SSE 实时推送）
+### 4.6 按日期同步全部 A 股日线数据（SSE 实时推送）（已废弃）
 ```
 GET /api/sync/daily/date/{trade_date}/stream
 ```
@@ -981,39 +987,16 @@ GET /api/sync/daily/date/{trade_date}/stream
 |------|------|
 | trade_date | 如 `2026-04-12` 或 `20260412` |
 
-**说明**
-- 此接口使用 **Server-Sent Events (SSE)**，建立长连接后服务端会实时推送同步进度
-- 比轮询更实时，推荐用于前端展示进度条
-- 同步完成后服务端会自动关闭连接
+> **废弃**：浏览器对 SSE 长连接有内置超时（约 10-20 分钟），长时间同步任务会中途断开且无感知。此端点已废弃。  
+> **替代**：请使用 **4.3 按日期同步全部 A 股日线数据（后台异步）** + **4.5 查询同步任务状态** 轮询。
 
-**前端使用示例**
-```javascript
-const source = new EventSource('/api/sync/daily/date/2025-04-18/stream')
-
-source.onmessage = (event) => {
-  const data = JSON.parse(event.data)
-  console.log(data)
-  // {
-  //   "current": 1500,      // 当前处理到第几只
-  //   "total": 5499,        // 总共多少只
-  //   "status": "running",  // running / completed / failed
-  //   "symbol": "002456",   // 当前股票代码
-  //   "success": 1200,      // 成功数
-  //   "skipped": 250,       // 跳过数
-  //   "failed": 50          // 失败数
-  // }
+**响应示例**
+```json
+{
+  "code": 410,
+  "message": "SSE 同步端点已废弃，请使用 POST /api/sync/daily/date/{trade_date} 异步任务 + /api/sync/task/{task_id} 轮询",
+  "data": null
 }
-
-source.addEventListener('error', () => {
-  source.close()
-})
-```
-
-**SSE 数据流示例**
-```
-data: {"current": 10, "total": 5499, "status": "running", "symbol": "600001", "success": 8, "skipped": 1, "failed": 1}
-
-data: {"current": 5499, "total": 5499, "status": "completed", "result": {"trade_date": "2025-04-18", "upserted": 5000, "skipped": 300, "failed": 199}}
 ```
 
 ---

@@ -108,6 +108,25 @@ class MainwavePickerQuery(StockBasicQuery):
     close_max: Optional[float] = Field(None, description="收盘价最大值")
     avg_turnover_min: Optional[float] = Field(None, description="10日平均换手率最小值(%)")
     avg_amount_min: Optional[float] = Field(None, description="10日平均成交额最小值(元)")
+    ma_bull: Optional[bool] = Field(None, description="均线多头排列")
+
+
+# ==================== 股票停牌信息 ====================
+
+
+class StockSuspensionCreate(BaseModel):
+    """股票停牌信息-创建"""
+    symbol: str = Field(..., description="股票代码")
+    name: Optional[str] = Field(None, description="股票名称")
+    suspend_date: date = Field(..., description="停牌日期")
+    resume_date: Optional[date] = Field(None, description="复牌日期")
+    reason: Optional[str] = Field(None, description="停牌原因")
+
+
+class StockSuspensionQuery(BaseModel):
+    """股票停牌信息-查询"""
+    symbol: Optional[str] = Field(None, description="股票代码")
+    suspend_date: Optional[date] = Field(None, description="停牌日期")
 
 
 # ==================== 股票日线数据 ====================
@@ -218,6 +237,8 @@ class StockDailyIndicatorResponse(BaseModel):
     vol_ma10: Optional[int]
     turnover_ma5: Optional[float]
     turnover_ma10: Optional[float]
+    chg_5d: Optional[float] = None
+    chg_10d: Optional[float] = None
     macd_dif: Optional[float] = None
     macd_dea: Optional[float] = None
     macd_hist: Optional[float] = None
@@ -440,6 +461,39 @@ class PortfolioTradeResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class PortfolioTradeUpdate(BaseModel):
+    """交易记录-更新"""
+    trade_date: Optional[str] = Field(None, description='交易日期')
+    trade_type: Optional[str] = Field(None, description='交易类型 BUY/SELL')
+    price: Optional[float] = Field(None, description='成交价格')
+    quantity: Optional[int] = Field(None, description='成交股数')
+    amount: Optional[float] = Field(None, description='成交金额')
+    fee: Optional[float] = Field(None, description='交易手续费')
+    realized_pnl: Optional[float] = Field(None, description='实际盈亏金额（卖出时填写，用于重新计算手续费）')
+    remark: Optional[str] = Field(None, description='备注')
+
+    @field_validator('trade_date', mode='before')
+    @classmethod
+    def validate_trade_date(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d')
+        return str(v)
+
+    @field_validator('amount', mode='before')
+    @classmethod
+    def validate_amount(cls, v, info):
+        if v is not None:
+            return v
+        data = info.data
+        price = data.get('price')
+        quantity = data.get('quantity')
+        if price is not None and quantity is not None:
+            return round(price * quantity, 4)
+        return v
 
 
 class PortfolioTradeQuery(BaseModel):
@@ -692,4 +746,318 @@ class StockFinancialIndicatorQuery(BaseModel):
     revenue_yoy_max: Optional[float] = Field(None, description='营收增长率最大值')
     debt_ratio_min: Optional[float] = Field(None, description='资产负债率最小值')
     debt_ratio_max: Optional[float] = Field(None, description='资产负债率最大值')
+
+
+# ==================== 指数数据 ====================
+
+
+class IndexDailyQuery(BaseModel):
+    """指数日线查询"""
+    symbol: Optional[str] = Field(None, description='指数代码')
+    start_date: Optional[str] = Field(None, description='开始日期 YYYY-MM-DD')
+    end_date: Optional[str] = Field(None, description='结束日期 YYYY-MM-DD')
+    page_num: int = Field(default=1, ge=1, description='页码')
+    page_size: int = Field(default=50, ge=1, le=200, description='每页条数')
+
+
+class IndexConstituentQuery(BaseModel):
+    """指数成分股查询"""
+    index_symbol: str = Field(..., description='指数代码')
+    page_num: int = Field(default=1, ge=1, description='页码')
+    page_size: int = Field(default=100, ge=1, le=500, description='每页条数')
+
+
+class IndexDailyResponse(BaseModel):
+    """指数日线响应"""
+    symbol: str
+    name: Optional[str]
+    trade_date: str
+    open: Optional[float]
+    high: Optional[float]
+    low: Optional[float]
+    close: Optional[float]
+    preclose: Optional[float]
+    volume: Optional[float]
+    amount: Optional[float]
+    pct_chg: Optional[float]
+
+    @field_validator('trade_date', mode='before')
+    @classmethod
+    def validate_trade_date(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d')
+        return str(v)
+
+    class Config:
+        from_attributes = True
+
+
+class IndexConstituentResponse(BaseModel):
+    """指数成分股响应"""
+    index_symbol: str
+    constituent_symbol: str
+    update_date: Optional[str]
+
+    @field_validator('update_date', mode='before')
+    @classmethod
+    def validate_update_date(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d')
+        return str(v)
+
+    class Config:
+        from_attributes = True
+
+
+class LivePriceRequest(BaseModel):
+    """实盘价格请求"""
+    symbols: List[str] = Field(..., description='股票代码列表', max_length=50)
+
+
+# ==================== 板块/ETF数据 ====================
+
+
+class BoardInfoCreate(BaseModel):
+    """板块/ETF信息-创建"""
+    code: str = Field(..., description='板块/ETF代码')
+    name: str = Field(..., description='板块/ETF名称')
+    category: str = Field(..., description='类型: industry/concept/etf')
+    exchange: Optional[str] = Field(None, description='交易所')
+    source: Optional[str] = Field(None, description='数据来源')
+
+
+class BoardInfoResponse(BaseModel):
+    """板块/ETF信息-响应"""
+    code: str
+    name: str
+    category: str
+    exchange: Optional[str] = None
+    source: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class BoardInfoQuery(BaseModel):
+    """板块/ETF信息-分页查询"""
+    page_num: int = Field(default=1, ge=1, description='页码')
+    page_size: int = Field(default=50, ge=1, le=500, description='每页条数')
+    category: Optional[str] = Field(None, description='类型过滤: industry/concept/etf')
+    keyword: Optional[str] = Field(None, description='名称模糊搜索')
+
+
+class BoardConstituentCreate(BaseModel):
+    """板块成分股-创建"""
+    board_code: str = Field(..., description='板块/ETF代码')
+    constituent_symbol: str = Field(..., description='成分股代码')
+    update_date: Optional[date] = Field(None, description='更新日期')
+
+
+class BoardConstituentResponse(BaseModel):
+    """板块成分股-响应"""
+    board_code: str
+    constituent_symbol: str
+    update_date: Optional[str] = None
+
+    @field_validator('update_date', mode='before')
+    @classmethod
+    def validate_date(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d')
+        return str(v)
+
+    class Config:
+        from_attributes = True
+
+
+class BoardDailyCreate(BaseModel):
+    """板块/ETF日线-创建"""
+    code: str = Field(..., description='板块/ETF代码')
+    trade_date: str = Field(..., description='交易日期')
+    open: Optional[float] = Field(None, description='开盘价')
+    high: Optional[float] = Field(None, description='最高价')
+    low: Optional[float] = Field(None, description='最低价')
+    close: Optional[float] = Field(None, description='收盘价')
+    volume: Optional[float] = Field(None, description='成交量')
+    amount: Optional[float] = Field(None, description='成交额')
+    pct_chg: Optional[float] = Field(None, description='涨跌幅')
+
+
+class BoardDailyResponse(BaseModel):
+    """板块/ETF日线-响应"""
+    id: int
+    code: str
+    trade_date: str
+    open: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    close: Optional[float] = None
+    volume: Optional[float] = None
+    amount: Optional[float] = None
+    pct_chg: Optional[float] = None
+
+    @field_validator('trade_date', mode='before')
+    @classmethod
+    def validate_trade_date(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d')
+        return str(v)
+
+    class Config:
+        from_attributes = True
+
+
+class BoardDailyQuery(BaseModel):
+    """板块/ETF日线-分页查询"""
+    code: str = Field(..., description='板块/ETF代码')
+    start_date: Optional[str] = Field(None, description='开始日期 YYYY-MM-DD')
+    end_date: Optional[str] = Field(None, description='结束日期 YYYY-MM-DD')
+    page_num: int = Field(default=1, ge=1, description='页码')
+    page_size: int = Field(default=100, ge=1, le=1000, description='每页条数')
+
+
+# ==================== 同步任务链 ====================
+
+
+class PipelineStepCreate(BaseModel):
+    """任务链步骤-创建"""
+    name: str = Field(..., description='步骤名称')
+    job_type: str = Field(..., description='任务类型')
+    trade_date: Optional[str] = Field(None, description='关联交易日')
+    skip_on_fail: bool = Field(default=False, description='失败时是否跳过继续')
+
+
+class PipelineCreate(BaseModel):
+    """同步任务链-创建"""
+    chain_type: str = Field(..., description='预设链类型: daily / full / board')
+    trade_date: Optional[str] = Field(None, description='交易日 YYYY-MM-DD')
+    steps: Optional[List[PipelineStepCreate]] = Field(None, description='自定义步骤列表')
+
+
+class PipelineStepResponse(BaseModel):
+    """任务链步骤-响应"""
+    name: str
+    job_type: str
+    status: str
+    trade_date: Optional[str] = None
+    task_id: Optional[str] = None
+    log_id: Optional[int] = None
+    result: Optional[Any] = None
+    error: Optional[str] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    skip_on_fail: bool = False
+
+
+class PipelineResponse(BaseModel):
+    """同步任务链-响应"""
+    pipeline_id: str
+    chain_type: str
+    status: str
+    trade_date: Optional[str] = None
+    steps: List[PipelineStepResponse] = Field(default_factory=list)
+    started_at: str
+    finished_at: Optional[str] = None
+    error: Optional[str] = None
+
+
+# ==================== 系统日志 ====================
+
+
+class SystemErrorLogCreate(BaseModel):
+    """系统错误日志-创建"""
+    level: str = Field(default='error', description='级别: error / warning / critical')
+    source: str = Field(..., description='来源模块')
+    trace_id: Optional[str] = Field(None, description='关联ID')
+    message: str = Field(..., description='错误消息')
+    detail: Optional[str] = Field(None, description='详细内容')
+
+
+class SystemErrorLogResponse(BaseModel):
+    """系统错误日志-响应"""
+    id: int
+    level: str
+    source: str
+    trace_id: Optional[str] = None
+    message: str
+    detail: Optional[str] = None
+    created_at: str
+
+    @field_validator('created_at', mode='before')
+    @classmethod
+    def validate_timestamp(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d %H:%M:%S')
+        return str(v)
+
+    class Config:
+        from_attributes = True
+
+
+class SystemErrorLogQuery(BaseModel):
+    """系统错误日志-查询"""
+    page_num: int = Field(default=1, description='页码')
+    page_size: int = Field(default=10, description='每页条数')
+    level: Optional[str] = Field(None, description='级别')
+    source: Optional[str] = Field(None, description='来源模块')
+    days: Optional[int] = Field(None, description='最近N天')
+
+
+class SystemOperationLogCreate(BaseModel):
+    """系统操作日志-创建"""
+    operation_type: str = Field(..., description='操作类型')
+    operator: Optional[str] = Field(None, description='操作人')
+    target_type: Optional[str] = Field(None, description='操作对象类型')
+    target_id: Optional[str] = Field(None, description='对象标识')
+    detail: Optional[str] = Field(None, description='操作详情')
+    result: Optional[str] = Field(None, description='结果: success / failed')
+
+
+class SystemOperationLogResponse(BaseModel):
+    """系统操作日志-响应"""
+    id: int
+    operation_type: str
+    operator: Optional[str] = None
+    target_type: Optional[str] = None
+    target_id: Optional[str] = None
+    detail: Optional[str] = None
+    result: Optional[str] = None
+    created_at: str
+
+    @field_validator('created_at', mode='before')
+    @classmethod
+    def validate_timestamp(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d %H:%M:%S')
+        return str(v)
+
+    class Config:
+        from_attributes = True
+
+
+class SystemOperationLogQuery(BaseModel):
+    """系统操作日志-查询"""
+    page_num: int = Field(default=1, description='页码')
+    page_size: int = Field(default=10, description='每页条数')
+    operation_type: Optional[str] = Field(None, description='操作类型')
+    days: Optional[int] = Field(None, description='最近N天')
+
+
+class SystemLogOverviewResponse(BaseModel):
+    """系统日志概览-响应"""
+    today_error_count: int = Field(default=0, description='今日错误数')
+    today_operation_count: int = Field(default=0, description='今日操作数')
+    latest_sync_logs: List[SyncJobLogResponse] = Field(default_factory=list, description='各任务类型最新同步记录')
 

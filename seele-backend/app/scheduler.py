@@ -3,6 +3,8 @@
 """
 
 import logging
+import threading
+import traceback
 from datetime import datetime, timedelta
 from functools import wraps
 from typing import Callable
@@ -10,6 +12,7 @@ from typing import Callable
 import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from app.akshare_lock import akshare_lock
 from app.database import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -35,22 +38,24 @@ def get_scheduler() -> BackgroundScheduler:
 def _get_trade_dates() -> set[str]:
     """获取所有交易日（缓存到模块级变量）"""
     global _trade_dates_cache, _trade_dates_cache_time
-    if _trade_dates_cache is not None and _trade_dates_cache_time is not None:
-        if datetime.now() - _trade_dates_cache_time < timedelta(hours=6):
-            return _trade_dates_cache
+    with _trade_dates_lock:
+        if _trade_dates_cache is not None and _trade_dates_cache_time is not None:
+            if datetime.now() - _trade_dates_cache_time < timedelta(hours=6):
+                return _trade_dates_cache
 
-    try:
-        import akshare as ak
-        df = ak.tool_trade_date_hist_sina()
-        if df is not None and not df.empty:
-            df['trade_date'] = pd.to_datetime(df['trade_date'])
-            _trade_dates_cache = set(df['trade_date'].dt.strftime('%Y-%m-%d'))
-            _trade_dates_cache_time = datetime.now()
-            return _trade_dates_cache
-    except Exception as exc:
-        logger.warning('[SCHEDULER] 获取交易日历失败: %s', exc)
+        try:
+            import akshare as ak
+            with akshare_lock:
+                df = ak.tool_trade_date_hist_sina()
+            if df is not None and not df.empty:
+                df['trade_date'] = pd.to_datetime(df['trade_date'])
+                _trade_dates_cache = set(df['trade_date'].dt.strftime('%Y-%m-%d'))
+                _trade_dates_cache_time = datetime.now()
+                return _trade_dates_cache
+        except Exception as exc:
+            logger.warning('[SCHEDULER] 获取交易日历失败: %s', exc)
 
-    return set()
+        return set()
 
 
 def is_trading_day(check_date: datetime | None = None) -> bool:
@@ -98,6 +103,21 @@ def _with_job_log(job_type: str):
                 log_id = log.id
             except Exception as exc:
                 logger.error('[SCHEDULER] 创建 job log 失败: %s', exc, exc_info=True)
+                try:
+                    from app import crud as _crud, schemas as _schemas
+                    _db_err = SessionLocal()
+                    _crud.system_error_log_crud.create(
+                        _db_err,
+                        _schemas.SystemErrorLogCreate(
+                            level='error', source='scheduler', trace_id=None,
+                            message=f'创建 job log 失败: {exc}'[:1000],
+                            detail=traceback.format_exc()[:4000],
+                        )
+                    )
+                    _db_err.commit()
+                    _db_err.close()
+                except Exception as exc:
+                    logger.warning('[SCHEDULER] 写入 system_error_log 失败: %s', exc)
                 db.close()
                 raise
             finally:
@@ -111,11 +131,27 @@ def _with_job_log(job_type: str):
             except Exception as exc:
                 logger.error('[SCHEDULER] 任务执行异常: %s', exc, exc_info=True)
                 try:
+                    from app import crud as _crud, schemas as _schemas
+                    _db_err = SessionLocal()
+                    _crud.system_error_log_crud.create(
+                        _db_err,
+                        _schemas.SystemErrorLogCreate(
+                            level='error', source='scheduler', trace_id=str(log_id),
+                            message=f'任务执行异常: {exc}'[:1000],
+                            detail=traceback.format_exc()[:4000],
+                        )
+                    )
+                    _db_err.commit()
+                    _db_err.close()
+                except Exception as exc:
+                    logger.warning('[SCHEDULER] 写入 system_error_log 失败: %s', exc)
+                try:
                     crud.sync_job_log_crud.finish(
                         db2, log_id, 'failed', error_message=str(exc)[:2000]
                     )
-                except Exception:
-                    pass
+                    db2.commit()
+                except Exception as exc:
+                    logger.warning('[SCHEDULER] 更新 sync_job_log 失败状态失败: %s', exc)
                 raise
             finally:
                 db2.close()
@@ -125,3 +161,4 @@ def _with_job_log(job_type: str):
 
 _trade_dates_cache: set[str] | None = None
 _trade_dates_cache_time: datetime | None = None
+_trade_dates_lock = threading.Lock()

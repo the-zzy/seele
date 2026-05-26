@@ -9,7 +9,7 @@ from typing import List, Optional
 
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, func
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
 from ta.momentum import RSIIndicator
 from ta.trend import MACD
@@ -42,24 +42,25 @@ def _build_indicator_for_symbol(
     symbol: str,
     trade_date: date,
     lookback: int = 60,
+    rows: list | None = None,
 ) -> Optional[dict]:
-    """为单只股票计算指定日期的指标"""
-    # 获取该日期及之前 lookback 天的数据（按日期降序）
-    rows = (
-        db.query(models.StockDaily)
-        .filter(
-            and_(
-                models.StockDaily.symbol == symbol,
-                models.StockDaily.trade_date <= trade_date,
+    """为单只股票计算指定日期的指标。如果传入 rows 则直接使用，否则查询数据库。"""
+    if rows is None:
+        rows = (
+            db.query(models.StockDaily)
+            .filter(
+                and_(
+                    models.StockDaily.symbol == symbol,
+                    models.StockDaily.trade_date <= trade_date,
+                )
             )
+            .order_by(models.StockDaily.trade_date.desc())
+            .limit(lookback)
+            .all()
         )
-        .order_by(models.StockDaily.trade_date.desc())
-        .limit(lookback)
-        .all()
-    )
 
     if not rows:
-        print(f'[_build_indicator] {symbol} rows empty, trade_date={trade_date}')
+        logger.debug('[_build_indicator] %s rows empty, trade_date=%s', symbol, trade_date)
         return None
 
     closes = [r.close for r in rows if r.close is not None]
@@ -83,6 +84,8 @@ def _build_indicator_for_symbol(
         "amount_ma10": int(_compute_avg(amounts, 10)) if len(amounts) >= 10 else None,
         "turnover_ma5": _compute_avg(turnovers, 5) if len(turnovers) >= 5 else None,
         "turnover_ma10": _compute_avg(turnovers, 10) if len(turnovers) >= 10 else None,
+        "chg_5d": round((closes[0] - closes[4]) / closes[4] * 100, 2) if len(closes) >= 5 and closes[4] != 0 else None,
+        "chg_10d": round((closes[0] - closes[9]) / closes[9] * 100, 2) if len(closes) >= 10 and closes[9] != 0 else None,
         "macd_dif": None,
         "macd_dea": None,
         "macd_hist": None,
@@ -112,8 +115,8 @@ def _build_indicator_for_symbol(
                 result['macd_dif'] = float(round(macd.macd().iloc[-1], 4))
                 result['macd_dea'] = float(round(macd.macd_signal().iloc[-1], 4))
                 result['macd_hist'] = float(round(macd.macd_diff().iloc[-1], 4))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug('[INDICATOR] MACD 计算失败 %s: %s', symbol, exc)
 
             # RSI
             try:
@@ -123,8 +126,8 @@ def _build_indicator_for_symbol(
                 result['rsi_6'] = float(round(rsi_6.rsi().iloc[-1], 2))
                 result['rsi_12'] = float(round(rsi_12.rsi().iloc[-1], 2))
                 result['rsi_24'] = float(round(rsi_24.rsi().iloc[-1], 2))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug('[INDICATOR] RSI 计算失败 %s: %s', symbol, exc)
 
             # BOLL
             try:
@@ -132,8 +135,8 @@ def _build_indicator_for_symbol(
                 result['boll_upper'] = float(round(bb.bollinger_hband().iloc[-1], 2))
                 result['boll_middle'] = float(round(bb.bollinger_mavg().iloc[-1], 2))
                 result['boll_lower'] = float(round(bb.bollinger_lband().iloc[-1], 2))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug('[INDICATOR] BOLL 计算失败 %s: %s', symbol, exc)
 
             # KDJ
             try:
@@ -147,8 +150,8 @@ def _build_indicator_for_symbol(
                     result['kdj_k'] = float(round(k.iloc[-1], 2))
                     result['kdj_d'] = float(round(d.iloc[-1], 2))
                     result['kdj_j'] = float(round(j.iloc[-1], 2))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug('[INDICATOR] KDJ 计算失败 %s: %s', symbol, exc)
 
     # 将 NaN 替换为 None，避免 MySQL 写入失败
     for key in list(result.keys()):
@@ -199,8 +202,26 @@ def compute_indicators(
     failed_count = 0
     items = []
 
+    # 批量预查询所有股票的历史数据，避免 N+1
+    all_rows = (
+        db.query(models.StockDaily)
+        .filter(
+            models.StockDaily.symbol.in_(symbols),
+            models.StockDaily.trade_date <= formatted_date,
+        )
+        .order_by(models.StockDaily.symbol, models.StockDaily.trade_date.desc())
+        .all()
+    )
+    rows_by_symbol: dict[str, list] = {}
+    for row in all_rows:
+        symbol_rows = rows_by_symbol.setdefault(row.symbol, [])
+        if len(symbol_rows) < 60:
+            symbol_rows.append(row)
+
     for symbol in symbols:
-        indicator_data = _build_indicator_for_symbol(db, symbol, formatted_date)
+        indicator_data = _build_indicator_for_symbol(
+            db, symbol, formatted_date, rows=rows_by_symbol.get(symbol)
+        )
         if indicator_data is None:
             failed_count += 1
             continue
@@ -215,6 +236,7 @@ def compute_indicators(
         success_count = result["success"]
         failed_count = result["failed"]
 
+    db.commit()
     return success({
         "trade_date": trade_date,
         "total": total,
@@ -223,30 +245,3 @@ def compute_indicators(
     })
 
 
-# 3.1 根据股票代码查询指标
-@router.get("/symbol/{symbol}")
-def get_indicator_by_symbol(
-    symbol: str,
-    db: Session = Depends(get_db),
-):
-    """根据股票代码查询全部日线指标"""
-    objs = crud.stock_daily_indicator_crud.get_by_symbol(db, symbol)
-    return list_success([
-        schemas.StockDailyIndicatorResponse.model_validate(item)
-        for item in objs
-    ])
-
-
-# 3.2 根据交易日期查询指标
-@router.get("/date/{trade_date}")
-def get_indicator_by_date(
-    trade_date: str,
-    db: Session = Depends(get_db),
-):
-    """根据交易日期查询全部日线指标"""
-    formatted_date = trade_date.replace("-", "")
-    objs = crud.stock_daily_indicator_crud.get_by_date(db, formatted_date)
-    return list_success([
-        schemas.StockDailyIndicatorResponse.model_validate(item)
-        for item in objs
-    ])

@@ -5,246 +5,86 @@
 选股策略已拆分至 routes.pickers，市场情绪已拆分至 routes.market_sentiment。
 """
 
-from datetime import date
-from typing import List, Optional
+import concurrent.futures
+import logging
+import socket
+import threading
+from datetime import date, datetime
+from typing import Dict, List, Optional
 
+import akshare as ak
+import baostock as bs
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app import crud, models, schemas
+from app.akshare_lock import akshare_lock
 from app.database import get_db
-from app.filters import apply_main_board_filter
+from app.filters import apply_main_board_filter, get_baostock_code
 from app.response import list_success, page_success, success
 from app.schemas import StockDailyResponse
+
+logger = logging.getLogger(__name__)
+
+# akshare 全量实时行情缓存（30 秒 TTL）
+_akshare_spot_cache: dict = {"df": None, "ts": 0}
+_AKSHARE_CACHE_TTL = 30  # 秒
+_akshare_cache_lock = threading.Lock()
+
+
+def _refresh_live_price_cache():
+    """强制刷新 akshare 全量实时行情缓存（用于启动预热）"""
+    global _akshare_spot_cache
+    with _akshare_cache_lock:
+        _akshare_spot_cache = {"df": None, "ts": 0}
+    import time
+    now = time.time()
+    try:
+        with akshare_lock:
+            df = ak.stock_zh_a_spot_em()
+        if df is not None and not df.empty:
+            _akshare_spot_cache = {"df": df, "ts": now}
+            logger.info('[WARMUP] 实时股价缓存已预热，共 %d 条', len(df))
+            return True
+    except Exception as exc:
+        logger.warning('[WARMUP] 预热实时股价缓存失败: %s', exc)
+    return False
+
 
 router = APIRouter(prefix="/stock/daily", tags=["股票日线数据"])
 
 
-# 2.1 分页查询日线数据
-@router.post("/page")
-def post_stock_daily_page(
-    query: schemas.StockDailyQuery,
-    db: Session = Depends(get_db),
-):
-    """分页查询日线数据 - 仅查询沪深主板且非ST股票"""
-    q = db.query(models.StockDaily).join(
-        models.StockBasic,
-        models.StockDaily.symbol == models.StockBasic.symbol,
-    )
-    q = apply_main_board_filter(q)
-
-    if query.symbol:
-        q = q.filter(models.StockDaily.symbol == query.symbol)
-    if query.start_date:
-        q = q.filter(models.StockDaily.trade_date >= query.start_date)
-    if query.end_date:
-        q = q.filter(models.StockDaily.trade_date <= query.end_date)
-
-    total = q.with_entities(func.count(models.StockDaily.id)).scalar()
-    list_data = (
-        q.order_by(models.StockDaily.trade_date.desc())
-        .offset((query.page_num - 1) * query.page_size)
-        .limit(query.page_size)
-        .all()
-    )
-
-    return page_success(
-        items=[StockDailyResponse.model_validate(item) for item in list_data],
-        total=total,
-        page_num=query.page_num,
-        page_size=query.page_size,
-    )
+def _build_daily_indicator_item(row) -> dict:
+    """将 (StockDaily, indicator_fields...) 查询结果组装为统一字典"""
+    daily = row[0]
+    return {
+        "id": daily.id,
+        "trade_date": str(daily.trade_date),
+        "symbol": daily.symbol,
+        "open": daily.open,
+        "high": daily.high,
+        "low": daily.low,
+        "close": daily.close,
+        "volume": daily.volume,
+        "amount": daily.amount,
+        "amplitude": daily.amplitude,
+        "pct_chg": daily.pct_chg,
+        "price_change": daily.price_change,
+        "turnover": daily.turnover,
+        "ma5": row[1] if len(row) > 1 else None,
+        "ma10": row[2] if len(row) > 2 else None,
+        "ma20": row[3] if len(row) > 3 else None,
+        "ma30": row[4] if len(row) > 4 else None,
+        "ma60": row[5] if len(row) > 5 else None,
+        "vol_ma5": row[6] if len(row) > 6 else None,
+        "vol_ma10": row[7] if len(row) > 7 else None,
+        "turnover_ma5": row[8] if len(row) > 8 else None,
+        "turnover_ma10": row[9] if len(row) > 9 else None,
+    }
 
 
-# 2.3 根据股票代码查询全部日线（含指标）
-@router.get("/symbol/{symbol}")
-def get_stock_daily_by_symbol(
-    symbol: str,
-    db: Session = Depends(get_db),
-):
-    """根据股票代码查询全部日线 - 仅查询沪深主板且非ST股票，联查指标表"""
-    basic = (
-        apply_main_board_filter(db.query(models.StockBasic))
-        .filter(models.StockBasic.symbol == symbol)
-        .first()
-    )
-    if not basic:
-        raise HTTPException(status_code=404, detail="股票不存在或非主板/ST股票")
-
-    results = (
-        db.query(
-            models.StockDaily,
-            models.StockDailyIndicator.ma5,
-            models.StockDailyIndicator.ma10,
-            models.StockDailyIndicator.ma20,
-            models.StockDailyIndicator.ma30,
-            models.StockDailyIndicator.ma60,
-            models.StockDailyIndicator.vol_ma5,
-            models.StockDailyIndicator.vol_ma10,
-            models.StockDailyIndicator.turnover_ma5,
-            models.StockDailyIndicator.turnover_ma10,
-        )
-        .outerjoin(
-            models.StockDailyIndicator,
-            and_(
-                models.StockDaily.symbol == models.StockDailyIndicator.symbol,
-                models.StockDaily.trade_date == models.StockDailyIndicator.trade_date,
-            ),
-        )
-        .filter(models.StockDaily.symbol == symbol)
-        .order_by(models.StockDaily.trade_date.desc())
-        .all()
-    )
-
-    data_list = []
-    for row in results:
-        daily = row[0]
-        data_list.append({
-            "id": daily.id,
-            "trade_date": str(daily.trade_date),
-            "symbol": daily.symbol,
-            "open": daily.open,
-            "high": daily.high,
-            "low": daily.low,
-            "close": daily.close,
-            "volume": daily.volume,
-            "amount": daily.amount,
-            "amplitude": daily.amplitude,
-            "pct_chg": daily.pct_chg,
-            "price_change": daily.price_change,
-            "turnover": daily.turnover,
-            "ma5": row[1],
-            "ma10": row[2],
-            "ma20": row[3],
-            "ma30": row[4],
-            "ma60": row[5],
-            "vol_ma5": row[6],
-            "vol_ma10": row[7],
-            "turnover_ma5": row[8],
-            "turnover_ma10": row[9],
-        })
-
-    return list_success(data_list)
-
-
-# 2.4 批量查询日线数据
-@router.post("/symbols")
-def post_stock_daily_symbols(
-    symbols: List[str],
-    db: Session = Depends(get_db),
-):
-    """批量查询日线数据 - 仅查询沪深主板且非ST股票"""
-    basics = (
-        apply_main_board_filter(db.query(models.StockBasic.symbol))
-        .filter(models.StockBasic.symbol.in_(symbols))
-        .all()
-    )
-    valid_symbols = [b[0] for b in basics]
-    objs = crud.stock_daily_crud.get_batch(db, valid_symbols)
-    return list_success([StockDailyResponse.model_validate(item) for item in objs])
-
-
-# 2.5 根据日期范围查询（含指标）
-@router.get("/symbol/{symbol}/range")
-def get_stock_daily_by_symbol_range(
-    symbol: str,
-    start_date: date = Query(..., description="开始日期"),
-    end_date: date = Query(..., description="结束日期"),
-    db: Session = Depends(get_db),
-):
-    """根据日期范围查询 - 仅查询沪深主板且非ST股票，联查指标表"""
-    basic = (
-        apply_main_board_filter(db.query(models.StockBasic))
-        .filter(models.StockBasic.symbol == symbol)
-        .first()
-    )
-    if not basic:
-        raise HTTPException(status_code=404, detail="股票不存在或非主板/ST股票")
-
-    results = (
-        db.query(
-            models.StockDaily,
-            models.StockDailyIndicator.ma5,
-            models.StockDailyIndicator.ma10,
-            models.StockDailyIndicator.ma20,
-            models.StockDailyIndicator.ma30,
-            models.StockDailyIndicator.ma60,
-            models.StockDailyIndicator.vol_ma5,
-            models.StockDailyIndicator.vol_ma10,
-            models.StockDailyIndicator.turnover_ma5,
-            models.StockDailyIndicator.turnover_ma10,
-        )
-        .outerjoin(
-            models.StockDailyIndicator,
-            and_(
-                models.StockDaily.symbol == models.StockDailyIndicator.symbol,
-                models.StockDaily.trade_date == models.StockDailyIndicator.trade_date,
-            ),
-        )
-        .filter(
-            and_(
-                models.StockDaily.symbol == symbol,
-                models.StockDaily.trade_date >= start_date,
-                models.StockDaily.trade_date <= end_date,
-            )
-        )
-        .order_by(models.StockDaily.trade_date.asc())
-        .all()
-    )
-
-    data_list = []
-    for row in results:
-        daily = row[0]
-        data_list.append({
-            "id": daily.id,
-            "trade_date": str(daily.trade_date),
-            "symbol": daily.symbol,
-            "open": daily.open,
-            "high": daily.high,
-            "low": daily.low,
-            "close": daily.close,
-            "volume": daily.volume,
-            "amount": daily.amount,
-            "amplitude": daily.amplitude,
-            "pct_chg": daily.pct_chg,
-            "price_change": daily.price_change,
-            "turnover": daily.turnover,
-            "ma5": row[1],
-            "ma10": row[2],
-            "ma20": row[3],
-            "ma30": row[4],
-            "ma60": row[5],
-            "vol_ma5": row[6],
-            "vol_ma10": row[7],
-            "turnover_ma5": row[8],
-            "turnover_ma10": row[9],
-        })
-
-    return list_success(data_list)
-
-
-# 2.6 根据交易日期查询
-@router.get("/date/{trade_date}")
-def get_stock_daily_by_date(
-    trade_date: str,
-    db: Session = Depends(get_db),
-):
-    """根据交易日期查询 - 仅查询沪深主板且非ST股票"""
-    formatted_date = trade_date.replace("-", "")
-    q = db.query(models.StockDaily).join(
-        models.StockBasic,
-        models.StockDaily.symbol == models.StockBasic.symbol,
-    )
-    objs = (
-        apply_main_board_filter(q)
-        .filter(models.StockDaily.trade_date == formatted_date)
-        .all()
-    )
-    return list_success([StockDailyResponse.model_validate(item) for item in objs])
-
-
-# 2.6.1 根据交易日期获取全部A股数据（关联basic表及指标表）— 服务端分页
+# 2.1 根据交易日期获取全部A股数据（关联basic表及指标表）— 服务端分页
 @router.get("/date/{trade_date}/all")
 def get_stock_daily_all_by_date(
     trade_date: str,
@@ -263,13 +103,11 @@ def get_stock_daily_all_by_date(
     """根据交易日期分页获取A股数据（关联 stock_basic 及 stock_daily_indicator）"""
     formatted_date = trade_date.replace("-", "")
 
+    # 使用 STRAIGHT_JOIN 强制 MySQL 按 FROM 子句顺序执行 JOIN，
+    # 避免优化器误选 stock_basic 作为驱动表导致全表扫描。
     q = (
         db.query(
             models.StockDaily,
-            models.StockBasic.name.label("stock_name"),
-            models.StockBasic.industry,
-            models.StockBasic.market,
-            models.StockBasic.area,
             models.StockDailyIndicator.ma5,
             models.StockDailyIndicator.ma10,
             models.StockDailyIndicator.ma20,
@@ -279,7 +117,12 @@ def get_stock_daily_all_by_date(
             models.StockDailyIndicator.vol_ma10,
             models.StockDailyIndicator.turnover_ma5,
             models.StockDailyIndicator.turnover_ma10,
+            models.StockBasic.name.label("stock_name"),
+            models.StockBasic.industry,
+            models.StockBasic.market,
+            models.StockBasic.area,
         )
+        .prefix_with('STRAIGHT_JOIN')
         .join(models.StockBasic, models.StockDaily.symbol == models.StockBasic.symbol)
         .outerjoin(
             models.StockDailyIndicator,
@@ -321,6 +164,43 @@ def get_stock_daily_all_by_date(
     if min_pct_chg is not None:
         q = q.filter(models.StockDaily.pct_chg > min_pct_chg)
 
+    # 优化 COUNT：用子查询替代 JOIN，避免大表 JOIN 开销
+    basic_subq = db.query(models.StockBasic.symbol).filter(
+        models.StockBasic.market == "主板",
+        ~models.StockBasic.name.like('%ST%'),
+    )
+    if exclude_cyb:
+        basic_subq = basic_subq.filter(
+            models.StockBasic.symbol.notlike("300%"),
+            models.StockBasic.symbol.notlike("301%"),
+        )
+    if exclude_kcb:
+        basic_subq = basic_subq.filter(
+            models.StockBasic.symbol.notlike("688%"),
+            models.StockBasic.symbol.notlike("689%"),
+        )
+    if exclude_bse:
+        basic_subq = basic_subq.filter(
+            models.StockBasic.symbol.notlike("4%"),
+            models.StockBasic.symbol.notlike("8%"),
+        )
+    if symbol:
+        like_pattern = f"%{symbol}%"
+        basic_subq = basic_subq.filter(
+            or_(
+                models.StockBasic.symbol.like(like_pattern),
+                models.StockBasic.name.like(like_pattern),
+            )
+        )
+
+    count_q = db.query(models.StockDaily).filter(
+        models.StockDaily.trade_date == formatted_date,
+        models.StockDaily.symbol.in_(basic_subq),
+    )
+    if min_pct_chg is not None:
+        count_q = count_q.filter(models.StockDaily.pct_chg > min_pct_chg)
+    total = count_q.with_entities(func.count(models.StockDaily.id)).scalar() or 0
+
     # 排序映射
     sort_column_map = {
         'symbol': models.StockDaily.symbol,
@@ -351,9 +231,6 @@ def get_stock_daily_all_by_date(
     else:
         q = q.order_by(sort_column.asc())
 
-    # 总数
-    total = q.with_entities(func.count(models.StockDaily.id)).scalar() or 0
-
     # 分页
     results = (
         q.offset((page_num - 1) * page_size)
@@ -362,50 +239,15 @@ def get_stock_daily_all_by_date(
     )
 
     data_list = []
-    for (
-        daily,
-        stock_name,
-        industry,
-        market,
-        area,
-        ma5,
-        ma10,
-        ma20,
-        ma30,
-        ma60,
-        vol_ma5,
-        vol_ma10,
-        turnover_ma5,
-        turnover_ma10,
-    ) in results:
-        data_list.append({
-            'id': daily.id,
-            'trade_date': str(daily.trade_date),
-            'symbol': daily.symbol,
-            'stock_name': stock_name or '',
-            'industry': industry or '',
-            'market': market or '',
-            'area': area or '',
-            'open': daily.open,
-            'high': daily.high,
-            'low': daily.low,
-            'close': daily.close,
-            'volume': daily.volume,
-            'amount': daily.amount,
-            'amplitude': daily.amplitude,
-            'pct_chg': daily.pct_chg,
-            'price_change': daily.price_change,
-            'turnover': daily.turnover,
-            'ma5': ma5,
-            'ma10': ma10,
-            'ma20': ma20,
-            'ma30': ma30,
-            'ma60': ma60,
-            'vol_ma5': vol_ma5,
-            'vol_ma10': vol_ma10,
-            'turnover_ma5': turnover_ma5,
-            'turnover_ma10': turnover_ma10,
+    for row in results:
+        item = _build_daily_indicator_item(row)
+        item.update({
+            'stock_name': row[10] if len(row) > 10 else '',
+            'industry': row[11] if len(row) > 11 else '',
+            'market': row[12] if len(row) > 12 else '',
+            'area': row[13] if len(row) > 13 else '',
         })
+        data_list.append(item)
 
     return page_success(
         items=data_list,
@@ -416,142 +258,3 @@ def get_stock_daily_all_by_date(
     )
 
 
-# 2.7 获取交易日列表
-@router.get("/trade-dates")
-def get_stock_daily_trade_dates(
-    db: Session = Depends(get_db),
-):
-    """获取交易日列表"""
-    dates = crud.stock_daily_crud.get_trade_dates(db)
-    return list_success([str(d) for d in dates])
-
-
-# 2.8 新增日线数据
-@router.post("")
-def post_stock_daily(
-    obj_in: schemas.StockDailyCreate,
-    db: Session = Depends(get_db),
-):
-    """新增日线数据"""
-    obj = crud.stock_daily_crud.upsert(db, obj_in)
-    return success(StockDailyResponse.model_validate(obj))
-
-
-# 2.9 批量新增
-@router.post("/batch")
-def post_stock_daily_batch(
-    obj_list: List[schemas.StockDailyCreate],
-    db: Session = Depends(get_db),
-):
-    """批量新增"""
-    count = crud.stock_daily_crud.create_batch(db, obj_list)
-    return success(f"成功创建 {count} 条数据")
-
-
-# 2.10 更新日线数据
-@router.put("")
-def put_stock_daily(
-    obj_in: schemas.StockDailyUpdate,
-    db: Session = Depends(get_db),
-):
-    """更新日线数据"""
-    obj = crud.stock_daily_crud.update(db, obj_in)
-    if not obj:
-        raise HTTPException(status_code=404, detail="日线数据不存在")
-    return success(StockDailyResponse.model_validate(obj))
-
-
-# 2.11 根据日期和涨幅筛选股票
-@router.get("/top-pct-chg")
-def get_stock_daily_top_pct_chg(
-    trade_date: str = Query(..., description="交易日期，格式 2026-04-14 或 20260412"),
-    min_pct_chg: float = Query(5.0, description="最小涨幅百分比"),
-    db: Session = Depends(get_db),
-):
-    """获取指定日期涨幅超过固定百分比的股票数据"""
-    formatted_date = trade_date.replace("-", "")
-
-    total_stocks = (
-        apply_main_board_filter(db.query(func.count(models.StockBasic.id))).scalar() or 0
-    )
-
-    q = (
-        db.query(
-            models.StockDaily,
-            models.StockBasic.name.label("stock_name"),
-            models.StockBasic.industry,
-            models.StockBasic.market,
-            models.StockBasic.area,
-        )
-        .join(models.StockBasic, models.StockDaily.symbol == models.StockBasic.symbol)
-    )
-    results = (
-        apply_main_board_filter(q)
-        .filter(
-            models.StockDaily.trade_date == formatted_date,
-            models.StockDaily.pct_chg >= min_pct_chg,
-        )
-        .order_by(models.StockDaily.pct_chg.desc())
-        .all()
-    )
-
-    matched_count = len(results)
-    matched_percent = round(matched_count / total_stocks * 100, 2) if total_stocks else 0.0
-
-    data_list = [
-        {
-            "id": daily.id,
-            "trade_date": str(daily.trade_date),
-            "symbol": daily.symbol,
-            "stock_name": stock_name or "",
-            "industry": industry or "",
-            "market": market or "",
-            "area": area or "",
-            "open": daily.open,
-            "high": daily.high,
-            "low": daily.low,
-            "close": daily.close,
-            "volume": daily.volume,
-            "amount": daily.amount,
-            "amplitude": daily.amplitude,
-            "pct_chg": daily.pct_chg,
-            "price_change": daily.price_change,
-            "turnover": daily.turnover,
-        }
-        for daily, stock_name, industry, market, area in results
-    ]
-
-    return success({
-        "trade_date": trade_date,
-        "min_pct_chg": min_pct_chg,
-        "total_stocks": total_stocks,
-        "matched_count": matched_count,
-        "matched_percent": matched_percent,
-        "list": data_list,
-    })
-
-
-# 2.2 根据ID查询 (放在后面避免路由冲突)
-@router.get("/{id}")
-def get_stock_daily_by_id(
-    id: int,
-    db: Session = Depends(get_db),
-):
-    """根据ID查询"""
-    obj = crud.stock_daily_crud.get_by_id(db, id)
-    if not obj:
-        raise HTTPException(status_code=404, detail="日线数据不存在")
-    return success(StockDailyResponse.model_validate(obj))
-
-
-# 2.11 删除日线数据
-@router.delete("/{id}")
-def delete_stock_daily(
-    id: int,
-    db: Session = Depends(get_db),
-):
-    """删除日线数据"""
-    deleted = crud.stock_daily_crud.delete(db, id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="日线数据不存在")
-    return success(None)

@@ -2,7 +2,7 @@
 数据库模型模块
 """
 
-from sqlalchemy import Column, Integer, String, Float, Date, UniqueConstraint, BigInteger, TIMESTAMP
+from sqlalchemy import Column, Integer, String, Float, Date, UniqueConstraint, BigInteger, TIMESTAMP, Index
 from sqlalchemy.sql import func
 
 from app.database import Base
@@ -40,9 +40,10 @@ class StockDaily(Base):
     price_change = Column(Float, comment="涨跌额")
     turnover = Column(Float, comment="换手率")
 
-    # 复合唯一索引
+    # 复合唯一索引 + 查询索引
     __table_args__ = (
         UniqueConstraint('trade_date', 'symbol', name='uq_trade_date_symbol'),
+        Index('idx_stock_daily_symbol_trade_date', 'symbol', 'trade_date'),
     )
 
 
@@ -64,6 +65,8 @@ class StockDailyIndicator(Base):
     amount_ma10 = Column(BigInteger, comment="10日平均成交额")
     turnover_ma5 = Column(Float, comment="5日平均换手率(%)")
     turnover_ma10 = Column(Float, comment="10日平均换手率(%)")
+    chg_5d = Column(Float, comment="5日涨幅(%)")
+    chg_10d = Column(Float, comment="10日涨幅(%)")
     macd_dif = Column(Float, comment="MACD DIF")
     macd_dea = Column(Float, comment="MACD DEA")
     macd_hist = Column(Float, comment="MACD 柱状图")
@@ -170,6 +173,7 @@ class PortfolioDailyPosition(Base):
 
     __table_args__ = (
         UniqueConstraint('trade_date', 'symbol', name='uq_daily_position_date_symbol'),
+        Index('idx_daily_position_symbol_trade_date', 'symbol', 'trade_date'),
     )
 
 
@@ -273,6 +277,105 @@ class StockFinancialIndicator(Base):
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
 
 
+class StockSuspension(Base):
+    """股票停牌信息表"""
+    __tablename__ = 'stock_suspension'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False, index=True, comment='股票代码')
+    name = Column(String(100), comment='股票名称')
+    suspend_date = Column(Date, nullable=False, index=True, comment='停牌日期')
+    resume_date = Column(Date, comment='复牌日期')
+    reason = Column(String(255), comment='停牌原因')
+    created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
+
+    __table_args__ = (
+        UniqueConstraint('symbol', 'suspend_date', name='uq_suspension_symbol_date'),
+    )
+
+
+class IndexDaily(Base):
+    """指数日线数据表"""
+    __tablename__ = 'index_daily'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False, index=True, comment='指数代码')
+    name = Column(String(50), comment='指数名称')
+    trade_date = Column(Date, nullable=False, index=True, comment='交易日期')
+    open = Column(Float, comment='开盘价')
+    high = Column(Float, comment='最高价')
+    low = Column(Float, comment='最低价')
+    close = Column(Float, comment='收盘价')
+    preclose = Column(Float, comment='前收盘价')
+    volume = Column(Float, comment='成交量')
+    amount = Column(Float, comment='成交额')
+    pct_chg = Column(Float, comment='涨跌幅')
+
+    __table_args__ = (
+        UniqueConstraint('trade_date', 'symbol', name='uq_index_daily_date_symbol'),
+    )
+
+
+class IndexConstituent(Base):
+    """指数成分股映射表"""
+    __tablename__ = 'index_constituent'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    index_symbol = Column(String(20), nullable=False, index=True, comment='指数代码')
+    constituent_symbol = Column(String(20), nullable=False, index=True, comment='成分股代码')
+    update_date = Column(Date, comment='成分股更新日期')
+
+    __table_args__ = (
+        UniqueConstraint('index_symbol', 'constituent_symbol', name='uq_index_constituent'),
+    )
+
+
+class BoardInfo(Base):
+    """板块/ETF基础信息表"""
+    __tablename__ = 'board_info'
+
+    code = Column(String(20), primary_key=True, comment='板块/ETF代码')
+    name = Column(String(100), nullable=False, comment='板块/ETF名称')
+    category = Column(String(20), nullable=False, comment='类型: industry/concept/etf')
+    exchange = Column(String(10), comment='交易所')
+    source = Column(String(20), comment='数据来源')
+
+
+class BoardConstituent(Base):
+    """板块/ETF成分股映射表"""
+    __tablename__ = 'board_constituent'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    board_code = Column(String(20), nullable=False, index=True, comment='板块/ETF代码')
+    constituent_symbol = Column(String(20), nullable=False, index=True, comment='成分股代码')
+    update_date = Column(Date, comment='更新日期')
+
+    __table_args__ = (
+        UniqueConstraint('board_code', 'constituent_symbol', name='uq_board_constituent'),
+    )
+
+
+class BoardDaily(Base):
+    """板块/ETF日线数据表"""
+    __tablename__ = 'board_daily'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(20), nullable=False, index=True, comment='板块/ETF代码')
+    trade_date = Column(Date, nullable=False, index=True, comment='交易日期')
+    open = Column(Float, comment='开盘价')
+    high = Column(Float, comment='最高价')
+    low = Column(Float, comment='最低价')
+    close = Column(Float, comment='收盘价')
+    volume = Column(Float, comment='成交量')
+    amount = Column(Float, comment='成交额')
+    pct_chg = Column(Float, comment='涨跌幅')
+
+    __table_args__ = (
+        UniqueConstraint('trade_date', 'code', name='uq_board_daily_date_code'),
+    )
+
+
 class SyncJobLog(Base):
     """同步任务执行日志表"""
     __tablename__ = 'sync_job_log'
@@ -281,7 +384,7 @@ class SyncJobLog(Base):
     job_type = Column(String(50), nullable=False, index=True, comment='任务类型: stock_basic / daily / financial / indicator')
     trigger_type = Column(String(20), nullable=False, default='scheduled', comment='触发方式: scheduled / manual')
     status = Column(String(20), nullable=False, default='running', comment='状态: running / success / failed / skipped')
-    started_at = Column(TIMESTAMP, server_default=func.now(), nullable=False, comment='开始时间')
+    started_at = Column(TIMESTAMP, server_default=func.now(), nullable=False, index=True, comment='开始时间')
     ended_at = Column(TIMESTAMP, nullable=True, comment='结束时间')
     duration_seconds = Column(Integer, nullable=True, comment='执行耗时(秒)')
     success_count = Column(Integer, nullable=True, default=0, comment='成功处理数')
@@ -291,3 +394,53 @@ class SyncJobLog(Base):
     trade_date = Column(String(8), nullable=True, comment='关联交易日')
     error_message = Column(String(2000), nullable=True, comment='错误信息')
     extra_info = Column(String(1000), nullable=True, comment='额外信息')
+
+
+class TradeCalendar(Base):
+    """交易日历表"""
+    __tablename__ = 'trade_calendar'
+
+    trade_date = Column(Date, primary_key=True, nullable=False, comment='日期')
+    is_trading_day = Column(Integer, nullable=False, default=1, comment='是否交易日: 1是 0否')
+    year = Column(Integer, nullable=False, index=True, comment='年份')
+    quarter = Column(Integer, nullable=False, comment='季度')
+    month = Column(Integer, nullable=False, comment='月份')
+    week = Column(Integer, nullable=False, comment='周数')
+    weekday = Column(Integer, nullable=False, comment='星期几: 0=周一 6=周日')
+    is_weekend = Column(Integer, nullable=False, default=0, comment='是否周末: 1是 0否')
+    created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
+
+
+class SystemErrorLog(Base):
+    """系统错误日志表"""
+    __tablename__ = 'system_error_log'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    level = Column(String(20), nullable=False, default='error', index=True, comment='级别: error / warning / critical')
+    source = Column(String(100), nullable=False, index=True, comment='来源模块')
+    trace_id = Column(String(50), nullable=True, comment='关联ID: task_id / log_id / pipeline_id')
+    message = Column(String(1000), nullable=False, comment='错误消息')
+    detail = Column(String(4000), nullable=True, comment='详细内容: traceback等')
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False, index=True, comment='创建时间')
+
+    __table_args__ = (
+        {'mysql_engine': 'InnoDB', 'comment': '系统错误日志表'},
+    )
+
+
+class SystemOperationLog(Base):
+    """系统操作日志表"""
+    __tablename__ = 'system_operation_log'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    operation_type = Column(String(50), nullable=False, index=True, comment='操作类型: sync_manual / pipeline_start / pipeline_cancel / job_cancel / config_update')
+    operator = Column(String(50), nullable=True, comment='操作人')
+    target_type = Column(String(50), nullable=True, comment='操作对象类型: job / pipeline / stock / config')
+    target_id = Column(String(100), nullable=True, comment='对象标识')
+    detail = Column(String(1000), nullable=True, comment='操作详情')
+    result = Column(String(20), nullable=True, comment='结果: success / failed')
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False, index=True, comment='创建时间')
+
+    __table_args__ = (
+        {'mysql_engine': 'InnoDB', 'comment': '系统操作日志表'},
+    )

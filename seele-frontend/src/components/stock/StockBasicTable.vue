@@ -12,6 +12,7 @@ const columns = [
   { key: 'symbol', label: '股票代码', align: 'left' },
   { key: 'name', label: '股票名称', align: 'left' },
   { key: 'industry', label: '所属行业', align: 'left' },
+  { key: 'boards', label: '所属板块', align: 'left' },
   { key: 'area', label: '所在地区', align: 'left' },
   { key: 'market', label: '市场板块', align: 'center' },
   { key: 'listDate', label: '上市日期', align: 'center' },
@@ -69,17 +70,18 @@ function onRowDblClick (item) {
     <div v-else-if="list.length === 0" class="state empty">暂无数据</div>
     <table v-else class="stock-table">
       <colgroup>
-        <col style="width: 9%">
-        <col style="width: 11%">
-        <col style="width: 14%">
+        <col style="width: 8%">
         <col style="width: 10%">
+        <col style="width: 12%">
+        <col style="width: 12%">
+        <col style="width: 8%">
+        <col style="width: 8%">
         <col style="width: 9%">
-        <col style="width: 10%">
-        <col style="width: 8%">
-        <col style="width: 8%">
-        <col style="width: 8%">
-        <col style="width: 8%">
-        <col style="width: 8%">
+        <col style="width: 7%">
+        <col style="width: 7%">
+        <col style="width: 7%">
+        <col style="width: 7%">
+        <col style="width: 7%">
       </colgroup>
       <thead>
         <tr>
@@ -105,6 +107,21 @@ function onRowDblClick (item) {
           <td class="code">{{ extractCodeNum(item.symbol) }}</td>
           <td class="name">{{ item.name }}</td>
           <td class="td-left">{{ item.industry || '—' }}</td>
+          <td class="td-left">
+            <div v-if="item.boards" class="board-tags">
+              <span
+                v-for="b in item.boards.boards || []"
+                :key="b.code"
+                class="board-tag"
+              >{{ b.name }}</span>
+              <span
+                v-if="item.boards.industry_board"
+                class="board-tag industry"
+              >{{ item.boards.industry_board.name }}</span>
+              <span v-if="!(item.boards.boards?.length) && !item.boards.industry_board">—</span>
+            </div>
+            <span v-else>—</span>
+          </td>
           <td class="td-left">{{ item.area || '—' }}</td>
           <td class="td-center">{{ item.market || '—' }}</td>
           <td class="td-center">{{ formatDate(item.listDate) }}</td>
@@ -120,5 +137,33 @@ function onRowDblClick (item) {
 </template>
 
 <style scoped lang="scss">
-/* 组件特有样式 */
+.table-section {
+  overflow-x: auto;
+}
+
+.stock-table {
+  min-width: 1080px;
+}
+
+.board-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.board-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+  white-space: nowrap;
+
+  &.industry {
+    background: rgba(34, 197, 94, 0.1);
+    color: #22c55e;
+  }
+}
 </style>
