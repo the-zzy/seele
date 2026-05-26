@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useEChart } from '@/composables/useEChart'
+import { toast } from '@/composables/useToast'
 import { stockDailyApi } from '@/api/stock'
 import PageHero from '@/components/common/PageHero.vue'
 
@@ -103,11 +104,11 @@ function initChart (data) {
 
 async function handleChartQuery () {
   if (!chartStartDate.value || !chartEndDate.value) {
-    alert('请选择日期范围')
+    toast.warning('请选择日期范围')
     return
   }
   if (chartStartDate.value > chartEndDate.value) {
-    alert('开始日期不能晚于结束日期')
+    toast.warning('开始日期不能晚于结束日期')
     return
   }
 

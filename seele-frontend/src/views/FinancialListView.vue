@@ -14,7 +14,7 @@ const total = ref(0)
 const pageNum = ref(1)
 const pageSize = ref(10)
 
-const filterForm = reactive({
+let filterForm = reactive({
   symbol: '',
   name: '',
   industry: '',
@@ -198,6 +198,10 @@ onMounted(() => {
   padding: 4px 28px 18px;
   box-sizing: border-box;
   overflow: hidden;
+
+  @media (max-width: 768px) {
+    padding: 4px 16px 12px;
+  }
 }
 
 .filter-section {
@@ -209,6 +213,7 @@ onMounted(() => {
   border: 1px solid var(--rule);
   border-radius: 6px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 
 .filter-fields {

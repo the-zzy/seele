@@ -73,17 +73,26 @@ function pnlClass (v) {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
+
+  @media (max-width: 1200px) {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  @media (max-width: 768px) {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
 }
 
 .stat-card {
   background: var(--bg-secondary);
   border: 1px solid var(--rule);
   border-radius: 8px;
-  padding: 16px 18px;
+  padding: 10px 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
 
 .stat-label {

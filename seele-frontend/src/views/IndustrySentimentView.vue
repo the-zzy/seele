@@ -1,23 +1,24 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { marketSentimentApi, stockDailyApi } from '@/api/stock'
+import { indexApi, marketSentimentApi, tradeCalendarApi } from '@/api/stock'
 import PageHero from '@/components/common/PageHero.vue'
+import { formatNumber } from '@/utils/formatters'
 
 const industryList = ref([])
 const industryDate = ref('')
 const industryLoading = ref(false)
-const tradeDates = ref([])
+const indexList = ref([])
+const indexLoading = ref(false)
 
-async function loadTradeDates () {
+async function loadLatestTradeDate () {
   try {
-    const dates = await stockDailyApi.getTradeDates()
-    tradeDates.value = dates || []
-    if (tradeDates.value.length > 0 && !industryDate.value) {
-      industryDate.value = tradeDates.value[0]
-      await loadIndustrySentiment(industryDate.value)
+    const date = await tradeCalendarApi.getLatest()
+    if (date) {
+      industryDate.value = date
+      await loadIndustrySentiment(date)
     }
   } catch (error) {
-    console.error('加载交易日列表失败:', error)
+    console.error('获取最近交易日失败:', error)
   }
 }
 
@@ -35,6 +36,19 @@ async function loadIndustrySentiment (tradeDate) {
   }
 }
 
+async function loadIndexList () {
+  indexLoading.value = true
+  try {
+    const res = await indexApi.getIndexList()
+    indexList.value = res?.data || []
+  } catch (error) {
+    console.error('加载指数数据失败:', error)
+    indexList.value = []
+  } finally {
+    indexLoading.value = false
+  }
+}
+
 function handleQuery () {
   loadIndustrySentiment(industryDate.value)
 }
@@ -47,8 +61,17 @@ function getIndustryClass (avgPctChg) {
   return 'flat'
 }
 
+function getPriceClass (val) {
+  if (val === null || val === undefined) return ''
+  const v = parseFloat(val)
+  if (v > 0) return 'up'
+  if (v < 0) return 'down'
+  return ''
+}
+
 onMounted(() => {
-  loadTradeDates()
+  loadLatestTradeDate()
+  loadIndexList()
 })
 </script>
 
@@ -62,12 +85,36 @@ onMounted(() => {
       meta="板块统计"
     />
 
+    <div class="index-cards">
+      <div v-if="indexLoading" class="index-loading">加载指数…</div>
+      <template v-else>
+        <div
+          v-for="item in indexList"
+          :key="item.symbol"
+          class="index-card"
+        >
+          <div class="index-header">
+            <span class="index-name">{{ item.name }}</span>
+            <span class="index-source">{{ item.data_source === 'akshare_spot' ? '实时' : '缓存' }}</span>
+          </div>
+          <div class="index-close" :class="getPriceClass(item.latest_pct_chg)">
+            {{ item.latest_close != null ? formatNumber(item.latest_close) : '-' }}
+          </div>
+          <div class="index-pct" :class="getPriceClass(item.latest_pct_chg)">
+            {{ item.latest_pct_chg != null ? (item.latest_pct_chg > 0 ? '+' : '') + item.latest_pct_chg + '%' : '-' }}
+          </div>
+          <div class="index-date">{{ item.latest_trade_date || '-' }}</div>
+        </div>
+      </template>
+      <button class="index-refresh" title="刷新指数" @click="loadIndexList">
+        ↻
+      </button>
+    </div>
+
     <div class="filter-section">
       <div class="filter-item">
         <label>交易日期</label>
-        <select v-model="industryDate">
-          <option v-for="d in tradeDates" :key="d" :value="d">{{ d }}</option>
-        </select>
+        <input v-model="industryDate" type="date" />
       </div>
       <div class="filter-item filter-actions">
         <button class="btn-primary" @click="handleQuery">查询板块</button>
@@ -124,6 +171,88 @@ onMounted(() => {
   font-family: var(--font-body);
   color: var(--text-faint);
   font-size: 13px;
+}
+
+.index-cards {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.index-loading {
+  padding: 12px;
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
+.index-card {
+  flex: 1;
+  min-width: 140px;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.index-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.index-name {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.index-source {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+}
+
+.index-refresh {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+
+  &:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--border-focus);
+    color: var(--text-primary);
+  }
+}
+
+.index-close {
+  font-size: 18px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.index-pct {
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+
+.index-date {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 .industry-table-wrapper {

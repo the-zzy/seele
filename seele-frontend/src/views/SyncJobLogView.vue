@@ -1,22 +1,46 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
+import { toast } from '@/composables/useToast'
 import { syncApi } from '@/api/stock'
+import { useSyncTask } from '@/composables/useSyncTask'
 import PageHero from '@/components/common/PageHero.vue'
 
 const logs = ref([])
 const loading = ref(false)
-const syncing = ref({})
 const days = ref(5)
 const jobType = ref('')
-const dbStatus = ref(null)
 const detailedStatus = ref(null)
-const syncDates = ref({ daily: '', indicator: '' })
-const taskProgress = ref({})
-const pollTimers = ref({})
+const incrementalMap = ref({})
 
-function getTodayStr () {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const { syncing, progress: taskProgress, startSync, restoreTasks, clearPoll } = useSyncTask()
+
+const pipeline = ref(null)
+const pipelinePollTimer = ref(null)
+const pipelineLoading = ref(false)
+
+const todayStr = new Date().toISOString().slice(0, 10)
+const pipelineDateMap = ref({
+  daily: todayStr,
+  full: todayStr,
+  board: todayStr
+})
+
+const chainDefinitions = {
+  daily: {
+    label: '每日更新',
+    desc: '股票基础 → 日线 → 指标',
+    steps: ['股票基础信息', '日线数据', '指标计算']
+  },
+  full: {
+    label: '全量更新',
+    desc: '基础 → 日线 → 指标 → 财务 → 板块 → 指数',
+    steps: ['股票基础信息', '日线数据', '指标计算', '财务指标', '板块/ETF列表', '板块/ETF日线', '板块成分股', '指数日线', '指数成分股']
+  },
+  board: {
+    label: '板块更新',
+    desc: '板块列表 → 板块日线 → 成分股',
+    steps: ['板块/ETF列表', '板块/ETF日线', '板块成分股']
+  }
 }
 
 const jobTypeMap = {
@@ -40,46 +64,119 @@ const statusClass = {
   skipped: 'status-skipped'
 }
 
-const taskGroups = computed(() => [
-  {
-    title: '数据同步',
-    tasks: [
-      {
-        key: 'stock_basic',
-        name: '股票基础信息',
-        desc: '同步沪深A股基础信息、行业、流通市值等',
-        api: () => syncApi.syncStockBasic()
-      },
-      {
-        key: 'daily',
-        name: '日线数据',
-        desc: '按日期同步全部A股日线行情（开高低收量额等）',
-        api: () => syncApi.syncByDate(syncDates.value.daily.replace(/-/g, '')),
-        needDate: true,
-        dateKey: 'daily'
-      },
-      {
-        key: 'financial',
-        name: '财务指标',
-        desc: '同步全部股票最新一期财务指标数据',
-        api: () => syncApi.syncFinancial()
+const onSyncDone = async () => {
+  await loadLogs()
+  await loadDetailedStatus()
+}
+
+async function startPipelineSync (chainType) {
+  if (pipelineLoading.value) return
+  pipelineLoading.value = true
+  try {
+    const tradeDate = pipelineDateMap.value[chainType] || null
+    const res = await syncApi.startPipeline(chainType, tradeDate)
+    const pipelineId = res?.pipeline_id
+    if (pipelineId) {
+      pipeline.value = {
+        pipeline_id: pipelineId,
+        chain_type: chainType,
+        status: 'running',
+        steps: []
       }
-    ]
-  },
-  {
-    title: '指标计算',
-    tasks: [
-      {
-        key: 'indicator',
-        name: '技术指标',
-        desc: '计算均线、MACD、RSI、KDJ、BOLL等指标',
-        api: () => syncApi.syncIndicator(syncDates.value.indicator),
-        needDate: true,
-        dateKey: 'indicator'
-      }
-    ]
+      pollPipeline(pipelineId)
+    }
+  } catch (error) {
+    toast.error('启动任务链失败: ' + (error.response?.data?.detail || error.message))
+  } finally {
+    pipelineLoading.value = false
   }
-])
+}
+
+function pollPipeline (pipelineId) {
+  stopPipelinePoll()
+  const doPoll = async () => {
+    try {
+      const data = await syncApi.getPipeline(pipelineId)
+      pipeline.value = data
+      if (data?.status === 'success' || data?.status === 'failed') {
+        stopPipelinePoll()
+        await loadLogs()
+        await loadDetailedStatus()
+      }
+    } catch (err) {
+      console.error('轮询任务链失败:', err)
+    }
+  }
+  doPoll()
+  pipelinePollTimer.value = setInterval(doPoll, 2000)
+}
+
+function stopPipelinePoll () {
+  if (pipelinePollTimer.value) {
+    clearInterval(pipelinePollTimer.value)
+    pipelinePollTimer.value = null
+  }
+}
+
+async function handleCancelPipeline () {
+  if (!pipeline.value?.pipeline_id) return
+  if (!confirm('确定要停止当前任务链吗？')) return
+  try {
+    await syncApi.cancelPipeline(pipeline.value.pipeline_id)
+    stopPipelinePoll()
+    await loadLogs()
+  } catch (error) {
+    toast.error('取消失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+async function restorePipeline () {
+  try {
+    const res = await syncApi.getPipelines()
+    const active = res?.pipelines?.find(p => p.status === 'running')
+    if (active) {
+      const detail = await syncApi.getPipeline(active.pipeline_id)
+      pipeline.value = detail
+      pollPipeline(active.pipeline_id)
+    }
+  } catch (e) {
+    console.error('恢复任务链失败:', e)
+  }
+}
+
+function handleStockBasicSync () {
+  startSync('stock_basic', syncApi.syncStockBasic, { onDone: onSyncDone })
+}
+
+function handleDailySync (date) {
+  const dateFmt = date.replace(/-/g, '')
+  const key = 'daily_' + dateFmt
+  const onlyMissing = !!incrementalMap.value[date]
+  startSync(key, () => syncApi.syncByDate(dateFmt, onlyMissing), {
+    existingMatcher: t => t.job_type === 'daily' && t.trade_date === dateFmt,
+    onDone: onSyncDone
+  })
+}
+
+function handleIndicatorSync (date) {
+  const dateFmt = date.replace(/-/g, '')
+  const key = 'indicator_' + dateFmt
+  const onlyMissing = !!incrementalMap.value[date]
+  startSync(key, () => syncApi.syncIndicator(date, onlyMissing), {
+    existingMatcher: t => t.job_type === 'indicator' && t.trade_date === date,
+    onDone: onSyncDone
+  })
+}
+
+async function handleCancelJob (logId) {
+  if (!confirm('确定要停止该任务吗？')) return
+  try {
+    await syncApi.cancelJobLog(logId)
+    await loadLogs()
+  } catch (error) {
+    toast.error('停止失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
 
 async function loadLogs () {
   loading.value = true
@@ -93,15 +190,6 @@ async function loadLogs () {
   }
 }
 
-async function loadDbStatus () {
-  try {
-    const res = await syncApi.getDbStatus()
-    dbStatus.value = res
-  } catch (error) {
-    console.error('加载数据库状态失败:', error)
-  }
-}
-
 async function loadDetailedStatus () {
   try {
     const res = await syncApi.getDetailedStatus()
@@ -111,62 +199,10 @@ async function loadDetailedStatus () {
   }
 }
 
-function clearPoll (key) {
-  if (pollTimers.value[key]) {
-    clearInterval(pollTimers.value[key])
-    delete pollTimers.value[key]
-  }
-}
-
-async function pollTaskStatus (taskKey, taskId) {
-  clearPoll(taskKey)
-  taskProgress.value[taskKey] = { current: 0, total: 0, status: 'running' }
-
-  const doPoll = async () => {
-    try {
-      const res = await syncApi.getTaskStatus(taskId)
-      const data = res || {}
-      const progress = data.progress || { current: 0, total: 0 }
-      taskProgress.value[taskKey] = {
-        current: progress.current || 0,
-        total: progress.total || 0,
-        status: data.status || 'running'
-      }
-
-      if (data.status === 'success' || data.status === 'failed') {
-        clearPoll(taskKey)
-        syncing.value[taskKey] = false
-        await loadLogs()
-        if (taskKey === 'stock_basic' || taskKey === 'daily' || taskKey === 'indicator') {
-          await loadDbStatus()
-        }
-      }
-    } catch (err) {
-      console.error('轮询任务状态失败:', err)
-    }
-  }
-
-  await doPoll()
-  pollTimers.value[taskKey] = setInterval(doPoll, 2000)
-}
-
-async function handleManualSync (task) {
-  if (syncing.value[task.key]) return
-  syncing.value[task.key] = true
-  try {
-    const res = await task.api()
-    const taskId = res?.task_id
-    if (taskId) {
-      await pollTaskStatus(task.key, taskId)
-    } else {
-      alert(res?.summary || res?.message || '同步任务已提交')
-      syncing.value[task.key] = false
-      await loadLogs()
-    }
-  } catch (error) {
-    alert('同步失败: ' + (error.response?.data?.detail || error.message))
-    syncing.value[task.key] = false
-  }
+async function handleRefresh () {
+  loading.value = true
+  await Promise.all([loadLogs(), loadDetailedStatus()])
+  loading.value = false
 }
 
 function formatTime (ts) {
@@ -192,28 +228,24 @@ function formatDate (dateStr) {
   return dateStr
 }
 
-async function initDefaultDates () {
-  try {
-    const latest = await syncApi.getLatestTradeDate()
-    const dateStr = latest || getTodayStr()
-    syncDates.value.daily = dateStr
-    syncDates.value.indicator = dateStr
-  } catch (error) {
-    const today = getTodayStr()
-    syncDates.value.daily = today
-    syncDates.value.indicator = today
-  }
-}
+onMounted(async () => {
+  await loadLogs()
+  await loadDetailedStatus()
 
-onMounted(() => {
-  initDefaultDates()
-  loadLogs()
-  loadDbStatus()
-  loadDetailedStatus()
+  // 恢复正在运行的同步任务跟踪
+  await restoreTasks([
+    (task) => task.job_type === 'stock_basic' ? 'stock_basic' : null,
+    (task) => task.job_type === 'daily' ? 'daily_' + task.trade_date : null,
+    (task) => task.job_type === 'indicator' ? 'indicator_' + task.trade_date : null,
+    (task) => task.job_type === 'financial' ? 'financial' : null
+  ], { onDone: onSyncDone })
+
+  // 恢复正在运行的任务链
+  await restorePipeline()
 })
 
 onUnmounted(() => {
-  Object.keys(pollTimers.value).forEach(clearPoll)
+  stopPipelinePoll()
 })
 </script>
 
@@ -241,7 +273,7 @@ onUnmounted(() => {
             <option :value="7">最近7天</option>
             <option :value="30">最近30天</option>
           </select>
-          <button class="btn-refresh" :disabled="loading" @click="loadLogs">
+          <button class="btn-refresh" :disabled="loading" @click="handleRefresh">
             {{ loading ? '加载中...' : '刷新' }}
           </button>
         </div>
@@ -249,204 +281,213 @@ onUnmounted(() => {
     </PageHero>
 
     <div class="content-wrap">
-      <div class="top-section">
-        <div class="db-status-card" v-if="dbStatus">
-          <h3 class="card-title">数据库状态</h3>
-          <div class="status-grid">
-            <div class="status-item">
-              <span class="status-label">股票基础</span>
-              <span class="status-value">{{ formatNumber(dbStatus.stock_basic_count) }}</span>
+      <!-- 一键同步区域 -->
+      <div class="pipeline-section">
+        <h3 class="section-title">一键同步</h3>
+        <div class="pipeline-cards">
+          <div
+            v-for="(cfg, key) in chainDefinitions"
+            :key="key"
+            class="pipeline-card"
+          >
+            <div class="pipeline-card-header">
+              <span class="pipeline-card-title">{{ cfg.label }}</span>
+              <span class="pipeline-card-desc">{{ cfg.desc }}</span>
             </div>
-            <div class="status-item">
-              <span class="status-label">日线数据</span>
-              <span class="status-value">{{ formatNumber(dbStatus.stock_daily_count) }}</span>
+            <div class="pipeline-steps-preview">
+              <span
+                v-for="(s, idx) in cfg.steps"
+                :key="idx"
+                class="step-tag"
+              >{{ s }}</span>
             </div>
-            <div class="status-item">
-              <span class="status-label">技术指标</span>
-              <span class="status-value">{{ formatNumber(dbStatus.indicator_count) }}</span>
-            </div>
-            <div class="status-item">
-              <span class="status-label">财务指标</span>
-              <span class="status-value">{{ formatNumber(dbStatus.financial_count) }}</span>
-            </div>
-            <div class="status-item">
-              <span class="status-label">最新交易日</span>
-              <span class="status-value">{{ dbStatus.latest_trade_date || '-' }}</span>
-            </div>
-            <div class="status-item">
-              <span class="status-label">最新指标日</span>
-              <span class="status-value">{{ dbStatus.latest_indicator_date || '-' }}</span>
+            <div class="pipeline-date-row">
+              <input
+                v-model="pipelineDateMap[key]"
+                type="date"
+                class="pipeline-date-input"
+              >
+              <button
+                class="btn-pipeline-start"
+                :disabled="pipelineLoading || (pipeline && pipeline.status === 'running')"
+                @click="startPipelineSync(key)"
+              >
+                {{ pipelineLoading ? '启动中...' : '启动' }}
+              </button>
             </div>
           </div>
         </div>
 
-        <div class="task-groups">
-          <div v-for="group in taskGroups" :key="group.title" class="task-group">
-            <h3 class="group-title">{{ group.title }}</h3>
-            <div class="task-list">
-              <div v-for="task in group.tasks" :key="task.key" class="task-card">
-                <div class="task-info">
-                  <span class="task-name">{{ task.name }}</span>
-                  <span class="task-desc">{{ task.desc }}</span>
-                </div>
-                <div class="task-action">
-                  <input
-                    v-if="task.needDate"
-                    v-model="syncDates[task.dateKey]"
-                    type="date"
-                    class="date-input"
-                  />
-                  <button
-                    class="btn-sync"
-                    :disabled="syncing[task.key] || (task.needDate && !syncDates[task.dateKey])"
-                    @click="handleManualSync(task)"
-                  >
-                    {{ syncing[task.key]
-                      ? (taskProgress[task.key]?.total > 0
-                        ? `同步中 ${taskProgress[task.key].current}/${taskProgress[task.key].total}`
-                        : '同步中...')
-                      : '手动同步' }}
-                  </button>
-                </div>
-              </div>
+        <!-- 执行中状态面板 -->
+        <div v-if="pipeline" class="pipeline-status-panel">
+          <div class="pipeline-status-header">
+            <span class="pipeline-status-title">
+              {{ chainDefinitions[pipeline.chain_type]?.label || pipeline.chain_type }}
+              <span :class="['pipeline-status-badge', 'status-' + pipeline.status]">
+                {{ statusMap[pipeline.status] || pipeline.status }}
+              </span>
+            </span>
+            <button
+              v-if="pipeline.status === 'running'"
+              class="btn-pipeline-cancel"
+              @click="handleCancelPipeline"
+            >
+              停止
+            </button>
+          </div>
+          <div class="pipeline-steps">
+            <div
+              v-for="(step, idx) in pipeline.steps"
+              :key="idx"
+              class="pipeline-step"
+              :class="'step-' + step.status"
+            >
+              <span class="step-index">{{ idx + 1 }}</span>
+              <span class="step-name">{{ step.name }}</span>
+              <span class="step-status-icon" :class="'icon-' + step.status">
+                <template v-if="step.status === 'running'">
+                  <span class="spinner" />
+                </template>
+                <template v-else-if="step.status === 'success'">&#10003;</template>
+                <template v-else-if="step.status === 'failed'">&#10007;</template>
+                <template v-else>&#9675;</template>
+              </span>
+              <span v-if="step.error" class="step-error" :title="step.error">{{ step.error }}</span>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- 模块7：同步任务数据库状态 -->
-      <div v-if="detailedStatus" class="detail-section">
-        <h3 class="section-title">同步数据库状态</h3>
-        <div class="detail-grid">
-          <!-- 股票基本信息 -->
-          <div class="detail-card">
-            <div class="detail-card-header">
-              <span class="detail-card-title">股票基本信息</span>
-              <span class="detail-card-meta">上次同步: {{ formatTime(detailedStatus.stock_basic.last_sync) }}</span>
-            </div>
-            <div class="detail-metrics">
-              <div class="metric">
-                <span class="metric-value">{{ formatNumber(detailedStatus.stock_basic.total) }}</span>
-                <span class="metric-label">总记录</span>
-              </div>
-              <div class="metric">
-                <span class="metric-value highlight">{{ formatNumber(detailedStatus.stock_basic.valid_count) }}</span>
-                <span class="metric-label">有效记录(非ST非退市)</span>
-              </div>
-              <div class="metric">
-                <span class="metric-value warn">{{ formatNumber(detailedStatus.stock_basic.st_count) }}</span>
-                <span class="metric-label">ST股票</span>
-              </div>
-              <div class="metric">
-                <span class="metric-value danger">{{ formatNumber(detailedStatus.stock_basic.delisted_count) }}</span>
-                <span class="metric-label">退市股票</span>
-              </div>
-            </div>
-            <div class="market-dist">
-              <div
-                v-for="(count, market) in detailedStatus.stock_basic.market_distribution"
-                :key="market"
-                class="market-item"
-              >
-                <span class="market-name">{{ market }}</span>
-                <span class="market-bar-wrap">
-                  <span
-                    class="market-bar"
-                    :style="{ width: `${(count / detailedStatus.stock_basic.total) * 100}%` }"
-                  />
-                </span>
-                <span class="market-count">{{ count }}</span>
-              </div>
+      <div class="top-section">
+        <div class="stock-basic-card" v-if="detailedStatus">
+          <div class="stock-basic-header">
+            <h3 class="card-title">股票基础信息</h3>
+            <button
+              class="btn-sync-small"
+              :disabled="syncing.stock_basic"
+              @click="handleStockBasicSync"
+            >
+              {{ syncing.stock_basic
+                ? (taskProgress.stock_basic?.total > 0
+                  ? `同步中 ${taskProgress.stock_basic.current}/${taskProgress.stock_basic.total}`
+                  : '同步中...')
+                : '同步' }}
+            </button>
+          </div>
+          <div class="stock-basic-total">
+            <span class="total-value">{{ formatNumber(detailedStatus.stock_basic.total) }}</span>
+            <span class="total-label">只股票</span>
+          </div>
+          <div class="stock-basic-meta">
+            <span class="meta-item">
+              <span class="meta-dot valid"></span>
+              有效 {{ formatNumber(detailedStatus.stock_basic.valid_count) }}
+            </span>
+            <span class="meta-item">
+              <span class="meta-dot st"></span>
+              ST {{ formatNumber(detailedStatus.stock_basic.st_count) }}
+            </span>
+            <span class="meta-item">
+              <span class="meta-dot delisted"></span>
+              退市 {{ formatNumber(detailedStatus.stock_basic.delisted_count) }}
+            </span>
+          </div>
+          <div class="market-list">
+            <div
+              v-for="(count, market) in detailedStatus.stock_basic.market_distribution"
+              :key="market"
+              class="market-row"
+            >
+              <span class="market-name">{{ market }}</span>
+              <span class="market-bar-wrap">
+                <span
+                  class="market-bar"
+                  :style="{ width: `${(count / detailedStatus.stock_basic.total) * 100}%` }"
+                />
+              </span>
+              <span class="market-count">{{ formatNumber(count) }}</span>
             </div>
           </div>
-
-          <!-- 日线与指标 -->
-          <div class="detail-card wide">
-            <div class="detail-card-header">
-              <span class="detail-card-title">日线记录与指标计算（最近5个交易日）</span>
-              <span class="detail-card-meta">应同步: {{ formatNumber(detailedStatus.stock_basic.valid_count) }} 只</span>
-            </div>
-            <div class="daily-table-wrap">
-              <table class="daily-table">
-                <thead>
-                  <tr>
-                    <th>日期</th>
-                    <th>日线记录</th>
-                    <th>指标记录</th>
-                    <th>daily日志</th>
-                    <th>indicator日志</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="row in detailedStatus.daily" :key="row.date">
-                    <td>{{ formatDate(row.date) }}</td>
-                    <td>
-                      <span :class="row.daily_count > 0 ? 'num-ok' : 'num-zero'">{{ row.daily_count }}</span>
-                    </td>
-                    <td>
-                      <span :class="row.indicator_count > 0 ? 'num-ok' : 'num-zero'">{{ row.indicator_count }}</span>
-                    </td>
-                    <td>
-                      <template v-if="row.daily_log">
-                        <span class="tag" :class="`tag-${row.daily_log.status}`">{{ row.daily_log.status }}</span>
-                        <span class="log-count">
-                          {{ row.daily_log.success ?? 0 }} / {{ row.daily_log.failed ?? 0 }} / {{ row.daily_log.total ?? 0 }}
-                        </span>
-                      </template>
-                      <span v-else class="text-muted">无日志</span>
-                    </td>
-                    <td>
-                      <template v-if="row.indicator_log">
-                        <span class="tag" :class="`tag-${row.indicator_log.status}`">{{ row.indicator_log.status }}</span>
-                        <span class="log-count">
-                          {{ row.indicator_log.success ?? 0 }} / {{ row.indicator_log.failed ?? 0 }} / {{ row.indicator_log.total ?? 0 }}
-                        </span>
-                      </template>
-                      <span v-else class="text-muted">无日志</span>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+          <div class="last-sync">
+            最近同步: {{ formatTime(detailedStatus.stock_basic.last_sync) }}
           </div>
+        </div>
 
-          <!-- 财报指标 -->
-          <div class="detail-card">
-            <div class="detail-card-header">
-              <span class="detail-card-title">财报指标</span>
-              <span class="detail-card-meta">上次同步: {{ formatTime(detailedStatus.financial.last_sync) }}</span>
-            </div>
-            <div class="detail-metrics">
-              <div class="metric">
-                <span class="metric-value">{{ formatNumber(detailedStatus.financial.total) }}</span>
-                <span class="metric-label">已获取</span>
-              </div>
-              <div class="metric">
-                <span class="metric-value">{{ formatNumber(detailedStatus.financial.expected) }}</span>
-                <span class="metric-label">应获取</span>
-              </div>
-              <div class="metric">
-                <span class="metric-value danger">{{ formatNumber(detailedStatus.financial.missing) }}</span>
-                <span class="metric-label">缺失</span>
-              </div>
-            </div>
-            <div class="report-dist">
-              <div class="report-dist-title">报告期分布</div>
-              <div
-                v-for="item in detailedStatus.financial.report_distribution"
-                :key="item.date"
-                class="report-item"
-              >
-                <span class="report-date">{{ item.date }}</span>
-                <span class="report-bar-wrap">
-                  <span
-                    class="report-bar"
-                    :style="{ width: `${(item.count / detailedStatus.financial.total) * 100}%` }"
-                  />
-                </span>
-                <span class="report-count">{{ item.count }}</span>
-              </div>
-            </div>
+        <div class="daily-section" v-if="detailedStatus">
+          <div class="daily-section-header">
+            <h3 class="section-title">最近五个交易日</h3>
+            <span class="section-note">统计范围不含北交所</span>
+          </div>
+          <div class="daily-table-wrap">
+            <table class="daily-table">
+              <thead>
+                <tr>
+                  <th>日期</th>
+                  <th>总股票数</th>
+                  <th>日线数据</th>
+                  <th>指标数据</th>
+                  <th>增量更新</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in detailedStatus.daily" :key="row.date">
+                  <td>{{ row.date }}</td>
+                  <td>
+                    <span :class="row.total_stock_count > 0 ? 'num-ok' : 'num-zero'">
+                      {{ row.total_stock_count }}
+                    </span>
+                  </td>
+                  <td>
+                    <span :class="row.daily_count > 0 ? 'num-ok' : 'num-zero'">
+                      {{ row.daily_count }}
+                      <small v-if="row.missing_daily > 0" class="missing-tag">缺{{ row.missing_daily }}</small>
+                    </span>
+                  </td>
+                  <td>
+                    <span :class="row.indicator_count > 0 ? 'num-ok' : 'num-zero'">
+                      {{ row.indicator_count }}
+                      <small v-if="row.missing_indicator > 0" class="missing-tag">缺{{ row.missing_indicator }}</small>
+                    </span>
+                  </td>
+                  <td class="col-incremental">
+                    <label class="toggle-label">
+                      <input
+                        type="checkbox"
+                        v-model="incrementalMap[row.date]"
+                      >
+                      <span class="toggle-text">{{ incrementalMap[row.date] ? '增量' : '全量' }}</span>
+                    </label>
+                  </td>
+                  <td>
+                    <div class="action-btns">
+                      <button
+                        class="btn-sync-small"
+                        :disabled="syncing['daily_' + row.date.replace(/-/g, '')]"
+                        @click="handleDailySync(row.date)"
+                      >
+                        {{ syncing['daily_' + row.date.replace(/-/g, '')]
+                          ? (taskProgress['daily_' + row.date.replace(/-/g, '')]?.total > 0
+                            ? `同步中 ${taskProgress['daily_' + row.date.replace(/-/g, '')].current}/${taskProgress['daily_' + row.date.replace(/-/g, '')].total}`
+                            : '同步中...')
+                          : '日线同步' }}
+                      </button>
+                      <button
+                        class="btn-sync-small"
+                        :disabled="syncing['indicator_' + row.date.replace(/-/g, '')]"
+                        @click="handleIndicatorSync(row.date)"
+                      >
+                        {{ syncing['indicator_' + row.date.replace(/-/g, '')]
+                          ? (taskProgress['indicator_' + row.date.replace(/-/g, '')]?.total > 0
+                            ? `计算中 ${taskProgress['indicator_' + row.date.replace(/-/g, '')].current}/${taskProgress['indicator_' + row.date.replace(/-/g, '')].total}`
+                            : '计算中...')
+                          : '指标计算' }}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -468,6 +509,7 @@ onUnmounted(() => {
                 <th>总计</th>
                 <th>交易日</th>
                 <th>错误信息</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -493,9 +535,19 @@ onUnmounted(() => {
                 <td class="error-cell" :title="log.error_message">
                   {{ log.error_message || '-' }}
                 </td>
+                <td>
+                  <button
+                    v-if="log.status === 'running'"
+                    class="btn-sync-small"
+                    @click="handleCancelJob(log.id)"
+                  >
+                    停止
+                  </button>
+                  <span v-else class="text-muted">-</span>
+                </td>
               </tr>
               <tr v-if="logs.length === 0 && !loading">
-                <td colspan="11" class="empty">暂无任务记录</td>
+                <td colspan="12" class="empty">暂无任务记录</td>
               </tr>
             </tbody>
           </table>
@@ -513,6 +565,10 @@ onUnmounted(() => {
   padding: 4px 28px 18px;
   box-sizing: border-box;
   overflow: hidden;
+
+  @media (max-width: 768px) {
+    padding: 4px 16px 12px;
+  }
 }
 
 .content-wrap {
@@ -526,16 +582,27 @@ onUnmounted(() => {
 
 .top-section {
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: minmax(260px, 25%) 1fr;
   gap: 20px;
   min-height: 0;
 }
 
-.db-status-card {
+.stock-basic-card {
   background: var(--bg-secondary);
   border: 1px solid var(--rule);
   border-radius: 6px;
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  .stock-basic-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
 
   .card-title {
     font-family: var(--font-mono);
@@ -544,130 +611,120 @@ onUnmounted(() => {
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--text-primary);
-    margin: 0 0 14px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--rule);
+    margin: 0;
   }
-}
 
-.status-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
+  .stock-basic-total {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
 
-.status-item {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+    .total-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text-primary);
+      font-family: var(--font-mono);
+      line-height: 1;
+    }
 
-  .status-label {
+    .total-label {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+  }
+
+  .stock-basic-meta {
+    display: flex;
+    gap: 12px;
     font-size: 11px;
-    color: var(--text-muted);
+    color: var(--text-secondary);
+
+    .meta-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .meta-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      display: inline-block;
+
+      &.valid {
+        background: var(--down);
+      }
+
+      &.st {
+        background: #f5a623;
+      }
+
+      &.delisted {
+        background: var(--up);
+      }
+    }
+  }
+
+  .market-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .market-row {
+    display: grid;
+    grid-template-columns: 60px 1fr 40px;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+  }
+
+  .market-name {
+    color: var(--text-secondary);
     font-family: var(--font-mono);
   }
 
-  .status-value {
-    font-size: 13px;
-    font-weight: 600;
+  .market-bar-wrap {
+    height: 6px;
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .market-bar {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+  }
+
+  .market-count {
+    text-align: right;
     color: var(--text-primary);
     font-family: var(--font-mono);
-  }
-}
-
-.task-groups {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.task-group {
-  background: var(--bg-secondary);
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  padding: 16px;
-}
-
-.group-title {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-primary);
-  margin: 0 0 12px;
-}
-
-.task-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.task-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
-  background: var(--bg-primary);
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  gap: 12px;
-}
-
-.task-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-
-  .task-name {
-    font-size: 13px;
     font-weight: 600;
-    color: var(--text-primary);
   }
 
-  .task-desc {
+  .last-sync {
     font-size: 11px;
     color: var(--text-muted);
+    font-family: var(--font-mono);
+    padding-top: 8px;
+    border-top: 1px solid var(--rule);
   }
 }
 
-.task-action {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.date-input {
-  padding: 6px 8px;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  outline: none;
-
-  &:focus {
-    border-color: var(--accent);
-  }
-}
-
-.btn-sync {
-  padding: 6px 14px;
+.btn-sync-small {
+  padding: 4px 10px;
   background: var(--accent);
   color: #fff;
   border: none;
   border-radius: 4px;
   cursor: pointer;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.08em;
-  white-space: nowrap;
 
   &:disabled {
     opacity: 0.5;
@@ -679,16 +736,73 @@ onUnmounted(() => {
   }
 }
 
-.table-section {
-  .section-title {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--text-primary);
-    margin: 0 0 12px;
+.btn-missing {
+  background: var(--text-secondary);
+}
+
+.missing-tag {
+  margin-left: 4px;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.col-incremental {
+  text-align: center;
+}
+
+.toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+
+  input[type="checkbox"] {
+    cursor: pointer;
   }
+}
+
+.daily-section {
+  background: var(--bg-secondary);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.daily-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+
+  .section-title {
+    margin-bottom: 0;
+  }
+}
+
+.section-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.action-btns {
+  display: flex;
+  gap: 6px;
+}
+
+.section-title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  margin: 0 0 12px;
 }
 
 .filter-bar {
@@ -1104,6 +1218,263 @@ onUnmounted(() => {
   }
   .detail-card.wide {
     grid-column: auto;
+  }
+}
+
+/* Pipeline */
+.pipeline-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pipeline-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.pipeline-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pipeline-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.pipeline-card-title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+
+.pipeline-card-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.pipeline-steps-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pipeline-date-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+}
+
+.pipeline-date-input {
+  flex: 1;
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  outline: none;
+
+  &:focus {
+    border-color: var(--accent);
+  }
+}
+
+.step-tag {
+  font-size: 10px;
+  padding: 2px 8px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+}
+
+.btn-pipeline-start {
+  padding: 8px 16px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.btn-pipeline-start:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-pipeline-cancel {
+  padding: 4px 12px;
+  background: var(--up);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.pipeline-status-panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pipeline-status-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pipeline-status-title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pipeline-status-badge {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 2px;
+  font-weight: 600;
+}
+
+.pipeline-status-badge.status-running {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.pipeline-status-badge.status-success {
+  background: rgba(76, 175, 80, 0.15);
+  color: #4caf50;
+}
+
+.pipeline-status-badge.status-failed {
+  background: rgba(244, 67, 54, 0.15);
+  color: #f44336;
+}
+
+.pipeline-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pipeline-step {
+  display: grid;
+  grid-template-columns: 28px 1fr 28px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.pipeline-step.step-running {
+  border-color: var(--accent);
+}
+
+.pipeline-step.step-success {
+  border-color: rgba(76, 175, 80, 0.4);
+}
+
+.pipeline-step.step-failed {
+  border-color: rgba(244, 67, 54, 0.4);
+}
+
+.step-index {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  border-radius: 50%;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.step-name {
+  color: var(--text-secondary);
+}
+
+.step-status-icon {
+  text-align: center;
+  font-size: 14px;
+}
+
+.icon-success {
+  color: #4caf50;
+}
+
+.icon-failed {
+  color: #f44336;
+}
+
+.icon-running .spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--accent-subtle);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.step-error {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: #f44336;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .pipeline-cards {
+    grid-template-columns: 1fr;
   }
 }
 </style>

@@ -1,9 +1,10 @@
 <script setup>
-import { reactive, onMounted, ref } from 'vue'
+import { reactive, onMounted, onUnmounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { toast } from '@/composables/useToast'
 import { useStockData } from '@/composables/useStockData'
-import { stockDailyApi, syncApi, stockIndicatorApi } from '@/api/stock'
-import { getDefaultDate } from '@/utils/date'
+import { useSyncTask } from '@/composables/useSyncTask'
+import { syncApi, stockIndicatorApi, tradeCalendarApi } from '@/api/stock'
 import StockFilterPanel from '@/components/stock/StockFilterPanel.vue'
 import StockIndicatorTable from '@/components/stock/StockIndicatorTable.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
@@ -34,18 +35,29 @@ let filterForm = reactive({
 const latestTradeDate = ref('')
 const router = useRouter()
 
-const syncing = ref(false)
-const syncProgress = ref({
-  visible: false,
-  percent: 0,
-  current: 0,
-  total: 0,
-  message: ''
+const { syncing: taskSyncing, progress: taskProgress, startSync } = useSyncTask()
+const syncKey = 'indicator-daily-sync'
+
+const syncProgress = computed(() => {
+  const p = taskProgress[syncKey] || { current: 0, total: 0, status: '' }
+  const total = p.total || 0
+  const current = p.current || 0
+  const percent = total ? Math.round(current / total * 100) : 0
+  let message = '正在同步数据...'
+  if (p.status === 'success') message = '同步完成'
+  else if (p.status === 'failed') message = '同步失败'
+  return {
+    visible: !!taskSyncing[syncKey],
+    percent,
+    current,
+    total,
+    message
+  }
 })
-let syncEventSource = null
 
 const computing = ref(false)
 const computeResult = ref({ visible: false, message: '', tone: 'info' })
+let computeResultTimer = null
 
 const sortField = ref('symbol')
 const sortOrder = ref('asc')
@@ -71,20 +83,18 @@ function handleRowDblClick (item) {
 
 async function loadLatestTradeDate () {
   try {
-    const dates = await stockDailyApi.getTradeDates()
-    if (Array.isArray(dates) && dates.length > 0) {
-      const latestDate = dates[0]
-      latestTradeDate.value = latestDate
-      filterForm.tradeDate = latestDate
-      return latestDate
+    const date = await tradeCalendarApi.getLatest()
+    if (date) {
+      filterForm.tradeDate = date
+      latestTradeDate.value = date
+      return date
     }
   } catch (error) {
     console.error('获取最近交易日失败:', error)
   }
-  const today = getDefaultDate()
-  filterForm.tradeDate = today
-  latestTradeDate.value = today
-  return today
+  filterForm.tradeDate = ''
+  latestTradeDate.value = ''
+  return ''
 }
 
 function getQueryParams () {
@@ -132,7 +142,7 @@ async function handlePageSizeChange (newSize) {
 
 async function handleComputeIndicators () {
   if (!filterForm.tradeDate) {
-    alert('请选择交易日期')
+    toast.warning('请选择交易日期')
     return
   }
 
@@ -161,7 +171,8 @@ async function handleComputeIndicators () {
     }
   } finally {
     computing.value = false
-    setTimeout(() => {
+    if (computeResultTimer) clearTimeout(computeResultTimer)
+    computeResultTimer = setTimeout(() => {
       computeResult.value.visible = false
     }, 4000)
   }
@@ -169,86 +180,19 @@ async function handleComputeIndicators () {
 
 function handleFetchData () {
   if (!filterForm.tradeDate) {
-    alert('请选择交易日期')
+    toast.warning('请选择交易日期')
     return
   }
 
-  if (!confirm(`确定要从API获取 ${filterForm.tradeDate} 的全部A股数据吗？\n同步任务将在后台异步执行，可实时查看进度。`)) {
-    return
-  }
-
-  if (syncEventSource) {
-    syncEventSource.close()
-    syncEventSource = null
-  }
-
-  syncing.value = true
-  syncProgress.value = {
-    visible: true,
-    percent: 0,
-    current: 0,
-    total: 0,
-    message: '正在连接...'
-  }
-
-  const es = syncApi.createSyncStream(filterForm.tradeDate)
-  syncEventSource = es
-
-  es.onmessage = (event) => {
-    try {
-      const payload = JSON.parse(event.data)
-      if (payload.status === 'running') {
-        const current = payload.current || 0
-        const total = payload.total || 0
-        syncProgress.value = {
-          visible: true,
-          percent: total ? Math.round(current / total * 100) : 0,
-          current,
-          total,
-          message: payload.symbol
-            ? `正在同步: ${payload.symbol}`
-            : '正在同步数据...'
-        }
-      } else if (payload.status === 'completed') {
-        const result = payload.result || {}
-        syncProgress.value = {
-          visible: true,
-          percent: 100,
-          current: result.upserted || 0,
-          total: result.total_stocks || 0,
-          message: result.summary || '同步完成'
-        }
-        es.close()
-        syncEventSource = null
-        syncing.value = false
+  startSync(syncKey, () => syncApi.syncByDate(filterForm.tradeDate), {
+    confirmMessage: `确定要从API获取 ${filterForm.tradeDate} 的全部A股数据吗？\n同步任务将在后台异步执行，可实时查看进度。`,
+    onDone: (data) => {
+      if (data?.status === 'success') {
         clearCache()
         handleSearch()
-        setTimeout(() => {
-          syncProgress.value.visible = false
-        }, 3000)
-      } else if (payload.status === 'failed') {
-        syncProgress.value = {
-          visible: true,
-          percent: 0,
-          current: 0,
-          total: 0,
-          message: '同步失败: ' + (payload.error || '未知错误')
-        }
-        es.close()
-        syncEventSource = null
-        syncing.value = false
       }
-    } catch (e) {
-      console.error('解析进度消息失败:', e)
     }
-  }
-
-  es.onerror = () => {
-    syncProgress.value.message = '连接异常，请刷新页面查看结果'
-    es.close()
-    syncEventSource = null
-    syncing.value = false
-  }
+  })
 }
 
 onMounted(async () => {
@@ -256,6 +200,10 @@ onMounted(async () => {
   if (date) {
     await handleSearch()
   }
+})
+
+onUnmounted(() => {
+  if (computeResultTimer) clearTimeout(computeResultTimer)
 })
 </script>
 
@@ -283,7 +231,7 @@ onMounted(async () => {
     <StockFilterPanel
       v-model="filterForm"
       show-fetch
-      :fetching="syncing"
+      :fetching="!!taskSyncing[syncKey]"
       @search="handleSearch"
       @reset="handleReset"
       @fetch="handleFetchData"
@@ -336,6 +284,10 @@ onMounted(async () => {
   padding: 4px 28px 18px;
   box-sizing: border-box;
   overflow: hidden;
+
+  @media (max-width: 768px) {
+    padding: 4px 16px 12px;
+  }
 }
 
 .btn-compute {

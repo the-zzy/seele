@@ -115,7 +115,13 @@ function getChgBgClass (val) {
 </template>
 
 <style scoped lang="scss">
+.table-section {
+  overflow-x: auto;
+}
+
 .stock-table {
+  min-width: 1200px;
+
   th {
     &.g-ma { color: var(--accent); }
     &.g-vol { color: #d97757; }

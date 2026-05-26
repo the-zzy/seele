@@ -2,10 +2,11 @@
 持仓管理路由
 """
 
-from datetime import date
+from datetime import date, datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from app import models, schemas
@@ -36,86 +37,90 @@ def _get_latest_close(db: Session, symbol: str, target_date: date = None) -> Opt
     return result.close if result else None
 
 
-def _get_latest_close_batch(db: Session, symbols: List[str]) -> dict[str, float]:
-    """批量获取多只股票最新收盘价，返回 {symbol: close}"""
-    if not symbols:
-        return {}
-    from sqlalchemy import distinct
-    latest_date_row = (
-        db.query(models.StockDaily.trade_date)
-        .filter(models.StockDaily.symbol.in_(symbols))
-        .order_by(models.StockDaily.trade_date.desc())
+def _parse_trade_date_str(date_str: str) -> date:
+    """解析交易日期字符串，兼容 YYYY-MM-DD 和 YYYY/MM/DD"""
+    normalized = date_str.replace('/', '-')
+    return datetime.strptime(normalized, '%Y-%m-%d').date()
+
+
+def _validate_price_by_daily(db: Session, symbol: str, trade_date: date, price: float) -> Optional[str]:
+    """根据当日日线最高价/最低价校验成交价格是否合理"""
+    daily = (
+        db.query(models.StockDaily)
+        .filter(
+            and_(
+                models.StockDaily.symbol == symbol,
+                models.StockDaily.trade_date == trade_date,
+            )
+        )
         .first()
     )
-    if not latest_date_row:
+    if not daily:
+        return None
+    if daily.high is not None and price > daily.high:
+        return f'成交价格 {price} 超过当日最高价 {daily.high}'
+    if daily.low is not None and price < daily.low:
+        return f'成交价格 {price} 低于当日最低价 {daily.low}'
+    return None
+
+
+def _get_latest_close_batch(db: Session, symbols: List[str]) -> dict[str, float]:
+    """批量获取多只股票最新收盘价，返回 {symbol: close}
+
+    使用每只股票各自的最新有数据日期，避免停牌股票因统一日期无数据而遗漏。
+    """
+    if not symbols:
         return {}
-    latest_date = latest_date_row[0]
+
+    from sqlalchemy import func
+
+    subq = (
+        db.query(
+            models.StockDaily.symbol,
+            func.max(models.StockDaily.trade_date).label('max_date')
+        )
+        .filter(models.StockDaily.symbol.in_(symbols))
+        .group_by(models.StockDaily.symbol)
+        .subquery()
+    )
+
     results = (
         db.query(models.StockDaily.symbol, models.StockDaily.close)
-        .filter(
-            models.StockDaily.symbol.in_(symbols),
-            models.StockDaily.trade_date == latest_date,
+        .join(
+            subq,
+            and_(
+                models.StockDaily.symbol == subq.c.symbol,
+                models.StockDaily.trade_date == subq.c.max_date
+            )
         )
         .all()
     )
+
     return {r.symbol: r.close for r in results}
 
 
-def _calc_fifo_position(trades: List[models.PortfolioTrade]) -> tuple[int, float]:
-    """FIFO 计算当前持仓数量和剩余成本
+def _calc_comprehensive_position(trades: List[models.PortfolioTrade]) -> tuple[int, float]:
+    """综合成本（摊薄成本）计算当前持仓数量和剩余成本
     返回: (quantity, remaining_cost)
     """
-    buys = sorted([t for t in trades if t.trade_type == 'BUY'], key=lambda x: x.trade_date)
-    sells = sorted([t for t in trades if t.trade_type == 'SELL'], key=lambda x: x.trade_date)
-
-    buy_queue = [(b.quantity, b.price) for b in buys]
-    for s in sells:
-        sq = s.quantity
-        while sq > 0 and buy_queue:
-            bq, bp = buy_queue[0]
-            if bq <= sq:
-                sq -= bq
-                buy_queue.pop(0)
-            else:
-                buy_queue[0] = (bq - sq, bp)
-                sq = 0
-
-    remaining_qty = sum(q for q, p in buy_queue)
-    remaining_cost = sum(q * p for q, p in buy_queue)
-    return remaining_qty, remaining_cost
+    total_buy = sum(t.amount for t in trades if t.trade_type == 'BUY')
+    total_sell = sum(t.amount for t in trades if t.trade_type == 'SELL')
+    total_buy_qty = sum(t.quantity for t in trades if t.trade_type == 'BUY')
+    total_sell_qty = sum(t.quantity for t in trades if t.trade_type == 'SELL')
+    qty = total_buy_qty - total_sell_qty
+    cost = total_buy - total_sell
+    return qty, cost
 
 
-def _calc_new_sell_fifo_cost(existing_trades: List[models.PortfolioTrade], sell_quantity: int) -> float:
-    """基于已有交易记录，计算新的一笔卖出对应的 FIFO 成本"""
-    buys = sorted([t for t in existing_trades if t.trade_type == 'BUY'], key=lambda x: x.trade_date)
-    sells = sorted([t for t in existing_trades if t.trade_type == 'SELL'], key=lambda x: x.trade_date)
-
-    buy_queue = [(b.quantity, b.price) for b in buys]
-    for s in sells:
-        sq = s.quantity
-        while sq > 0 and buy_queue:
-            bq, bp = buy_queue[0]
-            if bq <= sq:
-                sq -= bq
-                buy_queue.pop(0)
-            else:
-                buy_queue[0] = (bq - sq, bp)
-                sq = 0
-
-    remaining_sq = sell_quantity
-    cost = 0.0
-    while remaining_sq > 0 and buy_queue:
-        bq, bp = buy_queue[0]
-        if bq <= remaining_sq:
-            cost += bq * bp
-            remaining_sq -= bq
-            buy_queue.pop(0)
-        else:
-            cost += remaining_sq * bp
-            buy_queue[0] = (bq - remaining_sq, bp)
-            remaining_sq = 0
-
-    return cost
+def _calc_new_sell_comprehensive_cost(existing_trades: List[models.PortfolioTrade], sell_quantity: int) -> float:
+    """基于已有交易记录，按综合成本计算新的一笔卖出对应的成本"""
+    total_buy = sum(t.amount for t in existing_trades if t.trade_type == 'BUY')
+    total_sell = sum(t.amount for t in existing_trades if t.trade_type == 'SELL')
+    total_buy_qty = sum(t.quantity for t in existing_trades if t.trade_type == 'BUY')
+    total_sell_qty = sum(t.quantity for t in existing_trades if t.trade_type == 'SELL')
+    current_qty = total_buy_qty - total_sell_qty
+    avg_cost = (total_buy - total_sell) / current_qty if current_qty > 0 else 0
+    return sell_quantity * avg_cost
 
 
 def _calc_closed_for_symbol(db: Session, symbol: str) -> Optional[dict]:
@@ -158,6 +163,14 @@ def _calc_closed_for_symbol(db: Session, symbol: str) -> Optional[dict]:
     }
 
 
+def _calc_history_pnl(market_value: float, trades: List[models.PortfolioTrade]) -> float:
+    """计算某只股票的历史盈亏（含已卖出部分和手续费）"""
+    total_buy = sum(t.amount for t in trades if t.trade_type == 'BUY')
+    total_sell = sum(t.amount for t in trades if t.trade_type == 'SELL')
+    total_fee = sum((t.fee or 0) for t in trades)
+    return market_value + total_sell - total_buy - total_fee
+
+
 def _sync_position_snapshot(db: Session, symbol: str) -> Optional[models.PortfolioPosition]:
     """同步单个股票的持仓快照"""
     trades = portfolio_trade_crud.get_by_symbol(db, symbol)
@@ -165,7 +178,7 @@ def _sync_position_snapshot(db: Session, symbol: str) -> Optional[models.Portfol
         portfolio_position_crud.delete_by_symbol(db, symbol)
         return None
 
-    qty, cost = _calc_fifo_position(trades)
+    qty, cost = _calc_comprehensive_position(trades)
     if qty <= 0:
         portfolio_position_crud.delete_by_symbol(db, symbol)
         return None
@@ -207,11 +220,86 @@ def _sync_position_snapshot(db: Session, symbol: str) -> Optional[models.Portfol
 
 
 def _sync_all_positions(db: Session) -> None:
-    """同步所有持仓快照"""
+    """同步所有持仓快照（批量优化版）"""
     all_trades = portfolio_trade_crud.get_all(db)
     symbols = sorted(set(t.symbol for t in all_trades))
+    if not symbols:
+        portfolio_position_crud.delete_all(db)
+        return
+
+    # 批量获取最新收盘价和现有持仓
+    price_map = _get_latest_close_batch(db, symbols)
+    existing_map = {
+        p.symbol: p
+        for p in portfolio_position_crud.get_list(db)
+    }
+
+    # 按 symbol 分组交易记录
+    trades_by_symbol: dict[str, list] = {}
+    for t in all_trades:
+        trades_by_symbol.setdefault(t.symbol, []).append(t)
+
+    upsert_items = []
+    symbols_to_delete = []
     for symbol in symbols:
-        _sync_position_snapshot(db, symbol)
+        trades = trades_by_symbol.get(symbol, [])
+        if not trades:
+            symbols_to_delete.append(symbol)
+            continue
+        qty, cost = _calc_comprehensive_position(trades)
+        if qty <= 0:
+            symbols_to_delete.append(symbol)
+            continue
+
+        avg_cost = cost / qty if qty > 0 else 0
+        current_price = price_map.get(symbol)
+        market_value = round(current_price * qty, 4) if current_price else None
+        unrealized_pnl = round(market_value - cost, 4) if market_value else None
+        unrealized_pnl_pct = round(unrealized_pnl / cost * 100, 4) if unrealized_pnl and cost > 0 else None
+
+        buys = [t for t in trades if t.trade_type == 'BUY']
+        first_buy_date = min(b.trade_date for b in buys) if buys else None
+
+        existing = existing_map.get(symbol)
+        upsert_items.append({
+            'symbol': symbol,
+            'name': trades[0].name,
+            'quantity': qty,
+            'avg_cost': round(avg_cost, 4),
+            'current_price': current_price,
+            'market_value': market_value,
+            'unrealized_pnl': unrealized_pnl,
+            'unrealized_pnl_pct': unrealized_pnl_pct,
+            'stop_loss_price': existing.stop_loss_price if existing else None,
+            'take_profit_price': existing.take_profit_price if existing else None,
+            'group': existing.group if existing else 'default',
+            'remark': existing.remark if existing else None,
+            'first_buy_date': first_buy_date,
+        })
+
+    for symbol in symbols_to_delete:
+        portfolio_position_crud.delete_by_symbol(db, symbol)
+
+    portfolio_position_crud.upsert_batch(db, upsert_items)
+
+
+def _sync_all_closed(db: Session) -> None:
+    """全量重建所有清仓记录"""
+    all_trades = portfolio_trade_crud.get_all(db)
+    symbols = sorted(set(t.symbol for t in all_trades))
+
+    # 先清空全部清仓记录
+    portfolio_closed_crud.delete_all(db)
+
+    # 按 symbol 分组并重新计算
+    trades_by_symbol: dict[str, list] = {}
+    for t in all_trades:
+        trades_by_symbol.setdefault(t.symbol, []).append(t)
+
+    for symbol in symbols:
+        closed_data = _calc_closed_for_symbol(db, symbol)
+        if closed_data:
+            portfolio_closed_crud.create(db, closed_data)
 
 
 def _rebuild_daily_data(db: Session) -> list[str]:
@@ -226,25 +314,30 @@ def _rebuild_daily_data(db: Session) -> list[str]:
     if not all_trades:
         portfolio_daily_position_crud.delete_all(db)
         portfolio_daily_summary_crud.delete_all(db)
+        db.commit()
         return []
 
     trade_dates = stock_daily_crud.get_trade_dates(db)
     trade_dates.sort()
 
     symbols = set(t.symbol for t in all_trades)
-    symbol_dailies = {}
-    for symbol in symbols:
-        dailies = stock_daily_crud.get_by_symbol(db, symbol)
-        symbol_dailies[symbol] = {d.trade_date: d.close for d in dailies}
+    all_dailies = stock_daily_crud.get_batch(db, list(symbols))
+    symbol_dailies: dict[str, dict] = {}
+    for d in all_dailies:
+        symbol_dailies.setdefault(d.symbol, {})[d.trade_date] = d.close
+
+    # 按 symbol + date 预计算每日手续费，用于准确的 daily_pnl
+    fee_by_symbol_date: dict[str, dict] = {}
+    for t in all_trades:
+        fee_by_symbol_date.setdefault(t.symbol, {}).setdefault(t.trade_date, 0.0)
+        fee_by_symbol_date[t.symbol][t.trade_date] += (t.fee or 0)
 
     # 逐 symbol 重建每日持仓明细
     symbol_day_details = {s: {} for s in symbols}
     missing_data: list[str] = []
     for symbol in symbols:
-        trades = sorted([t for t in all_trades if t.symbol == symbol], key=lambda x: x.trade_date)
+        trades = sorted([t for t in all_trades if t.symbol == symbol], key=lambda x: (x.trade_date, x.id))
         daily_map = symbol_dailies.get(symbol, {})
-        qty = 0
-        cost = 0.0
         t_idx = 0
         for d in trade_dates:
             day_buy = 0.0
@@ -252,20 +345,15 @@ def _rebuild_daily_data(db: Session) -> list[str]:
             while t_idx < len(trades) and trades[t_idx].trade_date <= d:
                 t = trades[t_idx]
                 if t.trade_type == 'BUY':
-                    qty += t.quantity
-                    cost += t.amount
                     day_buy += t.amount
                 else:
-                    qty -= t.quantity
-                    cost -= t.quantity * (cost / qty if qty > t.quantity else t.price)
                     day_sell += t.amount
                 t_idx += 1
-            # FIFO 重新计算成本更精确
+
             past_trades = [tt for tt in trades if tt.trade_date <= d]
-            qty, rem_cost = _calc_fifo_position(past_trades)
+            qty, rem_cost = _calc_comprehensive_position(past_trades)
             avg_cost = rem_cost / qty if qty > 0 else 0
             close_price = daily_map.get(d)
-            # 检测缺失数据：有持仓但无收盘价
             if qty > 0 and close_price is None:
                 missing_data.append(f'{symbol}@{d}')
             market_value = qty * close_price if close_price else 0
@@ -300,6 +388,7 @@ def _rebuild_daily_data(db: Session) -> list[str]:
         today_mv = 0.0
         today_buy = 0.0
         today_sell = 0.0
+        day_fee = 0.0
         total_invested = 0.0
         total_unrealized = 0.0
 
@@ -311,12 +400,15 @@ def _rebuild_daily_data(db: Session) -> list[str]:
             today_mv += mv
             today_buy += det['day_buy']
             today_sell += det['day_sell']
+            day_fee += fee_by_symbol_date.get(s, {}).get(d, 0.0)
             if q > 0:
                 total_invested += q * det['avg_cost']
                 total_unrealized += det['unrealized_pnl']
 
             # 写入每日持仓明细
-            trade = next(t for t in all_trades if t.symbol == s)
+            trade = next((t for t in all_trades if t.symbol == s), None)
+            if trade is None:
+                continue
             position_items.append({
                 'trade_date': d,
                 'symbol': s,
@@ -330,7 +422,7 @@ def _rebuild_daily_data(db: Session) -> list[str]:
                 'unrealized_pnl': round(det['unrealized_pnl'], 4),
             })
 
-        daily_pnl = today_mv - prev_mv - today_buy + today_sell
+        daily_pnl = today_mv - prev_mv - today_buy + today_sell - day_fee
         cumulative_pnl += daily_pnl
         prev_mv = today_mv
 
@@ -344,25 +436,20 @@ def _rebuild_daily_data(db: Session) -> list[str]:
             'unrealized_pnl': round(total_unrealized, 4),
         })
 
-    # 计算已实现盈亏：基于清仓记录，将清仓日的 realized_pnl 加到当天及之后的 cumulative
-    closed_list = portfolio_closed_crud.get_all(db)
-    closed_by_date = {}
-    for c in closed_list:
-        closed_by_date.setdefault(c.close_date, 0)
-        closed_by_date[c.close_date] += c.realized_pnl
+    # 存在缺失数据时不写入，保留旧数据，由调用方报错
+    if missing_data:
+        return missing_data
 
-    running_realized = 0.0
-    for item in summary_items:
-        d = item['trade_date']
-        running_realized += closed_by_date.get(d, 0)
-        item['realized_pnl'] = round(running_realized, 4)
+    portfolio_daily_position_crud.delete_all(db)
+    portfolio_daily_summary_crud.delete_all(db)
 
     if position_items:
         portfolio_daily_position_crud.create_batch(db, position_items)
     if summary_items:
         portfolio_daily_summary_crud.create_batch(db, summary_items)
 
-    return missing_data
+    db.commit()
+    return []
 
 
 # ==================== 交易记录接口 ====================
@@ -374,7 +461,13 @@ def create_trade(
 ):
     """录入交易记录（买入或卖出）"""
     if obj_in.trade_type not in ('BUY', 'SELL'):
-        raise HTTPException(status_code=400, detail='trade_type 必须为 BUY 或 SELL')
+        return {'code': 400, 'message': 'trade_type 必须为 BUY 或 SELL'}
+
+    # 价格合理性校验
+    trade_date_obj = _parse_trade_date_str(obj_in.trade_date)
+    price_err = _validate_price_by_daily(db, obj_in.symbol, trade_date_obj, obj_in.price)
+    if price_err:
+        return {'code': 400, 'message': price_err}
 
     # 构建数据，排除 realized_pnl（模型无此字段）
     data = obj_in.model_dump(exclude={'realized_pnl'})
@@ -384,13 +477,16 @@ def create_trade(
     # 卖出时若填写了实际盈亏，自动计算手续费
     if obj_in.trade_type == 'SELL' and obj_in.realized_pnl is not None:
         existing_trades = portfolio_trade_crud.get_by_symbol(db, obj_in.symbol)
-        fifo_cost = _calc_new_sell_fifo_cost(existing_trades, obj_in.quantity)
+        fifo_cost = _calc_new_sell_comprehensive_cost(existing_trades, obj_in.quantity)
         theoretical_pnl = data['amount'] - fifo_cost
-        data['fee'] = round(theoretical_pnl - obj_in.realized_pnl, 4)
+        new_fee = round(theoretical_pnl - obj_in.realized_pnl, 4)
+        if new_fee < 0:
+            return {'code': 400, 'message': f'计算得出的手续费为 {new_fee} 元，小于0，请检查盈亏金额是否填写正确'}
+        data['fee'] = new_fee
 
     trade = models.PortfolioTrade(**data)
     db.add(trade)
-    db.commit()
+    db.flush()
     db.refresh(trade)
 
     # 同步该股票的持仓快照
@@ -404,16 +500,14 @@ def create_trade(
             db.query(models.PortfolioClosed).filter(
                 models.PortfolioClosed.symbol == obj_in.symbol
             ).delete()
-            db.commit()
             portfolio_closed_crud.create(db, closed_data)
 
-    # 重建每日持仓和资产数据
+    # 重建每日持仓和资产数据（内部统一 commit）
     missing = _rebuild_daily_data(db)
-    msg = '录入成功'
     if missing:
-        msg += f'（警告: {len(missing)} 条持仓数据缺失日线收盘价）'
-
-    return success(schemas.PortfolioTradeResponse.model_validate(trade).model_dump(), message=msg)
+        detail = f'持仓数据缺失日线收盘价: {", ".join(missing[:5])}' + (' 等' if len(missing) > 5 else '')
+        return {'code': 400, 'message': detail, 'data': missing}
+    return success(schemas.PortfolioTradeResponse.model_validate(trade).model_dump(), message='录入成功')
 
 
 @router.get('/portfolio/trades')
@@ -436,6 +530,76 @@ def get_trades(
     return page_success(items, total, page_num, page_size)
 
 
+@router.put('/portfolio/trades/{id}')
+def update_trade(
+    id: int,
+    obj_in: schemas.PortfolioTradeUpdate,
+    db: Session = Depends(get_db),
+):
+    """更新交易记录，并重新计算该股票的持仓与清仓状态"""
+    trade = portfolio_trade_crud.get_by_id(db, id)
+    if not trade:
+        raise HTTPException(status_code=404, detail='交易记录不存在')
+
+    update_data = obj_in.model_dump(exclude_unset=True)
+    if update_data.get('amount') is None and update_data.get('price') and update_data.get('quantity'):
+        update_data['amount'] = round(update_data['price'] * update_data['quantity'], 4)
+
+    # 日期字段统一转为 date 对象，避免后续比较时出现 str vs date 的类型错误
+    if 'trade_date' in update_data:
+        update_data['trade_date'] = _parse_trade_date_str(update_data['trade_date'])
+
+    # 价格合理性校验（修改了价格或日期时）
+    if 'price' in update_data or 'trade_date' in update_data:
+        check_date = update_data['trade_date'] if 'trade_date' in update_data else trade.trade_date
+        check_price = update_data['price'] if 'price' in update_data else trade.price
+        price_err = _validate_price_by_daily(db, trade.symbol, check_date, check_price)
+        if price_err:
+            return {'code': 400, 'message': price_err}
+
+    # 卖出时若提供了实际盈亏，重新计算手续费
+    if (
+        trade.trade_type == 'SELL'
+        and update_data.get('realized_pnl') is not None
+    ):
+        existing_trades = [
+            t for t in portfolio_trade_crud.get_by_symbol(db, trade.symbol)
+            if t.id != id
+        ]
+        sell_qty = update_data.get('quantity', trade.quantity)
+        fifo_cost = _calc_new_sell_comprehensive_cost(existing_trades, sell_qty)
+        amount = update_data.get('amount', trade.amount)
+        theoretical_pnl = amount - fifo_cost
+        new_fee = round(theoretical_pnl - update_data['realized_pnl'], 4)
+        if new_fee < 0:
+            return {'code': 400, 'message': f'计算得出的手续费为 {new_fee} 元，小于0，请检查盈亏金额是否填写正确'}
+        update_data['fee'] = new_fee
+        # realized_pnl 不是模型字段，不入库
+        update_data.pop('realized_pnl', None)
+
+    portfolio_trade_crud.update(db, id, update_data)
+
+    symbol = trade.symbol
+    # 重新同步持仓快照
+    _sync_position_snapshot(db, symbol)
+
+    # 重新计算清仓状态
+    db.query(models.PortfolioClosed).filter(
+        models.PortfolioClosed.symbol == symbol
+    ).delete()
+
+    closed_data = _calc_closed_for_symbol(db, symbol)
+    if closed_data:
+        portfolio_closed_crud.create(db, closed_data)
+
+    # 重建每日持仓和资产数据（内部统一 commit）
+    missing = _rebuild_daily_data(db)
+    if missing:
+        detail = f'持仓数据缺失日线收盘价: {", ".join(missing[:5])}' + (' 等' if len(missing) > 5 else '')
+        return {'code': 400, 'message': detail, 'data': missing}
+    return success(message='更新成功')
+
+
 @router.delete('/portfolio/trades/{id}')
 def delete_trade(id: int, db: Session = Depends(get_db)):
     """删除交易记录，并重新计算该股票的清仓状态"""
@@ -453,30 +617,29 @@ def delete_trade(id: int, db: Session = Depends(get_db)):
     db.query(models.PortfolioClosed).filter(
         models.PortfolioClosed.symbol == symbol
     ).delete()
-    db.commit()
 
     closed_data = _calc_closed_for_symbol(db, symbol)
     if closed_data:
         portfolio_closed_crud.create(db, closed_data)
 
-    # 重建每日持仓和资产数据
+    # 重建每日持仓和资产数据（内部统一 commit）
     missing = _rebuild_daily_data(db)
-    msg = '删除成功'
     if missing:
-        msg += f'（警告: {len(missing)} 条持仓数据缺失日线收盘价）'
-
-    return success(message=msg)
+        detail = f'持仓数据缺失日线收盘价: {", ".join(missing[:5])}' + (' 等' if len(missing) > 5 else '')
+        return {'code': 400, 'message': detail, 'data': missing}
+    return success(message='删除成功')
 
 
 @router.post('/portfolio/sync')
 def sync_positions(db: Session = Depends(get_db)):
-    """手动触发全部持仓快照同步，并重建每日数据"""
+    """手动触发全部持仓快照同步、清仓记录重建和每日数据重建"""
     _sync_all_positions(db)
+    _sync_all_closed(db)
     missing = _rebuild_daily_data(db)
-    msg = '同步完成'
     if missing:
-        msg += f'（警告: {len(missing)} 条持仓数据缺失日线收盘价）'
-    return success(message=msg)
+        detail = f'持仓数据缺失日线收盘价: {", ".join(missing[:5])}' + (' 等' if len(missing) > 5 else '')
+        return {'code': 400, 'message': detail, 'data': missing}
+    return success(message='同步完成')
 
 
 # ==================== 持仓与清仓接口 ====================
@@ -491,6 +654,16 @@ def get_positions(
     symbols = [p.symbol for p in positions]
     price_map = _get_latest_close_batch(db, symbols)
 
+    # 批量获取交易记录，用于计算历史盈亏
+    all_trades = (
+        db.query(models.PortfolioTrade)
+        .filter(models.PortfolioTrade.symbol.in_(symbols))
+        .all()
+    )
+    trades_by_symbol: dict[str, list[models.PortfolioTrade]] = {}
+    for t in all_trades:
+        trades_by_symbol.setdefault(t.symbol, []).append(t)
+
     items = []
     for p in positions:
         data = schemas.PortfolioPositionResponse.model_validate(p).model_dump()
@@ -500,6 +673,15 @@ def get_positions(
             data['market_value'] = round(latest_price * p.quantity, 4)
             data['unrealized_pnl'] = round(data['market_value'] - p.avg_cost * p.quantity, 4)
             data['unrealized_pnl_pct'] = round(data['unrealized_pnl'] / (p.avg_cost * p.quantity) * 100, 4) if p.avg_cost > 0 else None
+
+        # 计算历史盈亏（包含已卖出部分）
+        symbol_trades = trades_by_symbol.get(p.symbol, [])
+        mv = data.get('market_value') or (p.market_value or 0)
+        history_pnl = _calc_history_pnl(mv, symbol_trades)
+        data['history_pnl'] = round(history_pnl, 4)
+        current_cost = p.avg_cost * p.quantity
+        data['history_pnl_pct'] = round(history_pnl / current_cost * 100, 4) if current_cost > 0 else None
+
         items.append(data)
 
     return list_success(items)
@@ -571,21 +753,14 @@ def get_alerts(db: Session = Depends(get_db)):
     return list_success(result)
 
 
-@router.post('/portfolio/alerts/{id}/dismiss')
-def dismiss_alert(id: int, db: Session = Depends(get_db)):
-    """标记预警为已处理"""
-    success_flag = portfolio_position_crud.mark_alert_triggered(db, id)
-    if not success_flag:
-        raise HTTPException(status_code=404, detail='持仓不存在')
-    return success(message='已标记为已处理')
-
-
 # ==================== 配置接口 ====================
 
 @router.get('/portfolio/config')
 def get_config(db: Session = Depends(get_db)):
     """获取持仓配置"""
-    config = portfolio_config_crud.get_or_create(db)
+    config = db.query(models.PortfolioConfig).first()
+    if not config:
+        return success({'initial_capital': 35000.0})
     return success({
         'initial_capital': round(config.initial_capital, 4)
     })
@@ -598,6 +773,7 @@ def update_config(
 ):
     """更新持仓配置"""
     config = portfolio_config_crud.update(db, obj_in.initial_capital)
+    db.commit()
     return success({
         'initial_capital': round(config.initial_capital, 4)
     })
@@ -610,7 +786,8 @@ def get_summary(db: Session = Depends(get_db)):
     """获取资产总览统计"""
     positions = portfolio_position_crud.get_list(db)
     closed_data = portfolio_closed_crud.get_all(db)
-    config = portfolio_config_crud.get_or_create(db)
+    config = db.query(models.PortfolioConfig).first()
+    initial_capital = config.initial_capital if config else 35000.0
 
     total_invested = sum(p.avg_cost * p.quantity for p in positions)
 
@@ -618,14 +795,29 @@ def get_summary(db: Session = Depends(get_db)):
     symbols = [p.symbol for p in positions]
     price_map = _get_latest_close_batch(db, symbols)
 
+    # 获取持仓股票的所有交易记录，用于计算历史盈亏（含部分卖出和手续费）
+    all_trades = (
+        db.query(models.PortfolioTrade)
+        .filter(models.PortfolioTrade.symbol.in_(symbols))
+        .all()
+    )
+    trades_by_symbol: dict[str, list[models.PortfolioTrade]] = {}
+    for t in all_trades:
+        trades_by_symbol.setdefault(t.symbol, []).append(t)
+
     total_market_value = 0.0
+    total_unrealized = 0.0
     for p in positions:
         latest_price = price_map.get(p.symbol)
-        total_market_value += latest_price * p.quantity if latest_price else (p.market_value or 0)
-    unrealized_pnl = total_market_value - total_invested
+        mv = latest_price * p.quantity if latest_price else (p.market_value or 0)
+        total_market_value += mv
+
+        symbol_trades = trades_by_symbol.get(p.symbol, [])
+        history_pnl = _calc_history_pnl(mv, symbol_trades)
+        total_unrealized += history_pnl
 
     realized_pnl = sum(c.realized_pnl for c in closed_data)
-    total_pnl = unrealized_pnl + realized_pnl
+    total_pnl = total_unrealized + realized_pnl
 
     total_pnl_pct = 0.0
     if total_invested > 0:
@@ -634,8 +826,8 @@ def get_summary(db: Session = Depends(get_db)):
         total_pnl_pct = None
 
     total_return_pct = None
-    if config.initial_capital > 0:
-        total_return_pct = total_pnl / config.initial_capital * 100
+    if initial_capital > 0:
+        total_return_pct = total_pnl / initial_capital * 100
 
     return success({
         'total_invested': round(total_invested, 4),
@@ -643,9 +835,9 @@ def get_summary(db: Session = Depends(get_db)):
         'total_pnl': round(total_pnl, 4),
         'total_pnl_pct': round(total_pnl_pct, 4) if total_pnl_pct is not None else None,
         'realized_pnl': round(realized_pnl, 4),
-        'unrealized_pnl': round(unrealized_pnl, 4),
+        'unrealized_pnl': round(total_unrealized, 4),
         'position_count': len(positions),
-        'initial_capital': round(config.initial_capital, 4),
+        'initial_capital': round(initial_capital, 4),
         'total_return_pct': round(total_return_pct, 4) if total_return_pct is not None else None,
     })
 
@@ -669,63 +861,13 @@ def get_daily_pnl(db: Session = Depends(get_db)):
     return list_success(items)
 
 
-@router.get('/portfolio/daily-pnl/debug')
-def get_daily_pnl_debug(db: Session = Depends(get_db)):
-    """每日盈亏调试接口：输出每天每只持仓股票的详细计算过程
-
-    直接从 portfolio_daily_position 实体表读取。
-    """
-    positions = portfolio_daily_position_crud.get_list(db)
-    summaries = portfolio_daily_summary_crud.get_list(db)
-
-    if not positions or not summaries:
-        return list_success([])
-
-    summary_map = {s.trade_date: s for s in summaries}
-
-    # 按日期分组持仓明细
-    date_details = {}
-    for p in positions:
-        date_details.setdefault(p.trade_date, []).append({
-            'symbol': p.symbol,
-            'qty': p.quantity,
-            'price': p.close_price,
-            'market_value': round(p.market_value, 4),
-            'day_buy': round(p.day_buy, 4),
-            'day_sell': round(p.day_sell, 4),
-        })
-
-    result = []
-    prev_mv = 0.0
-    for s in summaries:
-        d = s.trade_date
-        breakdown = date_details.get(d, [])
-        today_mv = s.total_market_value
-        today_buy = sum(b['day_buy'] for b in breakdown)
-        today_sell = sum(b['day_sell'] for b in breakdown)
-        daily_pnl = s.daily_pnl
-        prev_mv = today_mv - daily_pnl + today_buy - today_sell
-
-        result.append({
-            'date': d.strftime('%Y-%m-%d'),
-            'prev_mv': round(prev_mv, 4),
-            'today_mv': round(today_mv, 4),
-            'today_buy': round(today_buy, 4),
-            'today_sell': round(today_sell, 4),
-            'daily_pnl': round(daily_pnl, 4),
-            'cumulative_pnl': round(s.cumulative_pnl, 4),
-            'breakdown': breakdown,
-        })
-
-    return list_success(result)
-
-
 @router.get('/portfolio/distribution')
 def get_distribution(db: Session = Depends(get_db)):
     """获取当前持仓占总资产分布（用于环形图）"""
     positions = portfolio_position_crud.get_list(db)
     closed_data = portfolio_closed_crud.get_all(db)
-    config = portfolio_config_crud.get_or_create(db)
+    config = db.query(models.PortfolioConfig).first()
+    initial_capital = config.initial_capital if config else 35000.0
 
     total_invested = sum(p.avg_cost * p.quantity for p in positions)
 
@@ -743,7 +885,7 @@ def get_distribution(db: Session = Depends(get_db)):
     unrealized_pnl = total_market_value - total_invested
     realized_pnl = sum(c.realized_pnl for c in closed_data)
     total_pnl = unrealized_pnl + realized_pnl
-    total_asset = config.initial_capital + total_pnl
+    total_asset = initial_capital + total_pnl
 
     items = []
     for p, mv in position_mvs:

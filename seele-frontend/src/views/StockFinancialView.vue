@@ -243,6 +243,10 @@ onMounted(() => {
   padding: 4px 28px 18px;
   box-sizing: border-box;
   overflow-y: auto;
+
+  @media (max-width: 768px) {
+    padding: 4px 16px 12px;
+  }
 }
 
 .detail-bar {
@@ -331,6 +335,14 @@ onMounted(() => {
   gap: 12px;
   margin-bottom: 16px;
   flex-shrink: 0;
+
+  @media (max-width: 1200px) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+  }
 }
 
 .fin-card {
@@ -398,6 +410,11 @@ onMounted(() => {
   gap: 12px;
   flex: 1;
   min-height: 320px;
+
+  @media (max-width: 1200px) {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
 }
 
 .chart-card {

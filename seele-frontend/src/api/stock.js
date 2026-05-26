@@ -5,40 +5,6 @@ import request from '@/utils/request'
  */
 export const stockDailyApi = {
   /**
-   * 分页查询股票日线数据
-   * @param {Object} params - 查询参数
-   * @param {string} params.symbol - 股票代码（可选）
-   * @param {string} params.startDate - 开始日期（可选）
-   * @param {string} params.endDate - 结束日期（可选）
-   * @param {number} params.pageNum - 页码，默认 1
-   * @param {number} params.pageSize - 每页条数，默认 10
-   * @returns {Promise<PageResult>}
-   */
-  pageQuery (params) {
-    return request({
-      url: '/stock/daily/page',
-      method: 'post',
-      data: {
-        page_num: 1,
-        page_size: 10,
-        ...params
-      }
-    })
-  },
-
-  /**
-   * 根据交易日期查询股票日线数据
-   * @param {string} tradeDate - 交易日期 (YYYY-MM-DD)
-   * @returns {Promise<Array>}
-   */
-  getByTradeDate (tradeDate) {
-    return request({
-      url: `/stock/daily/date/${tradeDate}`,
-      method: 'get'
-    })
-  },
-
-  /**
    * 根据股票代码查询日线数据
    * @param {string} symbol - 股票代码
    * @returns {Promise<Array>}
@@ -46,30 +12,6 @@ export const stockDailyApi = {
   getBySymbol (symbol) {
     return request({
       url: `/stock/daily/symbol/${symbol}`,
-      method: 'get'
-    })
-  },
-
-  /**
-   * 批量查询股票日线数据
-   * @param {Array<string>} symbols - 股票代码数组
-   * @returns {Promise<Array>}
-   */
-  getBySymbols (symbols) {
-    return request({
-      url: '/stock/daily/symbols',
-      method: 'post',
-      data: symbols
-    })
-  },
-
-  /**
-   * 获取交易日列表
-   * @returns {Promise<Array<string>>} - 交易日列表（按升序排列，格式：YYYY-MM-DD）
-   */
-  getTradeDates () {
-    return request({
-      url: '/stock/daily/trade-dates',
       method: 'get'
     })
   },
@@ -129,6 +71,19 @@ export const stockDailyApi = {
         ...params
       }
     })
+  },
+
+}
+
+/**
+ * 指数数据 API
+ */
+export const indexApi = {
+  getIndexList () {
+    return request({
+      url: '/index/list',
+      method: 'get'
+    })
   }
 }
 
@@ -136,20 +91,6 @@ export const stockDailyApi = {
  * 市场情绪 API
  */
 export const marketSentimentApi = {
-  /**
-   * 查询日期范围内的每日市场情绪统计
-   * @param {string} startDate - 开始日期 (YYYY-MM-DD)
-   * @param {string} endDate - 结束日期 (YYYY-MM-DD)
-   * @returns {Promise<Object>}
-   */
-  getDailySentiment (startDate, endDate) {
-    return request({
-      url: '/market/sentiment/daily',
-      method: 'get',
-      params: { start_date: startDate, end_date: endDate }
-    })
-  },
-
   /**
    * 查询某日的板块情绪统计
    * @param {string} tradeDate - 交易日期 (YYYY-MM-DD)
@@ -181,47 +122,18 @@ export const stockIndicatorApi = {
     })
   },
 
-  /**
-   * 根据股票代码查询指标
-   * @param {string} symbol - 股票代码
-   * @returns {Promise<Array>}
-   */
-  getBySymbol (symbol) {
-    return request({
-      url: `/stock/indicator/symbol/${symbol}`,
-      method: 'get'
-    })
-  },
-
-  /**
-   * 根据交易日期查询指标
-   * @param {string} tradeDate - 交易日期 (YYYY-MM-DD)
-   * @returns {Promise<Array>}
-   */
-  getByDate (tradeDate) {
-    return request({
-      url: `/stock/indicator/date/${tradeDate}`,
-      method: 'get'
-    })
-  }
 }
 
 /**
  * 数据同步 API
  */
 export const syncApi = {
-  syncByDate (tradeDate) {
+  syncByDate (tradeDate, onlyMissing = false) {
     return request({
       url: `/sync/daily/date/${tradeDate}`,
       method: 'post',
+      params: { only_missing: onlyMissing },
       timeout: 600000
-    })
-  },
-
-  syncAll () {
-    return request({
-      url: '/sync/daily',
-      method: 'post'
     })
   },
 
@@ -241,20 +153,13 @@ export const syncApi = {
     })
   },
 
-  syncIndicator (tradeDate) {
+  syncIndicator (tradeDate, onlyMissing = false) {
     return request({
       url: '/sync/indicator',
       method: 'post',
-      params: { trade_date: tradeDate },
+      params: { trade_date: tradeDate, only_missing: onlyMissing },
       timeout: 600000
     })
-  },
-
-  createSyncStream (tradeDate) {
-    const base = process.env.NODE_ENV === 'production'
-      ? (process.env.VUE_APP_BASE_API || '/api')
-      : 'http://localhost:9000/api'
-    return new EventSource(`${base}/sync/daily/date/${tradeDate}/stream`)
   },
 
   getJobLogs (days = 5, jobType = null) {
@@ -268,13 +173,6 @@ export const syncApi = {
     })
   },
 
-  getDbStatus () {
-    return request({
-      url: '/sync/db-status',
-      method: 'get'
-    })
-  },
-
   getTaskStatus (taskId) {
     return request({
       url: `/sync/task/${taskId}`,
@@ -282,9 +180,9 @@ export const syncApi = {
     })
   },
 
-  getLatestTradeDate () {
+  getActiveTasks () {
     return request({
-      url: '/sync/latest-trade-date',
+      url: '/sync/active-tasks',
       method: 'get'
     })
   },
@@ -292,6 +190,58 @@ export const syncApi = {
   getDetailedStatus () {
     return request({
       url: '/sync/detailed-status',
+      method: 'get'
+    })
+  },
+
+  cancelJobLog (logId) {
+    return request({
+      url: `/sync/job-log/${logId}/cancel`,
+      method: 'post'
+    })
+  },
+
+  startPipeline (chainType, tradeDate = null) {
+    return request({
+      url: '/sync/pipeline',
+      method: 'post',
+      data: {
+        chain_type: chainType,
+        trade_date: tradeDate
+      },
+      timeout: 30000
+    })
+  },
+
+  getPipeline (pipelineId) {
+    return request({
+      url: `/sync/pipeline/${pipelineId}`,
+      method: 'get'
+    })
+  },
+
+  getPipelines () {
+    return request({
+      url: '/sync/pipelines',
+      method: 'get'
+    })
+  },
+
+  cancelPipeline (pipelineId) {
+    return request({
+      url: `/sync/pipeline/${pipelineId}/cancel`,
+      method: 'post'
+    })
+  }
+}
+
+/**
+ * 交易日历 API
+ */
+export const tradeCalendarApi = {
+  getLatest () {
+    return request({
+      url: '/trade-calendar/latest',
       method: 'get'
     })
   }
@@ -315,21 +265,4 @@ export const stockBasicApi = {
     })
   },
 
-  listAll (pageNum = 1, pageSize = 10) {
-    return request({
-      url: '/stock/basic/list',
-      method: 'get',
-      params: {
-        page_num: pageNum,
-        page_size: pageSize
-      }
-    })
-  },
-
-  getBySymbol (symbol) {
-    return request({
-      url: `/stock/basic/symbol/${symbol}`,
-      method: 'get'
-    })
-  }
 }

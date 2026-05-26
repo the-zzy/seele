@@ -1,9 +1,10 @@
 <script setup>
 import { reactive, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { stockDailyApi } from '@/api/stock'
+import { stockDailyApi, tradeCalendarApi } from '@/api/stock'
+import { formatNumber } from '@/utils/formatters'
 import MainwavePickerFilter from '@/components/stock/MainwavePickerFilter.vue'
-import StockDataTable from '@/components/stock/StockDataTable.vue'
+import MainwaveTable from '@/components/stock/MainwaveTable.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
 import PageHero from '@/components/common/PageHero.vue'
 
@@ -15,14 +16,15 @@ const total = ref(0)
 const pageNum = ref(1)
 const pageSize = ref(10)
 
-const filterForm = reactive({
+let filterForm = reactive({
   symbol: '',
   name: '',
   tradeDate: '',
   floatMarketCapMin: 200,
   closeMax: 300,
   avgTurnoverMin: 2,
-  avgAmountMin: 2
+  avgAmountMin: 2,
+  maBull: true
 })
 
 const sortField = ref('symbol')
@@ -40,15 +42,15 @@ function handleSort (field) {
 
 async function loadLatestTradeDate () {
   try {
-    const dates = await stockDailyApi.getTradeDates()
-    if (Array.isArray(dates) && dates.length > 0) {
-      const latestDate = dates[0]
-      filterForm.tradeDate = latestDate
-      return latestDate
+    const date = await tradeCalendarApi.getLatest()
+    if (date) {
+      filterForm.tradeDate = date
+      return date
     }
   } catch (error) {
     console.error('获取最近交易日失败:', error)
   }
+  filterForm.tradeDate = ''
   return ''
 }
 
@@ -82,6 +84,9 @@ async function loadData () {
     if (filterForm.avgAmountMin != null) {
       params.avg_amount_min = filterForm.avgAmountMin * 100000000
     }
+    if (filterForm.maBull) {
+      params.ma_bull = true
+    }
 
     const res = await stockDailyApi.getMainwavePicker(params)
     // 如果后端返回了实际使用的交易日期，同步更新前端日期选择器
@@ -111,7 +116,12 @@ async function loadData () {
       volMa5: item.vol_ma5,
       volMa10: item.vol_ma10,
       turnoverMa5: item.turnover_ma5,
-      turnoverMa10: item.turnover_ma10
+      turnoverMa10: item.turnover_ma10,
+      chg5d: item.chg_5d,
+      chg10d: item.chg_10d,
+      netProfit: item.net_profit,
+      netProfitYoy: item.net_profit_yoy,
+      roe: item.roe
     }))
     total.value = res?.total || 0
   } catch (error) {
@@ -135,6 +145,7 @@ async function handleReset () {
   filterForm.closeMax = 300
   filterForm.avgTurnoverMin = 2
   filterForm.avgAmountMin = 2
+  filterForm.maBull = true
   sortField.value = 'symbol'
   sortOrder.value = 'asc'
   pageNum.value = 1
@@ -183,7 +194,7 @@ onMounted(async () => {
       @reset="handleReset"
     />
 
-    <StockDataTable
+    <MainwaveTable
       :list="stockList"
       :sort-field="sortField"
       :sort-order="sortOrder"
@@ -211,5 +222,9 @@ onMounted(async () => {
   padding: 4px 28px 18px;
   box-sizing: border-box;
   overflow: hidden;
+
+  @media (max-width: 768px) {
+    padding: 4px 16px 12px;
+  }
 }
 </style>

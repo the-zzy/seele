@@ -6,14 +6,26 @@ import StockKLineView from '../views/StockKLineView.vue'
 import ChgDistributionView from '../views/ChgDistributionView.vue'
 import PortfolioView from '../views/PortfolioView.vue'
 import MainwavePickerView from '../views/MainwavePickerView.vue'
+import MainwaveScorerView from '../views/MainwaveScorerView.vue'
 import IndustrySentimentView from '../views/IndustrySentimentView.vue'
 import StockFinancialView from '../views/StockFinancialView.vue'
 import FinancialListView from '../views/FinancialListView.vue'
 import SyncJobLogView from '../views/SyncJobLogView.vue'
+import AgentView from '../views/AgentView.vue'
+import BoardListView from '../views/BoardListView.vue'
+import BoardDetailView from '../views/BoardDetailView.vue'
+import SystemLogView from '../views/SystemLogView.vue'
+import GalleryView from '../views/GalleryView.vue'
 
 const routes = [
   {
     path: '/',
+    name: 'gallery',
+    component: GalleryView,
+    meta: { title: '图库', nav: true, navOrder: 5, section: '主页' }
+  },
+  {
+    path: '/stock-basic',
     name: 'stock-basic',
     component: StockBasicView,
     meta: { title: '股票基本信息', nav: true, navOrder: 10, section: '基本面' }
@@ -61,10 +73,22 @@ const routes = [
     meta: { title: '主升浪选股', nav: true, navOrder: 50, section: '选股策略' }
   },
   {
+    path: '/mainwave-scorer',
+    name: 'mainwave-scorer',
+    component: MainwaveScorerView,
+    meta: { title: '主升浪评分', nav: true, navOrder: 51, section: '选股策略' }
+  },
+  {
     path: '/sync-jobs',
     name: 'sync-jobs',
     component: SyncJobLogView,
     meta: { title: '同步任务', nav: true, navOrder: 90, section: '系统' }
+  },
+  {
+    path: '/system-logs',
+    name: 'system-logs',
+    component: SystemLogView,
+    meta: { title: '系统日志', nav: true, navOrder: 91, section: '系统' }
   },
   {
     path: '/kline/:symbol',
@@ -77,12 +101,44 @@ const routes = [
     name: 'stock-financial',
     component: StockFinancialView,
     meta: { title: '财务分析' }
+  },
+  {
+    path: '/agent',
+    name: 'agent',
+    component: AgentView,
+    meta: { title: 'AI Agent', nav: true, navOrder: 100, section: '智能助手' }
+  },
+  {
+    path: '/boards',
+    name: 'board-list',
+    component: BoardListView,
+    meta: { title: '板块 / ETF', nav: true, navOrder: 35, section: '市场数据' }
+  },
+  {
+    path: '/boards/:code',
+    name: 'board-detail',
+    component: BoardDetailView,
+    meta: { title: '板块详情' }
   }
 ]
 
 const router = createRouter({
   history: createWebHistory(),
   routes
+})
+
+router.beforeEach((to, from, next) => {
+  const inWorkspace = localStorage.getItem('seele_workspace') === '1'
+  if (!inWorkspace && to.path !== '/') {
+    next('/')
+    return
+  }
+  next()
+})
+
+router.afterEach((to) => {
+  const title = to.meta?.title || 'Seele'
+  document.title = `${title} · Seele`
 })
 
 export default router

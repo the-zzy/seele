@@ -8,6 +8,10 @@ from datetime import datetime
 
 from app import crud, models, schemas
 from app.database import SessionLocal
+from app.routes.market_sentiment import (
+    _persist_industry_sentiment,
+    _persist_market_sentiment,
+)
 from app.routes.stock_indicator import _build_indicator_for_symbol
 from app.routes.sync import (
     _sync_daily_bulk,
@@ -39,11 +43,12 @@ def scheduled_sync_stock_basic(db, log_id: int) -> None:
         db,
         log_id,
         status='success',
-        success_count=result.get('updated', 0) + result.get('created', 0),
+        success_count=result.get('success', 0),
         failed_count=0,
         total_count=result.get('total', 0),
         extra_info=extra,
     )
+    db.commit()
 
 
 @_with_job_log('daily')
@@ -55,6 +60,7 @@ def scheduled_sync_daily(db, log_id: int) -> None:
         crud.sync_job_log_crud.finish(
             db, log_id, 'skipped', extra_info='non-trading day'
         )
+        db.commit()
         return
 
     trade_date = get_last_trade_date()
@@ -70,6 +76,7 @@ def scheduled_sync_daily(db, log_id: int) -> None:
         crud.sync_job_log_crud.finish(
             db, log_id, 'skipped', extra_info=f'trade_date={trade_date} already synced'
         )
+        db.commit()
         return
 
     source = 'baostock'
@@ -86,6 +93,16 @@ def scheduled_sync_daily(db, log_id: int) -> None:
 
     result = _sync_daily_bulk(trade_date, source=source)
 
+    # 日线同步完成后自动预计算市场情绪
+    from datetime import datetime as _datetime
+    trade_date_obj = _datetime.strptime(trade_date, '%Y%m%d').date()
+    try:
+        _persist_market_sentiment(db, trade_date_obj)
+        _persist_industry_sentiment(db, trade_date_obj)
+        logger.info('[SCHEDULER] 交易日 %s 市场情绪预计算完成', trade_date)
+    except Exception as exc:
+        logger.warning('[SCHEDULER] 市场情绪预计算失败: %s', exc)
+
     crud.sync_job_log_crud.finish(
         db,
         log_id,
@@ -97,12 +114,13 @@ def scheduled_sync_daily(db, log_id: int) -> None:
         trade_date=trade_date,
         extra_info=f'source={source}',
     )
+    db.commit()
 
 
 @_with_job_log('financial')
 def scheduled_sync_financial(db, log_id: int) -> None:
     """定时同步财务指标"""
-    result = _sync_financial_bulk()
+    result = _sync_financial_bulk(only_missing=True)
 
     crud.sync_job_log_crud.finish(
         db,
@@ -113,6 +131,7 @@ def scheduled_sync_financial(db, log_id: int) -> None:
         total_count=result.get('total_stocks', 0),
         extra_info='source=akshare_ths',
     )
+    db.commit()
 
 
 @_with_job_log('indicator')
@@ -124,6 +143,7 @@ def scheduled_compute_indicators(db, log_id: int) -> None:
         crud.sync_job_log_crud.finish(
             db, log_id, 'skipped', extra_info='non-trading day'
         )
+        db.commit()
         return
 
     trade_date = get_last_trade_date()
@@ -137,6 +157,7 @@ def scheduled_compute_indicators(db, log_id: int) -> None:
         crud.sync_job_log_crud.finish(
             db, log_id, 'skipped', extra_info=f'no daily data for {trade_date}'
         )
+        db.commit()
         return
 
     symbols = [
@@ -176,3 +197,4 @@ def scheduled_compute_indicators(db, log_id: int) -> None:
         trade_date=trade_date,
         extra_info=f'indicators for {formatted_date}',
     )
+    db.commit()

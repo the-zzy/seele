@@ -9,7 +9,7 @@ from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, func, text
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from app import models
@@ -150,6 +150,24 @@ def _persist_industry_sentiment(db: Session, trade_date: date, threshold: float 
     db.commit()
 
 
+@router.post("/compute")
+def post_compute_sentiment(
+    trade_date: str = Query(..., description="交易日期，格式 YYYY-MM-DD"),
+    threshold: float = Query(2.0, description="强势阈值，默认 2.0"),
+    db: Session = Depends(get_db),
+):
+    """计算并保存指定日期的市场情绪数据（用于手动补算）"""
+    from datetime import date as _date
+    date_obj = _date.fromisoformat(trade_date)
+    _persist_market_sentiment(db, date_obj, threshold)
+    _persist_industry_sentiment(db, date_obj, threshold)
+    return success({
+        "trade_date": trade_date,
+        "status": "computed",
+        "threshold": threshold,
+    })
+
+
 @router.get("/daily")
 def get_daily_sentiment(
     start_date: str = Query(..., description="开始日期，格式 YYYY-MM-DD"),
@@ -158,31 +176,36 @@ def get_daily_sentiment(
     db: Session = Depends(get_db),
 ):
     """查询日期范围内的每日市场情绪统计"""
-    start = start_date.replace("-", "")
-    end = end_date.replace("-", "")
+    from datetime import date as _date
+
+    start_obj = _date.fromisoformat(start_date)
+    end_obj = _date.fromisoformat(end_date)
 
     range_dates = [
         d[0]
-        for d in db.query(models.StockDaily.trade_date)
+        for d in db.query(models.TradeCalendar.trade_date)
         .filter(
-            models.StockDaily.trade_date >= start,
-            models.StockDaily.trade_date <= end,
+            models.TradeCalendar.trade_date >= start_obj,
+            models.TradeCalendar.trade_date <= end_obj,
+            models.TradeCalendar.is_trading_day == 1,
         )
-        .distinct()
-        .order_by(models.StockDaily.trade_date.asc())
+        .order_by(models.TradeCalendar.trade_date.asc())
         .all()
     ]
 
     if not range_dates:
         return success({"start_date": start_date, "end_date": end_date, "list": []})
 
+    existing_rows = (
+        db.query(models.MarketSentimentDaily)
+        .filter(models.MarketSentimentDaily.trade_date.in_(range_dates))
+        .all()
+    )
+    existing_map = {r.trade_date: r for r in existing_rows}
+
     result = []
     for td in range_dates:
-        row = (
-            db.query(models.MarketSentimentDaily)
-            .filter(models.MarketSentimentDaily.trade_date == td)
-            .first()
-        )
+        row = existing_map.get(td)
         if row:
             result.append({
                 "trade_date": str(row.trade_date),
@@ -196,9 +219,18 @@ def get_daily_sentiment(
                 "strong_percent": float(row.strong_percent) if row.strong_percent else 0.0,
             })
         else:
-            data = _compute_market_sentiment(db, td, threshold)
-            _persist_market_sentiment(db, td, threshold)
-            result.append(data)
+            # 缺失数据时返回空值，不再实时计算（应在同步任务链中预计算）
+            result.append({
+                "trade_date": str(td),
+                "total_stocks": 0,
+                "up_count": 0,
+                "down_count": 0,
+                "flat_count": 0,
+                "avg_pct_chg": 0.0,
+                "strong_count": 0,
+                "strong_threshold": threshold,
+                "strong_percent": 0.0,
+            })
 
     return success({
         "start_date": start_date,
@@ -215,11 +247,12 @@ def get_industry_sentiment(
     db: Session = Depends(get_db),
 ):
     """查询某日的板块情绪统计"""
-    formatted = trade_date.replace("-", "")
+    from datetime import date as _date
+    date_obj = _date.fromisoformat(trade_date)
 
     rows = (
         db.query(models.IndustrySentimentDaily)
-        .filter(models.IndustrySentimentDaily.trade_date == formatted)
+        .filter(models.IndustrySentimentDaily.trade_date == date_obj)
         .order_by(models.IndustrySentimentDaily.avg_pct_chg.desc())
         .all()
     )
@@ -242,19 +275,7 @@ def get_industry_sentiment(
             })
         return success({"trade_date": trade_date, "list": result})
 
-    data = _compute_industry_sentiment(db, formatted, threshold)
-    _persist_industry_sentiment(db, formatted, threshold)
-    return success({"trade_date": trade_date, "list": data})
+    # 缺失数据不再实时计算（应在同步任务链中预计算）
+    return success({"trade_date": trade_date, "list": []})
 
 
-@router.post("/compute/{trade_date}")
-def compute_sentiment(
-    trade_date: str,
-    threshold: float = Query(2.0, description="强势阈值，默认 2.0"),
-    db: Session = Depends(get_db),
-):
-    """手动触发某日的市场情绪统计计算并持久化"""
-    formatted = trade_date.replace("-", "")
-    _persist_market_sentiment(db, formatted, threshold)
-    _persist_industry_sentiment(db, formatted, threshold)
-    return success({"trade_date": trade_date, "message": "市场情绪统计已更新"})

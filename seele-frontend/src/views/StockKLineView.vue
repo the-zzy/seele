@@ -434,6 +434,10 @@ onMounted(() => {
   padding: 4px 28px 18px;
   box-sizing: border-box;
   overflow-y: auto;
+
+  @media (max-width: 768px) {
+    padding: 4px 16px 12px;
+  }
 }
 
 .detail-bar {

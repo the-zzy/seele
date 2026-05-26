@@ -1,7 +1,10 @@
 import axios from 'axios'
+import { getToken, removeToken, requireAuth } from '@/utils/auth'
+
+export const baseURL = process.env.VUE_APP_BASE_API || '/api'
 
 const request = axios.create({
-  baseURL: process.env.VUE_APP_BASE_API || '/api',
+  baseURL,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json'
@@ -9,7 +12,13 @@ const request = axios.create({
 })
 
 request.interceptors.request.use(
-  config => config,
+  config => {
+    const token = getToken()
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
   error => Promise.reject(error)
 )
 
@@ -30,6 +39,10 @@ request.interceptors.response.use(
     return res
   },
   error => {
+    if (error.response?.status === 401) {
+      removeToken()
+      requireAuth()
+    }
     console.error('请求错误:', error.message)
     return Promise.reject(error)
   }

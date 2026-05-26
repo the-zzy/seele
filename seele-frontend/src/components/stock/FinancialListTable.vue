@@ -111,4 +111,11 @@ function onRowDblClick (item) {
 </template>
 
 <style scoped lang="scss">
+.table-section {
+  overflow-x: auto;
+}
+
+.stock-table {
+  min-width: 960px;
+}
 </style>
