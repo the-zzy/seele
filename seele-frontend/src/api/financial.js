@@ -29,6 +29,5 @@ export const financialApi = {
       url: `/financial/${symbol}`,
       method: 'get'
     })
-  },
-
+  }
 }
