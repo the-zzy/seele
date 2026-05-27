@@ -20,6 +20,7 @@ const emit = defineEmits(['sort', 'row-dblclick'])
 const columns = [
   { key: 'symbol', label: '代码', align: 'left' },
   { key: 'name', label: '名称', align: 'left' },
+  { key: 'score', label: '总分' },
   { key: 'close', label: '收盘' },
   { key: 'pctChg', label: '涨跌幅' },
   { key: 'volume', label: '成交量' },
@@ -56,6 +57,41 @@ function extractCodeNum (symbol) {
 
 function onDblClick (item) {
   emit('row-dblclick', item)
+}
+
+function getScoreClass (score) {
+  if (!score || score.total === undefined) return ''
+  const total = score.total
+  if (total >= 80) return 'score-strong'
+  if (total >= 60) return 'score-ok'
+  if (total >= 40) return 'score-weak'
+  return 'score-poor'
+}
+
+function getScoreLabel (score) {
+  if (!score || score.total === undefined) return '—'
+  const total = score.total
+  if (total >= 80) return `${total} 强推`
+  if (total >= 60) return `${total} 推荐`
+  if (total >= 40) return `${total} 勉强`
+  return `${total} 不推荐`
+}
+
+function getScoreTooltip (item) {
+  const s = item.score
+  if (!s) return ''
+  return [
+    `总分: ${s.total}/100`,
+    `趋势形态: ${s.trend_shape}/35`,
+    `  均线偏离: ${s.ma_deviation}`,
+    `  K线质量: ${s.kline_quality}`,
+    `  距高点回落: ${s.pullback}`,
+    `板块强度: ${s.sector}/20`,
+    `业绩质量: ${s.earnings}/15`,
+    `方向分散: ${s.direction}/15`,
+    `市值流动性: ${s.liquidity}/8`,
+    `大盘环境: ${s.market_env}/7`
+  ].join('\n')
 }
 
 function getChgBgClass (val) {
@@ -103,6 +139,11 @@ function getPriceClass (pctChg) {
         >
           <td class="code">{{ extractCodeNum(item.symbol) }}</td>
           <td class="name">{{ item.name }}</td>
+          <td :title="getScoreTooltip(item)">
+            <span class="score-tag" :class="getScoreClass(item.score)">
+              {{ getScoreLabel(item.score) }}
+            </span>
+          </td>
           <td :class="getPriceClass(item.pctChg)">{{ formatNumber(item.close) }}</td>
           <td :class="getChgBgClass(item.pctChg)">{{ formatPctChg(item.pctChg) }}</td>
           <td>{{ formatVolume(item.volume) }}</td>
@@ -126,5 +167,39 @@ function getPriceClass (pctChg) {
 
 .stock-table {
   min-width: 1400px;
+}
+
+.score-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: help;
+
+  &.score-strong {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+  }
+
+  &.score-ok {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+  }
+
+  &.score-weak {
+    background: rgba(156, 163, 175, 0.15);
+    color: #9ca3af;
+    border: 1px solid rgba(156, 163, 175, 0.3);
+  }
+
+  &.score-poor {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+  }
 }
 </style>
