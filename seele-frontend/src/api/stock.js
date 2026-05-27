@@ -71,8 +71,7 @@ export const stockDailyApi = {
         ...params
       }
     })
-  },
-
+  }
 }
 
 /**
@@ -120,8 +119,7 @@ export const stockIndicatorApi = {
       method: 'post',
       params: { trade_date: tradeDate }
     })
-  },
-
+  }
 }
 
 /**
@@ -263,6 +261,5 @@ export const stockBasicApi = {
         ...params
       }
     })
-  },
-
+  }
 }
