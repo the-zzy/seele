@@ -1,5 +1,5 @@
 <script setup>
-import { reactive, ref, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { stockDailyApi, tradeCalendarApi } from '@/api/stock'
 import { formatNumber } from '@/utils/formatters'
@@ -16,7 +16,7 @@ const total = ref(0)
 const pageNum = ref(1)
 const pageSize = ref(10)
 
-let filterForm = reactive({
+const filterForm = ref({
   symbol: '',
   name: '',
   tradeDate: '',
@@ -44,13 +44,13 @@ async function loadLatestTradeDate () {
   try {
     const date = await tradeCalendarApi.getLatest()
     if (date) {
-      filterForm.tradeDate = date
+      filterForm.value.tradeDate = date
       return date
     }
   } catch (error) {
     console.error('获取最近交易日失败:', error)
   }
-  filterForm.tradeDate = ''
+  filterForm.value.tradeDate = ''
   return ''
 }
 
@@ -63,35 +63,35 @@ async function loadData () {
       sort_field: sortField.value,
       sort_order: sortOrder.value
     }
-    if (filterForm.symbol?.trim()) {
-      params.symbol = filterForm.symbol.trim()
+    if (filterForm.value.symbol?.trim()) {
+      params.symbol = filterForm.value.symbol.trim()
     }
-    if (filterForm.name?.trim()) {
-      params.name = filterForm.name.trim()
+    if (filterForm.value.name?.trim()) {
+      params.name = filterForm.value.name.trim()
     }
-    if (filterForm.tradeDate) {
-      params.trade_date = filterForm.tradeDate
+    if (filterForm.value.tradeDate) {
+      params.trade_date = filterForm.value.tradeDate
     }
-    if (filterForm.floatMarketCapMin != null) {
-      params.float_market_cap_min = filterForm.floatMarketCapMin
+    if (filterForm.value.floatMarketCapMin != null) {
+      params.float_market_cap_min = filterForm.value.floatMarketCapMin
     }
-    if (filterForm.closeMax != null) {
-      params.close_max = filterForm.closeMax
+    if (filterForm.value.closeMax != null) {
+      params.close_max = filterForm.value.closeMax
     }
-    if (filterForm.avgTurnoverMin != null) {
-      params.avg_turnover_min = filterForm.avgTurnoverMin
+    if (filterForm.value.avgTurnoverMin != null) {
+      params.avg_turnover_min = filterForm.value.avgTurnoverMin
     }
-    if (filterForm.avgAmountMin != null) {
-      params.avg_amount_min = filterForm.avgAmountMin * 100000000
+    if (filterForm.value.avgAmountMin != null) {
+      params.avg_amount_min = filterForm.value.avgAmountMin * 100000000
     }
-    if (filterForm.maBull) {
+    if (filterForm.value.maBull) {
       params.ma_bull = true
     }
 
     const res = await stockDailyApi.getMainwavePicker(params)
     // 如果后端返回了实际使用的交易日期，同步更新前端日期选择器
     if (res?.trade_date) {
-      filterForm.tradeDate = res.trade_date
+      filterForm.value.tradeDate = res.trade_date
     }
     stockList.value = (res?.list || []).map(item => ({
       id: item.id,
@@ -140,13 +140,13 @@ async function handleSearch () {
 }
 
 async function handleReset () {
-  filterForm.symbol = ''
-  filterForm.name = ''
-  filterForm.floatMarketCapMin = 200
-  filterForm.closeMax = 300
-  filterForm.avgTurnoverMin = 2
-  filterForm.avgAmountMin = 2
-  filterForm.maBull = true
+  filterForm.value.symbol = ''
+  filterForm.value.name = ''
+  filterForm.value.floatMarketCapMin = 200
+  filterForm.value.closeMax = 300
+  filterForm.value.avgTurnoverMin = 2
+  filterForm.value.avgAmountMin = 2
+  filterForm.value.maBull = true
   sortField.value = 'score'
   sortOrder.value = 'desc'
   pageNum.value = 1
@@ -190,7 +190,8 @@ onMounted(async () => {
     />
 
     <MainwavePickerFilter
-      v-model="filterForm"
+      :modelValue="filterForm.value"
+      @update:modelValue="val => { filterForm.value = val }"
       @search="handleSearch"
       @reset="handleReset"
     />
