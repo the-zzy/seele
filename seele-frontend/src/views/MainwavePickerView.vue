@@ -27,8 +27,8 @@ let filterForm = reactive({
   maBull: true
 })
 
-const sortField = ref('symbol')
-const sortOrder = ref('asc')
+const sortField = ref('score')
+const sortOrder = ref('desc')
 
 function handleSort (field) {
   if (sortField.value === field) {
@@ -121,7 +121,8 @@ async function loadData () {
       chg10d: item.chg_10d,
       netProfit: item.net_profit,
       netProfitYoy: item.net_profit_yoy,
-      roe: item.roe
+      roe: item.roe,
+      score: item.score
     }))
     total.value = res?.total || 0
   } catch (error) {
@@ -146,8 +147,8 @@ async function handleReset () {
   filterForm.avgTurnoverMin = 2
   filterForm.avgAmountMin = 2
   filterForm.maBull = true
-  sortField.value = 'symbol'
-  sortOrder.value = 'asc'
+  sortField.value = 'score'
+  sortOrder.value = 'desc'
   pageNum.value = 1
   await loadData()
 }
