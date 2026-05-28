@@ -4,15 +4,19 @@
 提供指标计算、查询等功能。
 """
 
+import logging
+import math
 from datetime import date
 from typing import List, Optional
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 from ta.momentum import RSIIndicator
-from ta.trend import MACD
+from ta.trend import MACD, ADXIndicator
 from ta.volatility import BollingerBands
 
 from app import crud, models, schemas
@@ -98,6 +102,7 @@ def _build_indicator_for_symbol(
         "boll_upper": None,
         "boll_middle": None,
         "boll_lower": None,
+        "adx": None,
     }
 
     # 使用 ta 库计算高级指标（需要至少 26 条数据）
@@ -153,10 +158,21 @@ def _build_indicator_for_symbol(
             except Exception as exc:
                 logger.debug('[INDICATOR] KDJ 计算失败 %s: %s', symbol, exc)
 
-    # 将 NaN 替换为 None，避免 MySQL 写入失败
+            # ADX
+            try:
+                if (len(df) >= 30 and df['high'].notna().all() and df['low'].notna().all()
+                        and len(df[df['high'] > df['low']]) >= 20):
+                    adx_ind = ADXIndicator(high=df['high'], low=df['low'], close=df['close'], window=14)
+                    adx_val = adx_ind.adx().iloc[-1]
+                    if pd.notna(adx_val):
+                        result['adx'] = float(round(adx_val, 2))
+            except Exception as exc:
+                logger.debug('[INDICATOR] ADX 计算失败 %s: %s', symbol, exc)
+
+    # 将 NaN / inf 替换为 None，避免 MySQL 写入失败
     for key in list(result.keys()):
         val = result[key]
-        if val is not None and isinstance(val, float) and (val != val):  # NaN 的唯一特性：NaN != NaN
+        if val is not None and isinstance(val, float) and not math.isfinite(val):
             result[key] = None
 
     return result

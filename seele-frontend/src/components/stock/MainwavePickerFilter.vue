@@ -1,6 +1,6 @@
 <script setup>
 const props = defineProps({
-  modelValue: { type: Object, required: true }
+  modelValue: { type: Object, default: () => ({}) }
 })
 
 const emit = defineEmits(['update:modelValue', 'search', 'reset'])

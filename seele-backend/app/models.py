@@ -79,6 +79,7 @@ class StockDailyIndicator(Base):
     boll_upper = Column(Float, comment="布林上轨")
     boll_middle = Column(Float, comment="布林中轨")
     boll_lower = Column(Float, comment="布林下轨")
+    adx = Column(Float, comment="ADX趋势强度")
     created_at = Column(TIMESTAMP, server_default=func.now(), comment="创建时间")
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment="更新时间")
 
@@ -444,3 +445,16 @@ class SystemOperationLog(Base):
     __table_args__ = (
         {'mysql_engine': 'InnoDB', 'comment': '系统操作日志表'},
     )
+
+
+class GalleryImage(Base):
+    """图库图片表"""
+    __tablename__ = 'gallery_image'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    filename = Column(String(255), nullable=False, comment='存储文件名')
+    original_name = Column(String(255), nullable=False, comment='原始文件名')
+    file_size = Column(Integer, nullable=False, comment='文件大小(字节)')
+    mime_type = Column(String(50), nullable=False, comment='MIME类型')
+    url_path = Column(String(500), nullable=False, comment='访问路径')
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False, comment='创建时间')

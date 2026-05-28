@@ -22,11 +22,11 @@
     <div v-else class="home-masonry">
       <div
         v-for="img in images"
-        :key="img"
+        :key="img.id"
         class="home-item"
         @click="openPreview(img)"
       >
-        <img :src="`/gallery/${img}`" :alt="img" loading="lazy">
+        <img :src="img.url_path" :alt="img.original_name" loading="lazy">
       </div>
     </div>
 
@@ -35,7 +35,7 @@
       <button class="preview-close" @click="closePreview">✕</button>
       <button v-if="previewIndex > 0" class="preview-nav prev" @click="goPrev">‹</button>
       <button v-if="previewIndex < images.length - 1" class="preview-nav next" @click="goNext">›</button>
-      <img :src="`/gallery/${preview}`" class="preview-img" @click.stop>
+      <img :src="preview.url_path" class="preview-img" @click.stop>
       <div class="preview-counter">{{ previewIndex + 1 }} / {{ images.length }}</div>
     </div>
 
@@ -48,6 +48,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { galleryApi } from '@/api/gallery'
 
 defineProps({
   loggedIn: { type: Boolean, default: false }
@@ -66,8 +67,7 @@ const previewIndex = computed(() => {
 
 async function loadImages () {
   try {
-    const res = await fetch('/gallery-images.json')
-    images.value = await res.json()
+    images.value = await galleryApi.getList()
   } catch (err) {
     console.error('加载图库失败:', err)
   } finally {

@@ -11,12 +11,13 @@ import logging
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.auth import get_current_user
 from app.config import get_settings
 from app.database import engine, Base
 from app.response import success
-from app.routes import auth, financial, index, market_sentiment, pickers, portfolio, stock_basic, stock_daily, stock_indicator, sync, system_log, trade_calendar
+from app.routes import auth, financial, gallery, index, market_sentiment, pickers, portfolio, stock_basic, stock_daily, stock_indicator, sync, system_log, trade_calendar
 from app.agent.router import router as agent_router
 from app.scheduler import get_scheduler
 from app.scheduler_jobs import (
@@ -153,6 +154,10 @@ app.include_router(index.router, prefix="/api", dependencies=auth_dep)
 app.include_router(system_log.router, prefix="/api", dependencies=auth_dep)
 app.include_router(trade_calendar.router, prefix="/api", dependencies=auth_dep)
 app.include_router(agent_router, prefix="/api", dependencies=auth_dep)
+app.include_router(gallery.router, prefix="/api")
+
+# 图库图片静态文件服务
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 
 @app.get("/")
