@@ -190,8 +190,7 @@ onMounted(async () => {
     />
 
     <MainwavePickerFilter
-      :modelValue="filterForm.value"
-      @update:modelValue="val => { filterForm.value = val }"
+      v-model="filterForm"
       @search="handleSearch"
       @reset="handleReset"
     />

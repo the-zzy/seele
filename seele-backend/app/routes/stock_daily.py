@@ -258,3 +258,38 @@ def get_stock_daily_all_by_date(
     )
 
 
+# 2.2 根据股票代码查询全部日线数据（关联指标表）
+@router.get("/symbol/{symbol}")
+def get_stock_daily_by_symbol(
+    symbol: str,
+    db: Session = Depends(get_db),
+):
+    """根据股票代码查询全部历史日线数据（关联 stock_daily_indicator）"""
+    results = (
+        db.query(
+            models.StockDaily,
+            models.StockDailyIndicator.ma5,
+            models.StockDailyIndicator.ma10,
+            models.StockDailyIndicator.ma20,
+            models.StockDailyIndicator.ma30,
+            models.StockDailyIndicator.ma60,
+            models.StockDailyIndicator.vol_ma5,
+            models.StockDailyIndicator.vol_ma10,
+            models.StockDailyIndicator.turnover_ma5,
+            models.StockDailyIndicator.turnover_ma10,
+        )
+        .outerjoin(
+            models.StockDailyIndicator,
+            and_(
+                models.StockDaily.symbol == models.StockDailyIndicator.symbol,
+                models.StockDaily.trade_date == models.StockDailyIndicator.trade_date,
+            ),
+        )
+        .filter(models.StockDaily.symbol == symbol)
+        .order_by(models.StockDaily.trade_date.asc())
+        .all()
+    )
+
+    data_list = [_build_daily_indicator_item(row) for row in results]
+    return list_success(data_list)
+

@@ -24,20 +24,22 @@ from app import models
 def _calc_ma_deviation(close: Optional[float], ma5: Optional[float]) -> int:
     """均线偏离评分（15分）
 
-    偏离越小越好，但必须在MA5上方。过高偏离意味着追高风险。
+    偏离适中为佳。负偏离表示偏弱，过高偏离表示追高风险。
     """
     if not close or not ma5 or ma5 == 0:
         return 0
     deviate = (close - ma5) / ma5 * 100
-    if deviate <= 0 or deviate > 10:
+    if deviate < -5 or deviate > 15:
         return 0
-    if deviate <= 1:
+    if deviate <= 0:
+        return 4
+    if deviate <= 2:
         return 15
-    if deviate <= 3:
-        return 12
     if deviate <= 5:
+        return 12
+    if deviate <= 8:
         return 8
-    if deviate <= 7:
+    if deviate <= 12:
         return 4
     return 1
 
@@ -50,7 +52,8 @@ def _calc_kline_quality(recent_dailies: List[models.StockDaily]) -> int:
     if not recent_dailies:
         return 0
 
-    pct_chgs = [d.pct_chg for d in recent_dailies if d.pct_chg is not None]
+    recent = recent_dailies[:5]
+    pct_chgs = [d.pct_chg for d in recent if d.pct_chg is not None]
     up_count = sum(1 for p in pct_chgs if p > 0)
 
     # 阳线数量：0~5分
@@ -58,7 +61,7 @@ def _calc_kline_quality(recent_dailies: List[models.StockDaily]) -> int:
 
     # 大阴线：阴线且跌幅>2%，0天=4分，1天=2分，2天+=0分
     big_drop_count = 0
-    for d in recent_dailies:
+    for d in recent:
         if d.close is not None and d.open is not None and d.pct_chg is not None:
             if d.close < d.open and d.pct_chg < -2:
                 big_drop_count += 1
@@ -71,7 +74,7 @@ def _calc_kline_quality(recent_dailies: List[models.StockDaily]) -> int:
 
     # 上影线：上影线长度占收盘价比例超过1.5%，0天=3分，1天=1分，2天+=0分
     upper_shadow_count = 0
-    for d in recent_dailies:
+    for d in recent:
         if d.high is None or d.open is None or d.close is None:
             continue
         if d.high <= max(d.open, d.close):
@@ -105,6 +108,27 @@ def _calc_pullback(close: Optional[float], recent_highs: List[float]) -> int:
     if pullback <= 4:
         return 5
     if pullback <= 7:
+        return 2
+    return 0
+
+
+def _calc_adx(adx: Optional[float]) -> int:
+    """ADX趋势强度评分（10分）
+
+    ADX >= 40: 强趋势
+    ADX >= 30: 确立趋势
+    ADX >= 25: 趋势开始
+    ADX >= 20: 弱势趋势
+    """
+    if adx is None:
+        return 0
+    if adx >= 40:
+        return 10
+    if adx >= 30:
+        return 8
+    if adx >= 25:
+        return 5
+    if adx >= 20:
         return 2
     return 0
 
@@ -250,7 +274,10 @@ def calculate_mainwave_score(
     recent_highs = [d.high for d in recent_dailies if d.high is not None]
     pullback = _calc_pullback(close, recent_highs)
 
-    trend_shape = ma_deviation + kline_quality + pullback
+    adx_val = stock.get('adx')
+    adx_score = _calc_adx(adx_val)
+
+    trend_shape = ma_deviation + kline_quality + pullback + adx_score
 
     sector = _calc_sector(industry, sector_sentiment_map)
     earnings = _calc_earnings(net_profit_yoy, roe)
@@ -266,12 +293,13 @@ def calculate_mainwave_score(
         'ma_deviation': ma_deviation,
         'kline_quality': kline_quality,
         'pullback': pullback,
+        'adx': adx_score,
         'sector': sector,
         'earnings': earnings,
         'direction': direction,
         'liquidity': liquidity,
         'market_env': market_env,
-        'hard_pass': True,
+        'hard_pass': total >= 60,
     }
 
 
@@ -301,7 +329,7 @@ def batch_calculate_scores(
     else:
         dt = datetime.strptime(trade_date, '%Y%m%d').date()
 
-    # 1. 批量获取近5个交易日K线数据
+    # 1. 批量获取近20个交易日K线数据（取30个交易日内最多20条，应对停牌）
     recent_dates = (
         db.query(models.TradeCalendar.trade_date)
         .filter(
@@ -309,7 +337,7 @@ def batch_calculate_scores(
             models.TradeCalendar.is_trading_day == 1,
         )
         .order_by(models.TradeCalendar.trade_date.desc())
-        .limit(10)
+        .limit(30)
         .all()
     )
     date_list = [d[0] for d in recent_dates]
@@ -334,7 +362,7 @@ def batch_calculate_scores(
 
     dailies_by_symbol: Dict[str, List[models.StockDaily]] = defaultdict(list)
     for d in recent_dailies:
-        if len(dailies_by_symbol[d.symbol]) < 5:
+        if len(dailies_by_symbol[d.symbol]) < 20:
             dailies_by_symbol[d.symbol].append(d)
 
     # 2. 获取当前持仓行业（quantity > 0 的持仓）

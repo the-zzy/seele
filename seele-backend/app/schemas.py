@@ -1061,3 +1061,29 @@ class SystemLogOverviewResponse(BaseModel):
     today_operation_count: int = Field(default=0, description='今日操作数')
     latest_sync_logs: List[SyncJobLogResponse] = Field(default_factory=list, description='各任务类型最新同步记录')
 
+
+# ==================== 图库管理 ====================
+
+
+class GalleryImageResponse(BaseModel):
+    """图库图片-响应"""
+    id: int
+    filename: str
+    original_name: str
+    file_size: int
+    mime_type: str
+    url_path: str
+    created_at: str
+
+    @field_validator('created_at', mode='before')
+    @classmethod
+    def validate_timestamp(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d %H:%M:%S')
+        return str(v)
+
+    class Config:
+        from_attributes = True
+

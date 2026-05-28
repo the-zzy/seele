@@ -207,6 +207,7 @@ class StockBasicCRUD:
                     models.StockDailyIndicator.turnover_ma10,
                     models.StockDailyIndicator.chg_5d,
                     models.StockDailyIndicator.chg_10d,
+                    models.StockDailyIndicator.adx,
                     models.StockFinancialIndicator.net_profit,
                     models.StockFinancialIndicator.net_profit_yoy,
                     models.StockFinancialIndicator.roe,
@@ -266,14 +267,14 @@ class StockBasicCRUD:
                 models.StockBasic.symbol.notlike("688%"),
                 models.StockBasic.symbol.notlike("689%"),
             )
-            if query.float_market_cap_min is not None:
-                q = q.filter(models.StockBasic.float_market_cap >= query.float_market_cap_min)
+            # 市值过滤已移除：float_market_cap 数据缺失且换手率+成交额过滤已足够
             if query.close_max is not None:
                 q = q.filter(models.StockDaily.close <= query.close_max)
             if query.avg_turnover_min is not None:
                 q = q.filter(models.StockDailyIndicator.turnover_ma10 >= query.avg_turnover_min)
+            # 前端传入单位为亿元，数据库 amount_ma10 单位为元，需转换
             if query.avg_amount_min is not None:
-                q = q.filter(models.StockDailyIndicator.amount_ma10 >= query.avg_amount_min)
+                q = q.filter(models.StockDailyIndicator.amount_ma10 >= query.avg_amount_min * 1e8)
             if query.ma_bull:
                 q = q.filter(
                     models.StockDaily.close > models.StockDailyIndicator.ma5,
@@ -282,17 +283,22 @@ class StockBasicCRUD:
                     models.StockDailyIndicator.ma20 > models.StockDailyIndicator.ma30,
                     models.StockDailyIndicator.ma30 > models.StockDailyIndicator.ma60,
                 )
+            # 财务数据过滤：允许缺失（NULL），有数据则要求盈利
             q = q.filter(
-                models.StockFinancialIndicator.net_profit > 0,
-                models.StockFinancialIndicator.total_revenue > 0,
+                or_(
+                    models.StockFinancialIndicator.net_profit.is_(None),
+                    models.StockFinancialIndicator.net_profit > 0,
+                ),
+                or_(
+                    models.StockFinancialIndicator.total_revenue.is_(None),
+                    models.StockFinancialIndicator.total_revenue > 0,
+                ),
             )
-            # 偏离MA5硬性门槛：0 < (close - ma5)/ma5 <= 7%
-            # 提前在SQL层过滤，减少Python评分的数据量
+            # MA5偏离不再在SQL层硬性过滤，由Python评分层处理
+            # 保留ma5非空检查以确保指标数据存在
             q = q.filter(
                 models.StockDailyIndicator.ma5.isnot(None),
                 models.StockDailyIndicator.ma5 > 0,
-                models.StockDaily.close > models.StockDailyIndicator.ma5,
-                models.StockDaily.close <= models.StockDailyIndicator.ma5 * 1.07,
             )
             return q
 
@@ -333,6 +339,7 @@ class StockBasicCRUD:
                 turnover_ma10,
                 chg_5d,
                 chg_10d,
+                adx,
                 net_profit,
                 net_profit_yoy,
                 roe,
@@ -370,6 +377,7 @@ class StockBasicCRUD:
                 "turnover_ma10": turnover_ma10,
                 "chg_5d": chg_5d,
                 "chg_10d": chg_10d,
+                "adx": adx,
                 "net_profit": net_profit,
                 "net_profit_yoy": net_profit_yoy,
                 "roe": roe,
