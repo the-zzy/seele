@@ -40,10 +40,10 @@
           class="image-card"
         >
           <div class="image-thumb" @click="openPreview(img)">
-            <img :src="img.url_path" :alt="img.original_name" loading="lazy">
+            <img :src="img.url_path + '?imageView2/2/w/400'" :alt="img.original_name" loading="lazy">
           </div>
           <div class="image-info">
-            <div class="image-name" :title="img.original_name">{{ img.original_name }}</div>
+            <div class="image-name" :title="displayName(img)">{{ displayName(img) }}</div>
             <div class="image-meta">
               <span>{{ formatSize(img.file_size) }}</span>
               <span>{{ formatDate(img.created_at) }}</span>
@@ -59,14 +59,14 @@
     <!-- 预览 -->
     <div v-if="preview" class="preview-overlay" @click.self="closePreview">
       <button class="preview-close" @click="closePreview">✕</button>
-      <img :src="preview.url_path" class="preview-img" @click.stop>
-      <div class="preview-name">{{ preview.original_name }}</div>
+      <img :src="preview.url_path + '?imageView2/2/w/1200'" class="preview-img" @click.stop>
+      <div class="preview-name">{{ displayName(preview) }}</div>
     </div>
 
     <!-- 删除确认 -->
     <div v-if="deleteTarget" class="confirm-overlay" @click.self="cancelDelete">
       <div class="confirm-dialog">
-        <p>确定删除「{{ deleteTarget.original_name }}」？</p>
+        <p>确定删除「{{ displayName(deleteTarget) }}」？</p>
         <div class="confirm-actions">
           <button class="btn-ghost" @click="cancelDelete">取消</button>
           <button class="btn-danger" :disabled="deleting" @click="confirmDelete">
@@ -94,6 +94,10 @@ const preview = ref(null)
 const deleteTarget = ref(null)
 const deleting = ref(false)
 const fileInput = ref(null)
+
+function displayName (img) {
+  return img.filename ? img.filename.replace('photo/', '') : img.original_name
+}
 
 function formatSize (bytes) {
   if (bytes < 1024) return bytes + ' B'

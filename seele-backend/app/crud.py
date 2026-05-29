@@ -271,17 +271,14 @@ class StockBasicCRUD:
             if query.close_max is not None:
                 q = q.filter(models.StockDaily.close <= query.close_max)
             if query.avg_turnover_min is not None:
-                q = q.filter(models.StockDailyIndicator.turnover_ma10 >= query.avg_turnover_min)
-            # 前端传入单位为亿元，数据库 amount_ma10 单位为元，需转换
+                q = q.filter(models.StockDailyIndicator.turnover_ma10 >= query.avg_turnover_min / 100)
+            # 前端已把亿元转换为元，直接使用
             if query.avg_amount_min is not None:
-                q = q.filter(models.StockDailyIndicator.amount_ma10 >= query.avg_amount_min * 1e8)
+                q = q.filter(models.StockDailyIndicator.amount_ma10 >= query.avg_amount_min)
             if query.ma_bull:
                 q = q.filter(
                     models.StockDaily.close > models.StockDailyIndicator.ma5,
                     models.StockDailyIndicator.ma5 > models.StockDailyIndicator.ma10,
-                    models.StockDailyIndicator.ma10 > models.StockDailyIndicator.ma20,
-                    models.StockDailyIndicator.ma20 > models.StockDailyIndicator.ma30,
-                    models.StockDailyIndicator.ma30 > models.StockDailyIndicator.ma60,
                 )
             # 财务数据过滤：允许缺失（NULL），有数据则要求盈利
             q = q.filter(
@@ -1906,3 +1903,47 @@ class TradeCalendarCRUD:
 
 
 trade_calendar_crud = TradeCalendarCRUD()
+
+
+# ==================== 访客日志 ====================
+
+
+class VisitorLogCRUD:
+    """访客日志 CRUD"""
+
+    def create(self, db: Session, data: dict) -> models.VisitorLog:
+        """创建访客日志（不自动 commit，由调用方统一提交）"""
+        db_obj = models.VisitorLog(**data)
+        db.add(db_obj)
+        return db_obj
+
+    def get_list(
+        self,
+        db: Session,
+        query: schemas.VisitorLogQuery,
+    ) -> tuple[List[models.VisitorLog], int]:
+        """分页查询访客日志"""
+        from datetime import timedelta
+
+        filters = []
+        if query.ip_address:
+            filters.append(models.VisitorLog.ip_address == query.ip_address)
+        if query.days:
+            cutoff = datetime.now() - timedelta(days=query.days)
+            filters.append(models.VisitorLog.created_at >= cutoff)
+
+        total = db.query(func.count(models.VisitorLog.id))
+        if filters:
+            total = total.filter(and_(*filters))
+        total = total.scalar()
+
+        stmt = db.query(models.VisitorLog)
+        if filters:
+            stmt = stmt.filter(and_(*filters))
+        stmt = stmt.order_by(models.VisitorLog.created_at.desc()).offset(
+            (query.page_num - 1) * query.page_size
+        ).limit(query.page_size)
+        return stmt.all(), total
+
+
+visitor_log_crud = VisitorLogCRUD()

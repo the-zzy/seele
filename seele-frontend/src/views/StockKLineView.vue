@@ -12,7 +12,7 @@ const router = useRouter()
 const symbol = ref(route.params.symbol || '')
 const stockName = ref(route.query.name || '')
 
-const { chartRef, init } = useEChart()
+const { chartRef, init, resize } = useEChart()
 const loading = ref(false)
 const dataReady = ref(false)
 const latestQuote = ref(null)
@@ -82,8 +82,7 @@ async function loadData () {
         item.open,
         item.close,
         item.low,
-        item.high,
-        item.volume
+        item.high
       ])
       const volumes = list.map((item) => ({
         value: item.volume,
@@ -232,7 +231,7 @@ function initChart (dates, data, volumes, list, indicatorMap) {
         gridIndex: 1,
         data: dates,
         scale: true,
-        boundaryGap: false,
+        boundaryGap: true,
         axisLine: { onZero: false, lineStyle: { color: axisColor } },
         axisTick: { show: false },
         splitLine: { show: false },
@@ -332,6 +331,7 @@ function initChart (dates, data, volumes, list, indicatorMap) {
       {
         name: '成交量',
         type: 'bar',
+        gridIndex: 1,
         xAxisIndex: 1,
         yAxisIndex: 1,
         data: volumes
@@ -340,6 +340,7 @@ function initChart (dates, data, volumes, list, indicatorMap) {
   }
 
   init(option)
+  resize()
 }
 
 onMounted(() => {

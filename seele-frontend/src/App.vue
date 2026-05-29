@@ -15,6 +15,8 @@
           <span>选股工作台</span>
           <span class="dot">·</span>
           <span>{{ year }}</span>
+          <span class="dot">·</span>
+          <span class="version">v2.0</span>
         </div>
       </div>
 
@@ -60,7 +62,7 @@
       </nav>
 
       <div class="masthead-footer">
-        <span class="footer-label">v1.0</span>
+        <span class="footer-label">v2.0</span>
         <span class="footer-edition">Internal · 数据来源 Tushare</span>
         <a
           href="https://beian.miit.gov.cn/"
@@ -104,6 +106,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useTheme } from '@/composables/useTheme'
 import { isLoggedIn, removeToken, onAuthRequired } from '@/utils/auth'
+import { visitorApi } from '@/api/visitor'
 import AgentFloatingWidget from '@/components/agent/AgentFloatingWidget.vue'
 import ToastContainer from '@/components/common/ToastContainer.vue'
 import AuthModal from '@/components/auth/AuthModal.vue'
@@ -151,6 +154,18 @@ onMounted(() => {
   onAuthRequired(() => {
     showAuthModal.value = true
   })
+
+  // 上报访客信息
+  const screenW = window.screen?.width || 0
+  const screenH = window.screen?.height || 0
+  visitorApi.track({
+    path: window.location.href,
+    screen_resolution: screenW && screenH ? `${screenW}x${screenH}` : null,
+    language: navigator.language || null,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+    platform: navigator.platform || null,
+    referrer: document.referrer || null
+  }).catch(() => {})
 })
 
 function pad (n) {
@@ -280,6 +295,11 @@ html, body {
 
       .dot {
         opacity: 0.5;
+      }
+
+      .version {
+        color: var(--accent);
+        font-weight: 600;
       }
     }
   }

@@ -68,7 +68,7 @@ def _fetch_akshare_batch(symbols: list, trade_date: str, preclose_map: dict) -> 
                 'amplitude': round((float(high) - float(low)) / preclose * 100, 4) if preclose and high is not None and low is not None else 0.0,
                 'pct_chg': pct_chg,
                 'price_change': round(float(close) - preclose, 4) if preclose else 0.0,
-                'turnover': float(row['turnover']) if pd.notna(row['turnover']) else None,
+                'turnover': float(row['turnover']) * 100 if pd.notna(row['turnover']) else None,
             }
             records.append(record)
     finally:
@@ -153,7 +153,7 @@ def _fetch_baostock_batch(symbols: list, trade_date: str) -> tuple:
                 'amplitude': round((high - low) / preclose * 100, 4) if preclose and high is not None and low is not None else 0.0,
                 'pct_chg': float(row[10]) if row[10] else None,
                 'price_change': round(close - preclose, 4) if preclose else 0.0,
-                'turnover': float(row[9]) / 100 if row[9] else None,
+                'turnover': float(row[9]) if row[9] else None,
             }
             records.append(record)
     finally:

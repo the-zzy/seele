@@ -17,7 +17,7 @@ from app.auth import get_current_user
 from app.config import get_settings
 from app.database import engine, Base
 from app.response import success
-from app.routes import auth, financial, gallery, index, market_sentiment, pickers, portfolio, stock_basic, stock_daily, stock_indicator, sync, system_log, trade_calendar
+from app.routes import auth, financial, gallery, index, market_sentiment, pickers, portfolio, stock_basic, stock_daily, stock_indicator, sync, system_log, trade_calendar, visitor_log
 from app.agent.router import router as agent_router
 from app.scheduler import get_scheduler
 from app.scheduler_jobs import (
@@ -155,9 +155,53 @@ app.include_router(system_log.router, prefix="/api", dependencies=auth_dep)
 app.include_router(trade_calendar.router, prefix="/api", dependencies=auth_dep)
 app.include_router(agent_router, prefix="/api", dependencies=auth_dep)
 app.include_router(gallery.router, prefix="/api")
+app.include_router(visitor_log.router, prefix="/api")
 
 # 图库图片静态文件服务
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+
+# 访客日志中间件：自动记录页面级访问（非 API / 静态资源 / 健康检查）
+@app.middleware("http")
+async def visitor_log_middleware(request: Request, call_next):
+    response = await call_next(request)
+
+    path = request.url.path
+    # 只记录页面级请求，排除 API、静态文件、健康检查
+    skip_prefixes = ('/api/', '/uploads/', '/health')
+    if path.startswith(skip_prefixes):
+        return response
+
+    def _do_log():
+        from app.database import SessionLocal
+        from app.crud import visitor_log_crud
+
+        db = SessionLocal()
+        try:
+            forwarded = request.headers.get('x-forwarded-for')
+            if forwarded:
+                ip = forwarded.split(',')[0].strip()
+            else:
+                ip = request.headers.get('x-real-ip') or (request.client.host if request.client else 'unknown')
+
+            data = {
+                'ip_address': ip,
+                'user_agent': request.headers.get('user-agent'),
+                'path': path,
+                'method': request.method,
+                'referrer': request.headers.get('referer'),
+            }
+            visitor_log_crud.create(db, data)
+            db.commit()
+        except Exception as exc:
+            logger.warning('[VISITOR_LOG] 中间件记录失败: %s', exc)
+            db.rollback()
+        finally:
+            db.close()
+
+    import threading
+    threading.Thread(target=_do_log, daemon=True).start()
+    return response
 
 
 @app.get("/")
