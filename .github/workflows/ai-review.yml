@@ -30,20 +30,20 @@ jobs:
       - name: Check API Key
         if: steps.diff.outputs.has_diff == 'true'
         env:
-          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
         run: |
-          if [ -z "$MOONSHOT_API_KEY" ]; then
-            echo "::error::MOONSHOT_API_KEY is not set in repository secrets"
+          if [ -z "$ANTHROPIC_AUTH_TOKEN" ]; then
+            echo "::error::ANTHROPIC_AUTH_TOKEN is not set in repository secrets"
             exit 1
           fi
-          echo "API Key is configured (length: ${#MOONSHOT_API_KEY})"
+          echo "API Key is configured (length: ${#ANTHROPIC_AUTH_TOKEN})"
 
-      - name: AI Review via Moonshot API
+      - name: AI Review via Kimi API
         if: steps.diff.outputs.has_diff == 'true'
         env:
-          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
         run: |
-          # Truncate if too long (Moonshot has context limits)
+          # Truncate if too long (context limits)
           MAX_CHARS=30000
           if [ $(wc -c < pr_diff.txt) -gt $MAX_CHARS ]; then
             head -c $MAX_CHARS pr_diff.txt > pr_diff_truncated.txt
@@ -65,9 +65,9 @@ jobs:
               ]
             }' > request.json
 
-          curl -s -X POST https://api.moonshot.cn/v1/chat/completions \
+          curl -s -X POST https://api.kimi.com/coding/v1/chat/completions \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $MOONSHOT_API_KEY" \
+            -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
             -d @request.json > response.json
 
           # Debug: print response if extraction fails
