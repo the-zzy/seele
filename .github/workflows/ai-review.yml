@@ -27,38 +27,57 @@ jobs:
             echo "has_diff=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: AI Review via Anthropic API
+      - name: Check API Key
         if: steps.diff.outputs.has_diff == 'true'
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
-          DIFF_CONTENT=$(cat pr_diff.txt)
-          # Truncate if too long (Anthropic has context limits)
+          if [ -z "$DEEPSEEK_API_KEY" ]; then
+            echo "::error::DEEPSEEK_API_KEY is not set in repository secrets"
+            exit 1
+          fi
+          echo "API Key is configured (length: ${#DEEPSEEK_API_KEY})"
+
+      - name: AI Review via DeepSeek API
+        if: steps.diff.outputs.has_diff == 'true'
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          # Truncate if too long (context limits)
           MAX_CHARS=30000
-          if [ ${#DIFF_CONTENT} -gt $MAX_CHARS ]; then
-            DIFF_CONTENT="${DIFF_CONTENT:0:$MAX_CHARS}\n\n...[内容过长，已截断]"
+          if [ $(wc -c < pr_diff.txt) -gt $MAX_CHARS ]; then
+            head -c $MAX_CHARS pr_diff.txt > pr_diff_truncated.txt
+            printf '\n\n...[内容过长，已截断]' >> pr_diff_truncated.txt
+            mv pr_diff_truncated.txt pr_diff.txt
           fi
 
           jq -n \
-            --arg diff "$DIFF_CONTENT" \
+            --rawfile diff pr_diff.txt \
+            --arg prompt "你是一位专业的全栈代码审查员。请审查以下 Pull Request 的代码变更，重点关注：\n1. 代码质量和可读性\n2. 潜在的安全漏洞（如 SQL 注入、XSS、命令注入等）\n3. 性能问题\n4. 是否符合项目规范（Vue 3 Composition API、FastAPI、Python 类型注解等）\n5. 是否有更好的实现方式\n\n请以中文回复，格式如下：\n- ✅ 通过的方面\n- ⚠️ 需要关注的问题\n- ❌ 必须修复的问题\n- 💡 改进建议\n\n代码变更：\n\n" \
             '{
-              model: "claude-sonnet-4-6",
+              model: "deepseek-v4-pro",
               max_tokens: 4096,
               messages: [
                 {
                   role: "user",
-                  content: "你是一位专业的全栈代码审查员。请审查以下 Pull Request 的代码变更，重点关注：\n1. 代码质量和可读性\n2. 潜在的安全漏洞（如 SQL 注入、XSS、命令注入等）\n3. 性能问题\n4. 是否符合项目规范（Vue 3 Composition API、FastAPI、Python 类型注解等）\n5. 是否有更好的实现方式\n\n请以中文回复，格式如下：\n- ✅ 通过的方面\n- ⚠️ 需要关注的问题\n- ❌ 必须修复的问题\n- 💡 改进建议\n\n代码变更：\n\n" + $diff
+                  content: ($prompt + $diff)
                 }
               ]
             }' > request.json
 
-          curl -s -X POST https://api.anthropic.com/v1/messages \
+          curl -s -X POST https://api.deepseek.com/v1/chat/completions \
             -H "Content-Type: application/json" \
-            -H "x-api-key: $ANTHROPIC_API_KEY" \
-            -H "anthropic-version: 2023-06-01" \
+            -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
             -d @request.json > response.json
 
-          jq -r '.content[0].text' response.json > review_result.txt || echo "AI 审查调用失败，请检查 API Key 配置。" > review_result.txt
+          # Debug: print response if extraction fails
+          TEXT=$(jq -r '.choices[0].message.content // empty' response.json)
+          if [ -z "$TEXT" ]; then
+            echo "AI 审查调用异常，原始响应：" > review_result.txt
+            cat response.json >> review_result.txt
+          else
+            echo "$TEXT" > review_result.txt
+          fi
 
       - name: Post review comment
         if: steps.diff.outputs.has_diff == 'true'

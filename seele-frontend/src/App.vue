@@ -1,5 +1,13 @@
 <template>
-  <div class="app-layout">
+  <HomeGalleryView
+    v-if="!workspaceMode"
+    :logged-in="loggedIn"
+    @open-auth="openAuth"
+    @enter-workspace="enterWorkspace"
+    @logout="handleLogout"
+  />
+
+  <div v-else class="app-layout">
     <aside class="sidebar">
       <div class="masthead">
         <div class="wordmark">Seele</div>
@@ -7,6 +15,8 @@
           <span>选股工作台</span>
           <span class="dot">·</span>
           <span>{{ year }}</span>
+          <span class="dot">·</span>
+          <span class="version">v2.0</span>
         </div>
       </div>
 
@@ -52,8 +62,15 @@
       </nav>
 
       <div class="masthead-footer">
-        <span class="footer-label">v1.0</span>
+        <span class="footer-label">v2.0</span>
         <span class="footer-edition">Internal · 数据来源 Tushare</span>
+        <a
+          href="https://beian.miit.gov.cn/"
+          target="_blank"
+          rel="noopener"
+          class="beian-link"
+        >桂ICP备2023008226号-1</a>
+        <button class="logout-btn-inline" @click="exitWorkspace">退出工作台</button>
       </div>
     </aside>
 
@@ -64,28 +81,92 @@
           <span v-if="currentTitle" class="crumb-divider">/</span>
           <span class="crumb-page">{{ currentTitle }}</span>
         </div>
-        <button class="theme-toggle" @click="toggleTheme">
-          <span v-if="theme === 'dark'">☀</span>
-          <span v-else>☾</span>
-        </button>
+        <div class="top-actions">
+          <button class="theme-toggle" @click="toggleTheme">
+            <span v-if="theme === 'dark'">☀</span>
+            <span v-else>☾</span>
+          </button>
+          <button class="logout-btn" @click="exitWorkspace">退出工作台</button>
+        </div>
       </header>
       <div class="page-content">
         <router-view />
       </div>
     </main>
+
+    <AgentFloatingWidget />
+    <ToastContainer />
   </div>
+
+  <AuthModal v-model:visible="showAuthModal" @success="onLoginSuccess" />
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useTheme } from '@/composables/useTheme'
+import { isLoggedIn, removeToken, onAuthRequired } from '@/utils/auth'
+import { visitorApi } from '@/api/visitor'
+import AgentFloatingWidget from '@/components/agent/AgentFloatingWidget.vue'
+import ToastContainer from '@/components/common/ToastContainer.vue'
+import AuthModal from '@/components/auth/AuthModal.vue'
+import HomeGalleryView from '@/views/HomeGalleryView.vue'
 
 const router = useRouter()
 const route = useRoute()
 const { theme, toggle: toggleTheme } = useTheme()
 
+const WORKSPACE_KEY = 'seele_workspace'
+
+const workspaceMode = ref(localStorage.getItem(WORKSPACE_KEY) === '1')
+const showAuthModal = ref(false)
+const loggedIn = ref(isLoggedIn())
+
 const year = new Date().getFullYear()
+
+function openAuth () {
+  showAuthModal.value = true
+}
+
+function onLoginSuccess () {
+  loggedIn.value = true
+  showAuthModal.value = false
+}
+
+function enterWorkspace () {
+  workspaceMode.value = true
+  localStorage.setItem(WORKSPACE_KEY, '1')
+  router.push('/stock-basic')
+}
+
+function exitWorkspace () {
+  workspaceMode.value = false
+  localStorage.removeItem(WORKSPACE_KEY)
+  router.push('/')
+}
+
+function handleLogout () {
+  removeToken()
+  loggedIn.value = false
+}
+
+onMounted(() => {
+  onAuthRequired(() => {
+    showAuthModal.value = true
+  })
+
+  // 上报访客信息
+  const screenW = window.screen?.width || 0
+  const screenH = window.screen?.height || 0
+  visitorApi.track({
+    path: window.location.href,
+    screen_resolution: screenW && screenH ? `${screenW}x${screenH}` : null,
+    language: navigator.language || null,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+    platform: navigator.platform || null,
+    referrer: document.referrer || null
+  }).catch(() => {})
+})
 
 function pad (n) {
   return String(n).padStart(2, '0')
@@ -214,6 +295,11 @@ html, body {
 
       .dot {
         opacity: 0.5;
+      }
+
+      .version {
+        color: var(--accent);
+        font-weight: 600;
       }
     }
   }
@@ -448,6 +534,38 @@ html, body {
       font-size: 11px;
       color: var(--text-muted);
     }
+
+    .beian-link {
+      font-family: var(--font-body);
+      font-size: 10px;
+      color: var(--text-faint);
+      text-decoration: none;
+      margin-top: 4px;
+      transition: color 0.2s;
+
+      &:hover {
+        color: var(--text-secondary);
+      }
+    }
+
+    .login-btn-inline {
+      margin-top: 10px;
+      width: 100%;
+      padding: 7px;
+      background: transparent;
+      border: 1px solid var(--accent);
+      border-radius: 4px;
+      color: var(--accent);
+      font-family: var(--font-body);
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+
+      &:hover {
+        background: var(--accent);
+        color: #fff;
+      }
+    }
   }
 
   .main-content {
@@ -495,6 +613,12 @@ html, body {
     }
   }
 
+  .top-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
   .theme-toggle {
     background: transparent;
     border: 1px solid var(--rule);
@@ -512,10 +636,109 @@ html, body {
     }
   }
 
+  .logout-btn {
+    background: transparent;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-family: var(--font-body);
+    font-size: 12px;
+    color: var(--text-muted);
+    transition: all 0.2s;
+
+    &:hover {
+      border-color: var(--down);
+      color: var(--down);
+    }
+  }
+
   .page-content {
     flex: 1;
     min-height: 0;
     overflow: hidden;
+  }
+}
+
+@media (max-width: 1200px) {
+  .app-layout {
+    .sidebar {
+      width: 190px;
+    }
+
+    .masthead {
+      padding: 20px 16px 14px;
+    }
+
+    .nav-menu {
+      padding: 14px 12px 20px;
+    }
+
+    .masthead-footer {
+      padding: 12px 16px 16px;
+    }
+  }
+}
+
+@media (max-width: 900px) {
+  .app-layout {
+    .sidebar {
+      width: 64px;
+
+      .masthead {
+        padding: 16px 8px;
+
+        .wordmark {
+          font-size: 18px;
+          text-align: center;
+        }
+
+        .masthead-meta {
+          display: none;
+        }
+      }
+
+      .rule {
+        margin: 0 12px;
+      }
+
+      .nav-menu {
+        padding: 12px 8px;
+      }
+
+      .nav-single {
+        justify-content: center;
+        padding: 10px 4px;
+        gap: 0;
+
+        .num {
+          display: none;
+        }
+
+        .single-body {
+          display: none;
+        }
+
+        .indicator {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+        }
+      }
+
+      .nav-group {
+        display: none;
+      }
+
+      .masthead-footer {
+        display: none;
+      }
+    }
+
+    .top-bar {
+      padding: 0 18px;
+    }
   }
 }
 </style>

@@ -4,22 +4,37 @@ import StockIndicatorView from '../views/StockIndicatorView.vue'
 import StockBasicView from '../views/StockBasicView.vue'
 import StockKLineView from '../views/StockKLineView.vue'
 import ChgDistributionView from '../views/ChgDistributionView.vue'
-import ChgDistributionDetailView from '../views/ChgDistributionDetailView.vue'
-import RangeStockPickerView from '../views/RangeStockPickerView.vue'
-import TrendStockPickerView from '../views/TrendStockPickerView.vue'
-import ShrinkingVolumePickerView from '../views/ShrinkingVolumePickerView.vue'
-import BreakoutVolumePickerView from '../views/BreakoutVolumePickerView.vue'
 import PortfolioView from '../views/PortfolioView.vue'
-import FinancialPickerView from '../views/FinancialPickerView.vue'
 import MainwavePickerView from '../views/MainwavePickerView.vue'
+import MainwaveScorerView from '../views/MainwaveScorerView.vue'
+import IndustrySentimentView from '../views/IndustrySentimentView.vue'
+import StockFinancialView from '../views/StockFinancialView.vue'
+import FinancialListView from '../views/FinancialListView.vue'
+import SyncJobLogView from '../views/SyncJobLogView.vue'
+import AgentView from '../views/AgentView.vue'
+import BoardListView from '../views/BoardListView.vue'
+import BoardDetailView from '../views/BoardDetailView.vue'
+import SystemLogView from '../views/SystemLogView.vue'
+import GalleryView from '../views/GalleryView.vue'
 
-// nav 顺序：股票基本信息 → 股票日线数据(基本数据/指标数据) → 选股策略
 const routes = [
   {
     path: '/',
+    name: 'gallery',
+    component: GalleryView,
+    meta: { title: '图库', nav: true, navOrder: 5, section: '主页' }
+  },
+  {
+    path: '/stock-basic',
     name: 'stock-basic',
     component: StockBasicView,
     meta: { title: '股票基本信息', nav: true, navOrder: 10, section: '基本面' }
+  },
+  {
+    path: '/financial',
+    name: 'financial-list',
+    component: FinancialListView,
+    meta: { title: '财务指标', nav: true, navOrder: 11, section: '基本面' }
   },
   {
     path: '/daily/basic',
@@ -37,37 +52,13 @@ const routes = [
     path: '/chg-distribution',
     name: 'chg-distribution',
     component: ChgDistributionView,
-    meta: { title: '涨幅分布统计', nav: true, navOrder: 30, group: '选股策略' }
+    meta: { title: '涨幅分布统计', nav: true, navOrder: 30, group: '市场情绪' }
   },
   {
-    path: '/range-picker',
-    name: 'range-picker',
-    component: RangeStockPickerView,
-    meta: { title: '震荡选股策略', nav: true, navOrder: 31, group: '选股策略' }
-  },
-  {
-    path: '/trend-picker',
-    name: 'trend-picker',
-    component: TrendStockPickerView,
-    meta: { title: '趋势选股策略', nav: true, navOrder: 32, group: '选股策略' }
-  },
-  {
-    path: '/shrinking-volume',
-    name: 'shrinking-volume',
-    component: ShrinkingVolumePickerView,
-    meta: { title: '缩量选股', nav: true, navOrder: 33, group: '选股策略' }
-  },
-  {
-    path: '/breakout-volume',
-    name: 'breakout-volume',
-    component: BreakoutVolumePickerView,
-    meta: { title: '倍量突破选股', nav: true, navOrder: 34, group: '选股策略' }
-  },
-  {
-    path: '/chg-distribution/detail',
-    name: 'chg-distribution-detail',
-    component: ChgDistributionDetailView,
-    meta: { title: '涨幅分布详情' }
+    path: '/industry-sentiment',
+    name: 'industry-sentiment',
+    component: IndustrySentimentView,
+    meta: { title: '板块情绪分布', nav: true, navOrder: 31, group: '市场情绪' }
   },
   {
     path: '/portfolio',
@@ -76,28 +67,78 @@ const routes = [
     meta: { title: '持仓管理', nav: true, navOrder: 40, section: '资产' }
   },
   {
-    path: '/financial-picker',
-    name: 'financial-picker',
-    component: FinancialPickerView,
-    meta: { title: '财务选股', nav: true, navOrder: 35, group: '选股策略' }
-  },
-  {
     path: '/mainwave-picker',
     name: 'mainwave-picker',
     component: MainwavePickerView,
-    meta: { title: '主升浪选股', nav: true, navOrder: 36, group: '选股策略' }
+    meta: { title: '主升浪选股', nav: true, navOrder: 50, section: '选股策略' }
+  },
+  {
+    path: '/mainwave-scorer',
+    name: 'mainwave-scorer',
+    component: MainwaveScorerView,
+    meta: { title: '主升浪评分', nav: true, navOrder: 51, section: '选股策略' }
+  },
+  {
+    path: '/sync-jobs',
+    name: 'sync-jobs',
+    component: SyncJobLogView,
+    meta: { title: '同步任务', nav: true, navOrder: 90, section: '系统' }
+  },
+  {
+    path: '/system-logs',
+    name: 'system-logs',
+    component: SystemLogView,
+    meta: { title: '系统日志', nav: true, navOrder: 91, section: '系统' }
   },
   {
     path: '/kline/:symbol',
     name: 'stock-kline',
     component: StockKLineView,
     meta: { title: 'K线图' }
+  },
+  {
+    path: '/financial/:symbol',
+    name: 'stock-financial',
+    component: StockFinancialView,
+    meta: { title: '财务分析' }
+  },
+  {
+    path: '/agent',
+    name: 'agent',
+    component: AgentView,
+    meta: { title: 'AI Agent', nav: true, navOrder: 100, section: '智能助手' }
+  },
+  {
+    path: '/boards',
+    name: 'board-list',
+    component: BoardListView,
+    meta: { title: '板块 / ETF', nav: true, navOrder: 35, section: '市场数据' }
+  },
+  {
+    path: '/boards/:code',
+    name: 'board-detail',
+    component: BoardDetailView,
+    meta: { title: '板块详情' }
   }
 ]
 
 const router = createRouter({
   history: createWebHistory(),
   routes
+})
+
+router.beforeEach((to, from, next) => {
+  const inWorkspace = localStorage.getItem('seele_workspace') === '1'
+  if (!inWorkspace && to.path !== '/') {
+    next('/')
+    return
+  }
+  next()
+})
+
+router.afterEach((to) => {
+  const title = to.meta?.title || 'Seele'
+  document.title = `${title} · Seele`
 })
 
 export default router

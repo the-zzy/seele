@@ -13,6 +13,7 @@
     - 每个 worker 进程复用 Baostock 连接，只登录一次
 """
 
+import os
 import time
 import sys
 from datetime import datetime, timedelta
@@ -27,8 +28,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import Column, Integer, String, Float, Date, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 
-# 并行进程数
-NUM_WORKERS = 16
+# 并行进程数（支持通过环境变量覆盖，默认限制为 CPU 核心数与 2 的较小值）
+NUM_WORKERS = int(os.environ.get('SYNC_MAX_WORKERS', min(os.cpu_count() or 2, 2)))
 # Baostock 查询间隔（秒），避免触发限流
 QUERY_INTERVAL = 2
 
@@ -339,7 +340,7 @@ def main():
         while processed < total:
             try:
                 result = progress_queue.get(timeout=60)
-            except Exception:
+            except Exception:  # queue.Empty
                 # queue 超时，打印提示继续等待
                 print('  [提示] 进度队列等待中...')
                 sys.stdout.flush()

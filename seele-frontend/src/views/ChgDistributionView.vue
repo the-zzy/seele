@@ -1,20 +1,14 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { useEChart } from '@/composables/useEChart'
+import { toast } from '@/composables/useToast'
 import { stockDailyApi } from '@/api/stock'
 import PageHero from '@/components/common/PageHero.vue'
-
-const router = useRouter()
 
 const { chartRef, instance, init } = useEChart()
 const chartStartDate = ref('')
 const chartEndDate = ref('')
 const chartThreshold = ref(2.0)
-const amountMa5Min = ref(20000)
-const amountMa10Min = ref(20000)
-const turnoverMa5Min = ref(2.0)
-const turnoverMa10Min = ref(2.0)
 const chartLoading = ref(false)
 
 function getDefaultChartDates () {
@@ -26,7 +20,7 @@ function getDefaultChartDates () {
 
 function buildOption (data) {
   const dates = data.map(item => item.trade_date)
-  const percents = data.map(item => item.matched_percent)
+  const percents = data.map(item => item.strong_percent)
 
   const isDark = document.documentElement.dataset.theme !== 'light'
   const axisColor = isDark ? '#52525b' : '#adb5bd'
@@ -46,7 +40,7 @@ function buildOption (data) {
       formatter: (params) => {
         const p = params[0]
         const item = data[p.dataIndex]
-        return `${p.name}<br/>总股票数: ${item.total_stocks} 只<br/>涨幅超过 ${chartThreshold.value}% 的股票: ${item.matched_count} 只<br/>占比: ${item.matched_percent.toFixed(2)}%`
+        return `${p.name}<br/>总股票数: ${item.total_stocks} 只<br/>上涨: ${item.up_count} / 下跌: ${item.down_count}<br/>强势家数: ${item.strong_count}<br/>占比: ${item.strong_percent}%`
       }
     },
     grid: {
@@ -69,7 +63,7 @@ function buildOption (data) {
     },
     yAxis: {
       type: 'value',
-      name: 'Matched %',
+      name: '强势占比',
       nameTextStyle: {
         color: textColor,
         fontSize: 12
@@ -105,29 +99,16 @@ function buildOption (data) {
 }
 
 function initChart (data) {
-  const chart = init(buildOption(data))
-  if (!chart) return
-
-  chart.on('dblclick', (params) => {
-    if (params.componentType === 'series') {
-      const item = data[params.dataIndex]
-      if (item && item.trade_date) {
-        router.push({
-          name: 'chg-distribution-detail',
-          query: { date: item.trade_date }
-        })
-      }
-    }
-  })
+  init(buildOption(data))
 }
 
 async function handleChartQuery () {
   if (!chartStartDate.value || !chartEndDate.value) {
-    alert('请选择日期范围')
+    toast.warning('请选择日期范围')
     return
   }
   if (chartStartDate.value > chartEndDate.value) {
-    alert('开始日期不能晚于结束日期')
+    toast.warning('开始日期不能晚于结束日期')
     return
   }
 
@@ -136,11 +117,7 @@ async function handleChartQuery () {
     const data = await stockDailyApi.getPctChgDistribution(
       chartStartDate.value,
       chartEndDate.value,
-      chartThreshold.value,
-      amountMa5Min.value * 10000,
-      amountMa10Min.value * 10000,
-      turnoverMa5Min.value,
-      turnoverMa10Min.value
+      chartThreshold.value
     )
     const dataList = data?.list || []
     if (dataList.length > 0) {
@@ -167,10 +144,10 @@ onMounted(() => {
 <template>
   <div class="chg-distribution picker-page">
     <PageHero
-      section="选股策略"
-      number="03.1"
+      section="市场情绪"
+      number="02.1"
       title="涨幅分布统计"
-      description="按日期区间统计单日涨幅超过阈值的标的占比，识别市场强弱节奏。双击柱状图查看当日入选名单。"
+      description="按日期区间统计每日市场涨跌家数及强势标的占比，识别市场强弱节奏。点击柱状图查看当日板块分布。"
       meta="占比分布"
     />
 
@@ -184,24 +161,8 @@ onMounted(() => {
         <input v-model="chartEndDate" type="date" />
       </div>
       <div class="filter-item">
-        <label>涨幅阈值 (%)</label>
+        <label>强势阈值 (%)</label>
         <input v-model.number="chartThreshold" type="number" step="0.1" min="0" />
-      </div>
-      <div class="filter-item">
-        <label>5日平均成交额 ≥ (万)</label>
-        <input v-model.number="amountMa5Min" type="number" step="1000" min="0" />
-      </div>
-      <div class="filter-item">
-        <label>10日平均成交额 ≥ (万)</label>
-        <input v-model.number="amountMa10Min" type="number" step="1000" min="0" />
-      </div>
-      <div class="filter-item">
-        <label>5日平均换手率 ≥ (%)</label>
-        <input v-model.number="turnoverMa5Min" type="number" step="0.1" min="0" />
-      </div>
-      <div class="filter-item">
-        <label>10日平均换手率 ≥ (%)</label>
-        <input v-model.number="turnoverMa10Min" type="number" step="0.1" min="0" />
       </div>
       <div class="filter-item filter-actions">
         <button class="btn-primary" @click="handleChartQuery">查询分布</button>
@@ -211,19 +172,11 @@ onMounted(() => {
     <div ref="chartRef" class="chart-container"></div>
     <div v-if="chartLoading" class="chart-loading">加载图表中…</div>
 
-    <div class="chart-tip">
-      <span class="tip-tag">Tip</span>
-      <span>双击柱状图查看当日符合条件的股票列表</span>
-    </div>
   </div>
 </template>
 
 <style scoped lang="scss">
 @import '~@/styles/picker';
-
-.chg-distribution {
-  // picker-page 通用，但本页 result-bar 不需要
-}
 
 .chart-filters {
   flex-shrink: 0;
@@ -241,6 +194,7 @@ onMounted(() => {
   border: 1px solid var(--rule);
   border-radius: 4px;
   position: relative;
+  height: 360px;
 
   &::before {
     content: '';
@@ -260,27 +214,4 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.chart-tip {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 10px;
-  padding: 10px 14px;
-  border: 1px dashed var(--rule);
-  border-radius: 4px;
-  font-size: 12px;
-  color: var(--text-muted);
-  flex-shrink: 0;
-
-  .tip-tag {
-    font-family: var(--font-mono);
-    font-size: 9px;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--accent);
-    padding: 2px 8px;
-    border-radius: 2px;
-    background: var(--accent-subtle);
-  }
-}
 </style>

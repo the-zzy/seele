@@ -33,9 +33,22 @@ export const portfolioApi = {
       method: 'get',
       params: {
         page_num: 1,
-        page_size: 20,
+        page_size: 10,
         ...params
       }
+    })
+  },
+
+  /**
+   * 更新交易记录
+   * @param {number} id
+   * @param {Object} data
+   */
+  updateTrade (id, data) {
+    return request({
+      url: `/portfolio/trades/${id}`,
+      method: 'put',
+      data
     })
   },
 
@@ -81,7 +94,7 @@ export const portfolioApi = {
       method: 'get',
       params: {
         page_num: 1,
-        page_size: 20,
+        page_size: 10,
         ...params
       }
     })
@@ -137,17 +150,6 @@ export const portfolioApi = {
     return request({
       url: '/portfolio/alerts',
       method: 'get'
-    })
-  },
-
-  /**
-   * 标记预警已处理
-   * @param {number} id
-   */
-  dismissAlert (id) {
-    return request({
-      url: `/portfolio/alerts/${id}/dismiss`,
-      method: 'post'
     })
   },
 

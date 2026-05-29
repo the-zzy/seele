@@ -20,5 +20,8 @@ build/
 
 *.log
 
+# Uploads
+uploads/
+
 # Claude
 .claude/

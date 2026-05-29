@@ -62,10 +62,8 @@ function onSizeChange (e) {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 14px 4px 4px;
+  padding: 12px 14px;
   flex-shrink: 0;
-  border-top: 1px solid var(--rule);
-  margin-top: 12px;
 }
 
 .pg-meta {

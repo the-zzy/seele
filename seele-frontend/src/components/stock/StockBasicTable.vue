@@ -6,15 +6,21 @@ const props = defineProps({
   loading: Boolean
 })
 
-const emit = defineEmits(['sort'])
+const emit = defineEmits(['sort', 'row-dblclick'])
 
 const columns = [
   { key: 'symbol', label: '股票代码', align: 'left' },
   { key: 'name', label: '股票名称', align: 'left' },
   { key: 'industry', label: '所属行业', align: 'left' },
+  { key: 'boards', label: '所属板块', align: 'left' },
   { key: 'area', label: '所在地区', align: 'left' },
   { key: 'market', label: '市场板块', align: 'center' },
-  { key: 'listDate', label: '上市日期', align: 'center' }
+  { key: 'listDate', label: '上市日期', align: 'center' },
+  { key: 'roe', label: 'ROE', align: 'right' },
+  { key: 'grossProfitRatio', label: '毛利率', align: 'right' },
+  { key: 'netProfitRatio', label: '净利率', align: 'right' },
+  { key: 'netProfitYoy', label: '净利润同比', align: 'right' },
+  { key: 'revenueYoy', label: '营收同比', align: 'right' }
 ]
 
 function onSort (field) {
@@ -40,6 +46,22 @@ function formatDate (val) {
   }
   return s
 }
+
+function formatPercent (val) {
+  if (val == null || val === undefined) return '—'
+  const num = Number(val)
+  const sign = num > 0 ? '+' : ''
+  return `${sign}${num.toFixed(2)}%`
+}
+
+function getYoyClass (val) {
+  if (val == null) return ''
+  return Number(val) >= 0 ? 'up' : 'down'
+}
+
+function onRowDblClick (item) {
+  emit('row-dblclick', item)
+}
 </script>
 
 <template>
@@ -47,13 +69,27 @@ function formatDate (val) {
     <div v-if="loading" class="state loading">加载中…</div>
     <div v-else-if="list.length === 0" class="state empty">暂无数据</div>
     <table v-else class="stock-table">
+      <colgroup>
+        <col style="width: 8%">
+        <col style="width: 10%">
+        <col style="width: 12%">
+        <col style="width: 12%">
+        <col style="width: 8%">
+        <col style="width: 8%">
+        <col style="width: 9%">
+        <col style="width: 7%">
+        <col style="width: 7%">
+        <col style="width: 7%">
+        <col style="width: 7%">
+        <col style="width: 7%">
+      </colgroup>
       <thead>
         <tr>
           <th
             v-for="col in columns"
             :key="col.key"
             class="sortable"
-            :style="{ textAlign: col.align || 'left' }"
+            :class="{ 'th-left': col.align === 'left', 'th-center': col.align === 'center' }"
             @click="onSort(col.key)"
           >
             <span class="th-label">{{ col.label }}</span>
@@ -66,13 +102,34 @@ function formatDate (val) {
           v-for="item in list"
           :key="item.id"
           class="data-row"
+          @dblclick="onRowDblClick(item)"
         >
           <td class="code">{{ extractCodeNum(item.symbol) }}</td>
           <td class="name">{{ item.name }}</td>
-          <td>{{ item.industry || '—' }}</td>
-          <td>{{ item.area || '—' }}</td>
-          <td class="td-center market">{{ item.market || '—' }}</td>
+          <td class="td-left">{{ item.industry || '—' }}</td>
+          <td class="td-left">
+            <div v-if="item.boards" class="board-tags">
+              <span
+                v-for="b in item.boards.boards || []"
+                :key="b.code"
+                class="board-tag"
+              >{{ b.name }}</span>
+              <span
+                v-if="item.boards.industry_board"
+                class="board-tag industry"
+              >{{ item.boards.industry_board.name }}</span>
+              <span v-if="!(item.boards.boards?.length) && !item.boards.industry_board">—</span>
+            </div>
+            <span v-else>—</span>
+          </td>
+          <td class="td-left">{{ item.area || '—' }}</td>
+          <td class="td-center">{{ item.market || '—' }}</td>
           <td class="td-center">{{ formatDate(item.listDate) }}</td>
+          <td>{{ item.roe != null ? `${item.roe.toFixed(2)}%` : '—' }}</td>
+          <td>{{ item.grossProfitRatio != null ? `${item.grossProfitRatio.toFixed(2)}%` : '—' }}</td>
+          <td>{{ item.netProfitRatio != null ? `${item.netProfitRatio.toFixed(2)}%` : '—' }}</td>
+          <td :class="getYoyClass(item.netProfitYoy)">{{ formatPercent(item.netProfitYoy) }}</td>
+          <td :class="getYoyClass(item.revenueYoy)">{{ formatPercent(item.revenueYoy) }}</td>
         </tr>
       </tbody>
     </table>
@@ -81,106 +138,32 @@ function formatDate (val) {
 
 <style scoped lang="scss">
 .table-section {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  background: var(--bg-secondary);
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  margin-top: 12px;
-  position: relative;
-
-  &::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    border-radius: 4px;
-    box-shadow: var(--shadow-soft);
-  }
-}
-
-.state {
-  text-align: center;
-  padding: 60px 20px;
-  font-family: var(--font-body);
-  font-size: 13px;
-  color: var(--text-faint);
+  overflow-x: auto;
 }
 
 .stock-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-family: var(--font-body);
-  font-size: 14px;
+  min-width: 1080px;
+}
 
-  th,
-  td {
-    padding: 12px 15px;
-    text-align: left;
-    border-bottom: 1px solid var(--rule);
-    white-space: nowrap;
-  }
+.board-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
 
-  th {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    background: var(--bg-primary);
-    font-family: var(--font-mono);
-    font-weight: 600;
-    font-size: 12px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--text-faint);
+.board-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+  white-space: nowrap;
 
-    &.sortable {
-      cursor: pointer;
-      user-select: none;
-      transition: color 0.15s;
-
-      &:hover { color: var(--text-secondary); }
-
-      .sort-icon {
-        margin-left: 6px;
-        font-size: 11px;
-        opacity: 0.5;
-      }
-    }
-  }
-
-  tbody tr {
-    transition: background 0.12s;
-
-    &:hover { background: var(--bg-tertiary); }
-  }
-
-  td {
-    color: var(--text-secondary);
-
-    &.td-center { text-align: center; }
-  }
-
-  .code {
-    font-family: var(--font-mono);
-    font-weight: 600;
-    color: var(--text-primary);
-    letter-spacing: 0.04em;
-  }
-
-  .name {
-    font-family: var(--font-display);
-    font-weight: 500;
-    font-size: 16px;
-    color: var(--text-primary);
-  }
-
-  .market {
-    font-family: var(--font-mono);
-    font-size: 13px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-faint);
+  &.industry {
+    background: rgba(34, 197, 94, 0.1);
+    color: #22c55e;
   }
 }
 </style>
