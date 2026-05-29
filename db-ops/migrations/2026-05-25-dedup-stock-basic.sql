@@ -11,16 +11,12 @@ DELETE sb1 FROM stock_basic sb1
 INNER JOIN stock_basic sb2
 WHERE sb1.id < sb2.id AND sb1.symbol = sb2.symbol;
 
--- Step 3: 添加唯一索引（MySQL 8.0.13+ 支持 IF NOT EXISTS）
-ALTER TABLE stock_basic
-ADD UNIQUE INDEX IF NOT EXISTS uk_symbol (symbol);
-
--- 如果 MySQL 版本低于 8.0.13，使用以下替代方案：
--- SET @exist := (SELECT COUNT(*) FROM information_schema.statistics
---                WHERE table_schema = DATABASE()
---                AND table_name = 'stock_basic'
---                AND index_name = 'uk_symbol');
--- SET @sql := IF(@exist = 0, 'ALTER TABLE stock_basic ADD UNIQUE INDEX uk_symbol (symbol)', 'SELECT "Index already exists"');
--- PREPARE stmt FROM @sql;
--- EXECUTE stmt;
--- DEALLOCATE PREPARE stmt;
+-- Step 3: 添加唯一索引（兼容 MySQL 5.7+）
+SET @exist := (SELECT COUNT(*) FROM information_schema.statistics
+               WHERE table_schema = DATABASE()
+               AND table_name = 'stock_basic'
+               AND index_name = 'uk_symbol');
+SET @sql := IF(@exist = 0, 'ALTER TABLE stock_basic ADD UNIQUE INDEX uk_symbol (symbol)', 'SELECT "Index already exists"');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
