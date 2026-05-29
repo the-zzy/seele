@@ -30,18 +30,18 @@ jobs:
       - name: Check API Key
         if: steps.diff.outputs.has_diff == 'true'
         env:
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
-          if [ -z "$ANTHROPIC_AUTH_TOKEN" ]; then
-            echo "::error::ANTHROPIC_AUTH_TOKEN is not set in repository secrets"
+          if [ -z "$DEEPSEEK_API_KEY" ]; then
+            echo "::error::DEEPSEEK_API_KEY is not set in repository secrets"
             exit 1
           fi
-          echo "API Key is configured (length: ${#ANTHROPIC_AUTH_TOKEN})"
+          echo "API Key is configured (length: ${#DEEPSEEK_API_KEY})"
 
-      - name: AI Review via Kimi API
+      - name: AI Review via DeepSeek API
         if: steps.diff.outputs.has_diff == 'true'
         env:
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           # Truncate if too long (context limits)
           MAX_CHARS=30000
@@ -55,7 +55,7 @@ jobs:
             --rawfile diff pr_diff.txt \
             --arg prompt "你是一位专业的全栈代码审查员。请审查以下 Pull Request 的代码变更，重点关注：\n1. 代码质量和可读性\n2. 潜在的安全漏洞（如 SQL 注入、XSS、命令注入等）\n3. 性能问题\n4. 是否符合项目规范（Vue 3 Composition API、FastAPI、Python 类型注解等）\n5. 是否有更好的实现方式\n\n请以中文回复，格式如下：\n- ✅ 通过的方面\n- ⚠️ 需要关注的问题\n- ❌ 必须修复的问题\n- 💡 改进建议\n\n代码变更：\n\n" \
             '{
-              model: "kimi-k2.6",
+              model: "deepseek-v4-pro",
               max_tokens: 4096,
               messages: [
                 {
@@ -65,9 +65,9 @@ jobs:
               ]
             }' > request.json
 
-          curl -s -X POST https://api.kimi.com/coding/v1/chat/completions \
+          curl -s -X POST https://api.deepseek.com/v1/chat/completions \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
+            -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
             -d @request.json > response.json
 
           # Debug: print response if extraction fails
