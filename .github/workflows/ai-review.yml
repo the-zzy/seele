@@ -27,12 +27,12 @@ jobs:
             echo "has_diff=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: AI Review via Anthropic API
+      - name: AI Review via Moonshot API
         if: steps.diff.outputs.has_diff == 'true'
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
         run: |
-          # Truncate if too long (Anthropic has context limits)
+          # Truncate if too long (Moonshot has context limits)
           MAX_CHARS=30000
           if [ $(wc -c < pr_diff.txt) -gt $MAX_CHARS ]; then
             head -c $MAX_CHARS pr_diff.txt > pr_diff_truncated.txt
@@ -44,7 +44,7 @@ jobs:
             --rawfile diff pr_diff.txt \
             --arg prompt "你是一位专业的全栈代码审查员。请审查以下 Pull Request 的代码变更，重点关注：\n1. 代码质量和可读性\n2. 潜在的安全漏洞（如 SQL 注入、XSS、命令注入等）\n3. 性能问题\n4. 是否符合项目规范（Vue 3 Composition API、FastAPI、Python 类型注解等）\n5. 是否有更好的实现方式\n\n请以中文回复，格式如下：\n- ✅ 通过的方面\n- ⚠️ 需要关注的问题\n- ❌ 必须修复的问题\n- 💡 改进建议\n\n代码变更：\n\n" \
             '{
-              model: "claude-sonnet-4-6-20251001",
+              model: "moonshot-v1-128k",
               max_tokens: 4096,
               messages: [
                 {
@@ -54,14 +54,13 @@ jobs:
               ]
             }' > request.json
 
-          curl -s -X POST https://api.anthropic.com/v1/messages \
+          curl -s -X POST https://api.moonshot.cn/v1/chat/completions \
             -H "Content-Type: application/json" \
-            -H "x-api-key: $ANTHROPIC_API_KEY" \
-            -H "anthropic-version: 2023-06-01" \
+            -H "Authorization: Bearer $MOONSHOT_API_KEY" \
             -d @request.json > response.json
 
           # Debug: print response if extraction fails
-          TEXT=$(jq -r '.content[0].text // empty' response.json)
+          TEXT=$(jq -r '.choices[0].message.content // empty' response.json)
           if [ -z "$TEXT" ]; then
             echo "AI 审查调用异常，原始响应：" > review_result.txt
             cat response.json >> review_result.txt
