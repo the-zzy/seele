@@ -82,5 +82,5 @@ export function getPriceClass (price, pctChg) {
  */
 export function formatTurnover (turnover) {
   if (turnover === null || turnover === undefined) return '-'
-  return parseFloat(turnover).toFixed(2) + '%'
+  return (parseFloat(turnover) * 100).toFixed(2) + '%'
 }

@@ -401,6 +401,7 @@ class PortfolioTradeCreate(BaseModel):
     quantity: int = Field(..., description='成交股数')
     amount: Optional[float] = Field(None, description='成交金额（不传则自动计算）')
     fee: Optional[float] = Field(0, description='交易手续费')
+    dividend: Optional[float] = Field(0, description='分红金额')
     realized_pnl: Optional[float] = Field(None, description='实际盈亏金额（卖出时可选，用于自动计算手续费）')
     remark: Optional[str] = Field(None, description='备注')
 
@@ -437,6 +438,7 @@ class PortfolioTradeResponse(BaseModel):
     quantity: int
     amount: float
     fee: Optional[float] = 0
+    dividend: Optional[float] = 0
     remark: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -471,6 +473,7 @@ class PortfolioTradeUpdate(BaseModel):
     quantity: Optional[int] = Field(None, description='成交股数')
     amount: Optional[float] = Field(None, description='成交金额')
     fee: Optional[float] = Field(None, description='交易手续费')
+    dividend: Optional[float] = Field(None, description='分红金额')
     realized_pnl: Optional[float] = Field(None, description='实际盈亏金额（卖出时填写，用于重新计算手续费）')
     remark: Optional[str] = Field(None, description='备注')
 
@@ -1086,4 +1089,54 @@ class GalleryImageResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ==================== 访客日志 ====================
+
+
+class VisitorLogTrack(BaseModel):
+    """访客日志-前端上报"""
+    path: Optional[str] = Field(None, description='访问路径')
+    screen_resolution: Optional[str] = Field(None, description='屏幕分辨率')
+    language: Optional[str] = Field(None, description='浏览器语言')
+    timezone: Optional[str] = Field(None, description='时区')
+    platform: Optional[str] = Field(None, description='操作系统平台')
+    referrer: Optional[str] = Field(None, description='来源页面')
+
+
+class VisitorLogResponse(BaseModel):
+    """访客日志-响应"""
+    id: int
+    ip_address: str
+    user_agent: Optional[str] = None
+    path: str
+    method: str
+    referrer: Optional[str] = None
+    screen_resolution: Optional[str] = None
+    language: Optional[str] = None
+    timezone: Optional[str] = None
+    platform: Optional[str] = None
+    country: Optional[str] = None
+    city: Optional[str] = None
+    created_at: str
+
+    @field_validator('created_at', mode='before')
+    @classmethod
+    def validate_timestamp(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d %H:%M:%S')
+        return str(v)
+
+    class Config:
+        from_attributes = True
+
+
+class VisitorLogQuery(BaseModel):
+    """访客日志-查询"""
+    page_num: int = Field(default=1, description='页码')
+    page_size: int = Field(default=20, description='每页条数')
+    ip_address: Optional[str] = Field(None, description='IP地址')
+    days: Optional[int] = Field(None, description='最近N天')
 

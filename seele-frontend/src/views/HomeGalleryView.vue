@@ -26,7 +26,7 @@
         class="home-item"
         @click="openPreview(img)"
       >
-        <img :src="img.url_path" :alt="img.original_name" loading="lazy">
+        <img :src="img.url_path + '?imageView2/2/w/600'" :alt="img.original_name" loading="lazy">
       </div>
     </div>
 
@@ -35,7 +35,7 @@
       <button class="preview-close" @click="closePreview">✕</button>
       <button v-if="previewIndex > 0" class="preview-nav prev" @click="goPrev">‹</button>
       <button v-if="previewIndex < images.length - 1" class="preview-nav next" @click="goNext">›</button>
-      <img :src="preview.url_path" class="preview-img" @click.stop>
+      <img :src="preview.url_path + '?imageView2/2/w/1200'" class="preview-img" @click.stop>
       <div class="preview-counter">{{ previewIndex + 1 }} / {{ images.length }}</div>
     </div>
 

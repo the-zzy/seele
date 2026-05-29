@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     secret_key: str = ""
     admin_password: str = "seele"
 
+    # 七牛云 Kodo 配置
+    qiniu_access_key: str = ""
+    qiniu_secret_key: str = ""
+    qiniu_bucket: str = ""
+    qiniu_domain: str = ""
+
     # 以下为可覆盖参数，None 表示使用 deploy_env 自动推导
     db_pool_size: Optional[int] = None
     db_max_overflow: Optional[int] = None

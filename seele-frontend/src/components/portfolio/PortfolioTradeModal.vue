@@ -20,6 +20,7 @@ const form = reactive({
   quantity: '',
   fee: '',
   realizedPnl: '',
+  dividend: '',
   remark: ''
 })
 
@@ -40,6 +41,7 @@ watch(() => props.visible, (val) => {
       form.quantity = props.editData.quantity != null ? String(props.editData.quantity) : ''
       form.fee = props.editData.fee != null ? String(props.editData.fee) : ''
       form.realizedPnl = ''
+      form.dividend = props.editData.dividend != null ? String(props.editData.dividend) : ''
       form.remark = props.editData.remark || ''
     } else {
       // 新增模式：清空表单
@@ -50,6 +52,7 @@ watch(() => props.visible, (val) => {
       form.quantity = ''
       form.fee = ''
       form.realizedPnl = ''
+      form.dividend = ''
       form.remark = ''
     }
     closeDropdown()
@@ -174,6 +177,9 @@ function onSubmit () {
   if (props.type === 'SELL' && form.realizedPnl !== '' && form.realizedPnl != null) {
     data.realized_pnl = Number(form.realizedPnl)
   }
+  if (props.type === 'SELL' && form.dividend !== '' && form.dividend != null) {
+    data.dividend = Number(form.dividend)
+  }
   if (form.remark) data.remark = form.remark.trim()
   if (props.editData) {
     data.id = props.editData.id
@@ -251,29 +257,35 @@ function onSubmit () {
             </div>
           </div>
         </div>
-        <div class="form-row">
-          <label>交易日期</label>
-          <input v-model="form.trade_date" type="date">
+        <div class="form-grid">
+          <div class="form-row">
+            <label>交易日期</label>
+            <input v-model="form.trade_date" type="date">
+          </div>
+          <div class="form-row">
+            <label>成交价格</label>
+            <input v-model="form.price" placeholder="元" type="number" step="0.01">
+          </div>
         </div>
-        <div class="form-row">
-          <label>成交价格</label>
-          <input v-model="form.price" placeholder="元" type="number" step="0.01">
+        <div class="form-grid">
+          <div class="form-row">
+            <label>成交股数</label>
+            <input v-model="form.quantity" placeholder="100股的整数倍" type="number" step="100">
+          </div>
+          <div class="form-row">
+            <label>手续费</label>
+            <input v-model="form.fee" placeholder="元（可选）" type="number" step="0.01">
+          </div>
         </div>
-        <div class="form-row">
-          <label>成交股数</label>
-          <input v-model="form.quantity" placeholder="100股的整数倍" type="number" step="100">
-        </div>
-        <div v-if="props.editData && type === 'SELL'" class="form-row">
-          <label>盈亏金额</label>
-          <input v-model="form.realizedPnl" placeholder="元（重新填写以重新计算手续费）" type="number" step="0.01">
-        </div>
-        <div v-if="!props.editData && type === 'SELL'" class="form-row">
-          <label>盈亏金额</label>
-          <input v-model="form.realizedPnl" placeholder="元（用于自动计算手续费）" type="number" step="0.01">
-        </div>
-        <div class="form-row">
-          <label>手续费</label>
-          <input v-model="form.fee" placeholder="元（可选）" type="number" step="0.01">
+        <div v-if="type === 'SELL'" class="form-grid">
+          <div class="form-row">
+            <label>盈亏金额</label>
+            <input v-model="form.realizedPnl" :placeholder="props.editData ? '元（重新填写以重新计算手续费）' : '元（用于自动计算手续费）'" type="number" step="0.01">
+          </div>
+          <div class="form-row">
+            <label>分红</label>
+            <input v-model="form.dividend" placeholder="元（可选）" type="number" step="0.01">
+          </div>
         </div>
         <div class="form-row">
           <label>备注</label>
@@ -305,10 +317,8 @@ function onSubmit () {
   background: var(--bg-secondary);
   border: 1px solid var(--rule);
   border-radius: 10px;
-  width: 50vw;
-  height: 50vh;
-  min-width: 400px;
-  min-height: 400px;
+  width: 460px;
+  min-height: 360px;
   max-width: 96vw;
   max-height: 96vh;
   box-shadow: var(--shadow-soft);
@@ -359,6 +369,12 @@ function onSubmit () {
   gap: 12px;
   flex: 1;
   overflow: auto;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
 }
 
 .form-row {

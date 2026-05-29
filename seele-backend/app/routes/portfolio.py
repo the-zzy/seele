@@ -141,10 +141,11 @@ def _calc_closed_for_symbol(db: Session, symbol: str) -> Optional[dict]:
     total_buy_amount = sum(b.amount for b in buys)
     total_sell_amount = sum(s.amount for s in sells)
     total_fee = sum((t.fee or 0) for t in trades)
+    total_dividend = sum((t.dividend or 0) for t in trades)
     total_quantity = total_buy_qty
     avg_buy = total_buy_amount / total_quantity if total_quantity > 0 else 0
     avg_sell = total_sell_amount / total_sell_qty if total_sell_qty > 0 else 0
-    realized_pnl = total_sell_amount - total_buy_amount - total_fee
+    realized_pnl = total_sell_amount - total_buy_amount - total_fee + total_dividend
     pnl_pct = realized_pnl / total_buy_amount * 100 if total_buy_amount > 0 else 0
 
     return {
@@ -164,11 +165,12 @@ def _calc_closed_for_symbol(db: Session, symbol: str) -> Optional[dict]:
 
 
 def _calc_history_pnl(market_value: float, trades: List[models.PortfolioTrade]) -> float:
-    """计算某只股票的历史盈亏（含已卖出部分和手续费）"""
+    """计算某只股票的历史盈亏（含已卖出部分、手续费和分红）"""
     total_buy = sum(t.amount for t in trades if t.trade_type == 'BUY')
     total_sell = sum(t.amount for t in trades if t.trade_type == 'SELL')
     total_fee = sum((t.fee or 0) for t in trades)
-    return market_value + total_sell - total_buy - total_fee
+    total_dividend = sum((t.dividend or 0) for t in trades)
+    return market_value + total_sell - total_buy - total_fee + total_dividend
 
 
 def _sync_position_snapshot(db: Session, symbol: str) -> Optional[models.PortfolioPosition]:

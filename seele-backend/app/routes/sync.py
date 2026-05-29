@@ -2971,3 +2971,255 @@ def post_cancel_pipeline(pipeline_id: str):
     finally:
         db_pipeline.close()
     return success({"pipeline_id": pipeline_id, "status": "cancelled"})
+
+
+# ==================== 全量历史日线数据同步 ====================
+
+
+def _fetch_symbol_history_akshare(symbol: str, start_date: str, end_date: str) -> tuple:
+    """获取单只股票历史日线数据（akshare），返回 (records, error)"""
+    import akshare as ak
+
+    if symbol.startswith('6'):
+        prefix = 'sh'
+    elif symbol.startswith(('0', '2', '3')):
+        prefix = 'sz'
+    else:
+        prefix = 'bj'
+    code = f'{prefix}{symbol}'
+
+    try:
+        old_timeout = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(30)
+        try:
+            with akshare_lock:
+                df = ak.stock_zh_a_daily(symbol=code, start_date=start_date, end_date=end_date, adjust='qfq')
+        finally:
+            socket.setdefaulttimeout(old_timeout)
+    except Exception as exc:
+        return [], str(exc)
+
+    if df is None or df.empty:
+        return [], None
+
+    df = df.sort_values('date').reset_index(drop=True)
+    df['preclose'] = df['close'].shift(1)
+
+    records = []
+    for _, row in df.iterrows():
+        preclose = float(row['preclose']) if pd.notna(row['preclose']) else 0
+        close = float(row['close']) if pd.notna(row['close']) else None
+        high = float(row['high']) if pd.notna(row['high']) else None
+        low = float(row['low']) if pd.notna(row['low']) else None
+
+        _trade_date = pd.to_datetime(row['date']).date()
+
+        records.append({
+            'trade_date': _trade_date,
+            'symbol': symbol,
+            'open': float(row['open']) if pd.notna(row['open']) else None,
+            'high': high,
+            'low': low,
+            'close': close,
+            'volume': int(float(row['volume'])) if pd.notna(row['volume']) else None,
+            'amount': float(row['amount']) if pd.notna(row['amount']) else None,
+            'amplitude': round((high - low) / preclose * 100, 4) if preclose and high is not None and low is not None else 0.0,
+            'pct_chg': round((close - preclose) / preclose * 100, 4) if preclose and close is not None else 0.0,
+            'price_change': round(close - preclose, 4) if close is not None and preclose else 0.0,
+            'turnover': float(row['turnover']) * 100 if pd.notna(row['turnover']) else None,
+        })
+
+    return records, None
+
+
+def _sync_history_full_bulk(
+    task_id: str | None = None,
+    start_date: str = '20200101',
+    end_date: str | None = None,
+) -> dict:
+    """全量历史日线数据同步（akshare，多线程），换手率存百分位"""
+    if end_date is None:
+        end_date = datetime.now().strftime('%Y%m%d')
+
+    db = SessionLocal()
+    try:
+        all_stocks = crud.stock_basic_crud.get_list(
+            db,
+            schemas.StockBasicQuery(page_num=1, page_size=10000)
+        )[0]
+        all_stocks = [s for s in all_stocks if s.market != '北交所']
+    finally:
+        db.close()
+
+    _total = len(all_stocks)
+    _counter = [0]
+    _success_records = [0]
+    _failed_symbols: list[str] = []
+    _skipped_symbols: list[str] = []
+    _records_buffer: list[dict] = []
+    _lock = threading.Lock()
+
+    def _flush_buffer():
+        if not _records_buffer:
+            return
+        batch = _records_buffer[:]
+        db_write = SessionLocal()
+        try:
+            upsert_stmt = insert(models.StockDaily).values(batch)
+            update_dict = {
+                k: upsert_stmt.inserted[k]
+                for k in upsert_stmt.inserted.keys()
+                if k not in ('id', 'trade_date', 'symbol')
+            }
+            upsert_stmt = upsert_stmt.on_duplicate_key_update(**update_dict)
+            db_write.execute(upsert_stmt)
+            db_write.commit()
+            _success_records[0] += len(batch)
+        except Exception as exc:
+            logger.error('[SYNC_HISTORY_FULL] 批量写入失败，批次 %s 条: %s', len(batch), exc)
+            try:
+                db_write.rollback()
+            except Exception:
+                pass
+        finally:
+            db_write.close()
+        _records_buffer.clear()
+
+    def _process_stock(stock):
+        records, error = _fetch_symbol_history_akshare(stock.symbol, start_date, end_date)
+        with _lock:
+            _counter[0] += 1
+            current = _counter[0]
+            if error:
+                _failed_symbols.append(stock.symbol)
+                status = 'ERR'
+            elif not records:
+                _skipped_symbols.append(stock.symbol)
+                status = 'SKIP'
+            else:
+                _records_buffer.extend(records)
+                status = 'OK'
+                if len(_records_buffer) >= 5000:
+                    _flush_buffer()
+
+            if task_id and (current % 10 == 0 or current == _total):
+                _update_task_progress(task_id, current, _total)
+
+            logger.info(
+                '[SYNC_HISTORY_FULL] [%s/%s] %s %s records=%s',
+                current, _total, stock.symbol, status, len(records)
+            )
+
+    logger.info('[SYNC_HISTORY_FULL] 开始全量同步，共 %s 只，日期 %s ~ %s', _total, start_date, end_date)
+    _update_task_progress(task_id, 0, _total)
+
+    workers = get_settings().sync_max_workers
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(_process_stock, s) for s in all_stocks]
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                future.result()
+            except Exception as exc:
+                logger.error('[SYNC_HISTORY_FULL] 处理异常: %s', exc)
+
+    _flush_buffer()
+
+    return {
+        'total_stocks': _total,
+        'success_records': _success_records[0],
+        'failed': len(_failed_symbols),
+        'skipped': len(_skipped_symbols),
+        'failed_symbols': _failed_symbols[:50],
+        'summary': (
+            f'全量同步完成，股票 {_total} 只，'
+            f'成功记录 {_success_records[0]} 条，'
+            f'失败 {len(_failed_symbols)} 只，'
+            f'跳过 {len(_skipped_symbols)} 只'
+        ),
+    }
+
+
+def _run_sync_history_full_bg(task_id: str, start_date: str, end_date: str, log_id: int) -> None:
+    """后台执行全量历史数据同步任务"""
+    logger.info('[SYNC_HISTORY_FULL_BG] 后台任务启动 task_id=%s', task_id)
+    try:
+        result = _sync_history_full_bulk(task_id=task_id, start_date=start_date, end_date=end_date)
+        _finish_task(task_id, result=result)
+        status = 'success'
+    except Exception as exc:
+        logger.error('[SYNC_HISTORY_FULL_BG] 任务异常: %s', exc)
+        logger.error(traceback.format_exc())
+        _finish_task(task_id, error=str(exc))
+        result = {
+            'total_stocks': 0,
+            'success_records': 0,
+            'failed': 0,
+            'skipped': 0,
+            'summary': f'异常: {exc}',
+        }
+        status = 'failed'
+
+    db = SessionLocal()
+    try:
+        crud.sync_job_log_crud.finish(
+            db, log_id, status,
+            success_count=result.get('success_records', 0),
+            failed_count=result.get('failed', 0),
+            total_count=result.get('total_stocks', 0),
+            extra_info=result.get('summary', ''),
+        )
+        db.commit()
+    except Exception as exc:
+        logger.warning('[SYNC_HISTORY_FULL_BG] 更新日志失败: %s', exc)
+    finally:
+        db.close()
+
+
+@router.post("/history-full")
+def post_sync_history_full(
+    start_date: str = Query('20200101', description="起始日期，格式 YYYYMMDD"),
+    end_date: str = Query(None, description="结束日期，格式 YYYYMMDD，默认今天"),
+    db: Session = Depends(get_db),
+):
+    """全量历史日线数据同步（akshare，多线程，后台异步）
+
+    换手率存储为百分位（如 0.57 表示 0.57%）。
+    股票代码从 stock_basic 表获取，排除北交所。
+    """
+    if end_date is None:
+        end_date = datetime.now().strftime('%Y%m%d')
+
+    log = crud.sync_job_log_crud.create(
+        db,
+        schemas.SyncJobLogCreate(
+            job_type='history_full',
+            trigger_type='manual',
+            trade_date=start_date,
+        )
+    )
+    crud.system_operation_log_crud.create(
+        db,
+        schemas.SystemOperationLogCreate(
+            operation_type='sync_manual',
+            target_type='job',
+            target_id=str(log.id),
+            detail=f'手动触发全量历史同步，{start_date} ~ {end_date}',
+            result='success',
+        )
+    )
+    db.commit()
+    task_id = str(uuid.uuid4())
+    _register_task(task_id, start_date, job_type='history_full')
+    t = threading.Thread(
+        target=_run_sync_history_full_bg,
+        args=(task_id, start_date, end_date, log.id),
+        daemon=True,
+    )
+    t.start()
+    logger.info('[SYNC_HISTORY_FULL_API] 已提交后台任务 log_id=%s', log.id)
+    return success({
+        "task_id": task_id,
+        "log_id": log.id,
+        "status": "running",
+        "hint": "全量历史同步任务已提交后台执行，约需 30-60 分钟，请稍后刷新页面查看",
+    })

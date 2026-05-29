@@ -101,6 +101,7 @@ class PortfolioTrade(Base):
     quantity = Column(Integer, nullable=False, comment='成交股数')
     amount = Column(Float, nullable=False, comment='成交金额')
     fee = Column(Float, default=0, comment='交易手续费')
+    dividend = Column(Float, default=0, comment='分红金额')
     remark = Column(String(255), comment='备注')
     created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
@@ -458,3 +459,22 @@ class GalleryImage(Base):
     mime_type = Column(String(50), nullable=False, comment='MIME类型')
     url_path = Column(String(500), nullable=False, comment='访问路径')
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False, comment='创建时间')
+
+
+class VisitorLog(Base):
+    """访客日志表"""
+    __tablename__ = 'visitor_log'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ip_address = Column(String(64), nullable=False, index=True, comment='IP地址')
+    user_agent = Column(String(500), comment='浏览器User-Agent')
+    path = Column(String(255), nullable=False, comment='访问路径')
+    method = Column(String(10), nullable=False, comment='HTTP方法')
+    referrer = Column(String(500), comment='来源页面')
+    screen_resolution = Column(String(20), comment='屏幕分辨率')
+    language = Column(String(50), comment='浏览器语言')
+    timezone = Column(String(50), comment='时区')
+    platform = Column(String(50), comment='操作系统平台')
+    country = Column(String(50), comment='国家/地区')
+    city = Column(String(50), comment='城市')
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False, index=True, comment='访问时间')
