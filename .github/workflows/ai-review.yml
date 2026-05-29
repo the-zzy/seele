@@ -60,7 +60,14 @@ jobs:
             -H "anthropic-version: 2023-06-01" \
             -d @request.json > response.json
 
-          jq -r '.content[0].text' response.json > review_result.txt || echo "AI 审查调用失败，请检查 API Key 配置。" > review_result.txt
+          # Debug: print response if extraction fails
+          TEXT=$(jq -r '.content[0].text // empty' response.json)
+          if [ -z "$TEXT" ]; then
+            echo "AI 审查调用异常，原始响应：" > review_result.txt
+            cat response.json >> review_result.txt
+          else
+            echo "$TEXT" > review_result.txt
+          fi
 
       - name: Post review comment
         if: steps.diff.outputs.has_diff == 'true'
