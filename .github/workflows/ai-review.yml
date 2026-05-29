@@ -27,6 +27,17 @@ jobs:
             echo "has_diff=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Check API Key
+        if: steps.diff.outputs.has_diff == 'true'
+        env:
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: |
+          if [ -z "$MOONSHOT_API_KEY" ]; then
+            echo "::error::MOONSHOT_API_KEY is not set in repository secrets"
+            exit 1
+          fi
+          echo "API Key is configured (length: ${#MOONSHOT_API_KEY})"
+
       - name: AI Review via Moonshot API
         if: steps.diff.outputs.has_diff == 'true'
         env:
