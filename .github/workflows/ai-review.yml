@@ -44,9 +44,9 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           # Truncate if too long (context limits)
-          MAX_CHARS=30000
-          if [ $(wc -c < pr_diff.txt) -gt $MAX_CHARS ]; then
-            head -c $MAX_CHARS pr_diff.txt > pr_diff_truncated.txt
+          MAX_LINES=500
+          if [ $(wc -l < pr_diff.txt) -gt $MAX_LINES ]; then
+            head -n $MAX_LINES pr_diff.txt > pr_diff_truncated.txt
             printf '\n\n...[内容过长，已截断]' >> pr_diff_truncated.txt
             mv pr_diff_truncated.txt pr_diff.txt
           fi
