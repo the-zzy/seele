@@ -1,11 +1,13 @@
 <script setup>
 import { reactive, watch, ref } from 'vue'
 import { stockBasicApi } from '@/api/stock'
+import { toast } from '@/composables/useToast'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
   type: { type: String, default: 'BUY' }, // BUY / SELL
-  positions: { type: Array, default: () => [] }
+  positions: { type: Array, default: () => [] },
+  editData: { type: Object, default: null }
 })
 
 const emit = defineEmits(['update:visible', 'submit'])
@@ -18,6 +20,7 @@ const form = reactive({
   quantity: '',
   fee: '',
   realizedPnl: '',
+  dividend: '',
   remark: ''
 })
 
@@ -29,14 +32,29 @@ let searchTimer = null
 
 watch(() => props.visible, (val) => {
   if (val) {
-    form.symbol = ''
-    form.name = ''
-    form.trade_date = new Date().toISOString().slice(0, 10)
-    form.price = ''
-    form.quantity = ''
-    form.fee = ''
-    form.realizedPnl = ''
-    form.remark = ''
+    if (props.editData) {
+      // 编辑模式：预填充数据
+      form.symbol = props.editData.symbol || ''
+      form.name = props.editData.name || ''
+      form.trade_date = props.editData.trade_date || ''
+      form.price = props.editData.price != null ? String(props.editData.price) : ''
+      form.quantity = props.editData.quantity != null ? String(props.editData.quantity) : ''
+      form.fee = props.editData.fee != null ? String(props.editData.fee) : ''
+      form.realizedPnl = ''
+      form.dividend = props.editData.dividend != null ? String(props.editData.dividend) : ''
+      form.remark = props.editData.remark || ''
+    } else {
+      // 新增模式：清空表单
+      form.symbol = ''
+      form.name = ''
+      form.trade_date = new Date().toISOString().slice(0, 10)
+      form.price = ''
+      form.quantity = ''
+      form.fee = ''
+      form.realizedPnl = ''
+      form.dividend = ''
+      form.remark = ''
+    }
     closeDropdown()
   }
 })
@@ -116,6 +134,9 @@ async function doSearch (kw) {
 function onSelectStock (item) {
   form.symbol = item.symbol
   form.name = item.name
+  if (props.type === 'SELL' && item.quantity != null) {
+    form.quantity = String(item.quantity)
+  }
   closeDropdown()
 }
 
@@ -125,21 +146,21 @@ function onClose () {
 
 function onSubmit () {
   if (!form.symbol.trim()) {
-    alert('请选择股票')
+    toast.warning('请选择股票')
     return
   }
   if (!form.trade_date) {
-    alert('请选择交易日期')
+    toast.warning('请选择交易日期')
     return
   }
   const price = Number(form.price)
   if (!price || price <= 0) {
-    alert('请输入有效的成交价格')
+    toast.warning('请输入有效的成交价格')
     return
   }
   const qty = Number(form.quantity)
   if (!qty || qty <= 0 || !Number.isInteger(qty) || qty % 100 !== 0) {
-    alert('请输入有效的成交股数（100股的整数倍）')
+    toast.warning('请输入有效的成交股数（100股的整数倍）')
     return
   }
   const data = {
@@ -150,10 +171,19 @@ function onSubmit () {
     price: price,
     quantity: qty
   }
+  if (form.fee !== '' && form.fee != null) {
+    data.fee = Number(form.fee)
+  }
   if (props.type === 'SELL' && form.realizedPnl !== '' && form.realizedPnl != null) {
     data.realized_pnl = Number(form.realizedPnl)
   }
+  if (props.type === 'SELL' && form.dividend !== '' && form.dividend != null) {
+    data.dividend = Number(form.dividend)
+  }
   if (form.remark) data.remark = form.remark.trim()
+  if (props.editData) {
+    data.id = props.editData.id
+  }
   emit('submit', data)
 }
 </script>
@@ -162,13 +192,16 @@ function onSubmit () {
   <div v-if="visible" class="modal-overlay" @click.self="onClose">
     <div class="modal-panel">
       <div class="modal-header">
-        <h3 class="modal-title">{{ type === 'BUY' ? '录入买入' : '录入卖出' }}</h3>
+        <h3 class="modal-title">{{ props.editData ? '编辑交易' : (type === 'BUY' ? '录入买入' : '录入卖出') }}</h3>
         <button class="modal-close" @click="onClose">&times;</button>
       </div>
       <div class="modal-body">
         <div class="form-row">
           <label>股票</label>
-          <div class="stock-select">
+          <div v-if="props.editData" class="stock-display">
+            {{ form.symbol }} {{ form.name }}
+          </div>
+          <div v-else class="stock-select">
             <div
               class="select-trigger"
               :class="{ active: showDropdown }"
@@ -224,21 +257,35 @@ function onSubmit () {
             </div>
           </div>
         </div>
-        <div class="form-row">
-          <label>交易日期</label>
-          <input v-model="form.trade_date" type="date">
+        <div class="form-grid">
+          <div class="form-row">
+            <label>交易日期</label>
+            <input v-model="form.trade_date" type="date">
+          </div>
+          <div class="form-row">
+            <label>成交价格</label>
+            <input v-model="form.price" placeholder="元" type="number" step="0.01">
+          </div>
         </div>
-        <div class="form-row">
-          <label>成交价格</label>
-          <input v-model="form.price" placeholder="元" type="number" step="0.01">
+        <div class="form-grid">
+          <div class="form-row">
+            <label>成交股数</label>
+            <input v-model="form.quantity" placeholder="100股的整数倍" type="number" step="100">
+          </div>
+          <div class="form-row">
+            <label>手续费</label>
+            <input v-model="form.fee" placeholder="元（可选）" type="number" step="0.01">
+          </div>
         </div>
-        <div class="form-row">
-          <label>成交股数</label>
-          <input v-model="form.quantity" placeholder="100股的整数倍" type="number" step="100">
-        </div>
-        <div v-if="type === 'SELL'" class="form-row">
-          <label>盈亏金额</label>
-          <input v-model="form.realizedPnl" placeholder="元（用于自动计算手续费）" type="number" step="0.01">
+        <div v-if="type === 'SELL'" class="form-grid">
+          <div class="form-row">
+            <label>盈亏金额</label>
+            <input v-model="form.realizedPnl" :placeholder="props.editData ? '元（重新填写以重新计算手续费）' : '元（用于自动计算手续费）'" type="number" step="0.01">
+          </div>
+          <div class="form-row">
+            <label>分红</label>
+            <input v-model="form.dividend" placeholder="元（可选）" type="number" step="0.01">
+          </div>
         </div>
         <div class="form-row">
           <label>备注</label>
@@ -270,10 +317,8 @@ function onSubmit () {
   background: var(--bg-secondary);
   border: 1px solid var(--rule);
   border-radius: 10px;
-  width: 50vw;
-  height: 50vh;
-  min-width: 400px;
-  min-height: 400px;
+  width: 460px;
+  min-height: 360px;
   max-width: 96vw;
   max-height: 96vh;
   box-shadow: var(--shadow-soft);
@@ -326,6 +371,12 @@ function onSubmit () {
   overflow: auto;
 }
 
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+}
+
 .form-row {
   display: flex;
   flex-direction: column;
@@ -353,6 +404,15 @@ function onSubmit () {
       border-color: var(--border-focus);
     }
   }
+}
+
+.stock-display {
+  padding: 8px 10px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  font-size: 13px;
 }
 
 .stock-select {

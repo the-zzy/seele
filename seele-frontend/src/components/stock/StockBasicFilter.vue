@@ -52,51 +52,58 @@ function onReset () {
 <style scoped lang="scss">
 .filter-section {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 16px;
-  padding: 14px 0 16px;
-  border-bottom: 1px dashed var(--rule);
+  padding: 12px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  margin-bottom: 12px;
 }
 
 .filter-fields {
   display: flex;
   flex-wrap: wrap;
-  gap: 18px;
+  gap: 12px;
   flex: 1;
 }
 
 .field {
   display: flex;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 140px;
+  align-items: center;
+  gap: 8px;
+  min-width: 160px;
+  flex: 1;
 
   .field-label {
-    font-family: var(--font-mono);
-    font-size: 9px;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--text-faint);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    flex-shrink: 0;
+    width: 28px;
+    text-align: right;
   }
 
   input {
-    padding: 7px 0;
-    background: transparent;
-    border: none;
-    border-bottom: 1px solid var(--rule);
-    border-radius: 0;
+    flex: 1;
+    padding: 7px 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
     font-family: var(--font-mono);
     font-size: 13px;
     color: var(--text-primary);
     transition: border-color 0.2s;
+    min-width: 0;
 
     &:focus {
       outline: none;
-      border-bottom-color: var(--accent);
+      border-color: var(--border-focus);
     }
 
     &::placeholder {
-      color: var(--text-faint);
+      color: var(--text-muted);
     }
   }
 }
@@ -104,21 +111,21 @@ function onReset () {
 .filter-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  flex-shrink: 0;
 }
 
 .btn-primary {
-  padding: 8px 18px;
+  padding: 7px 16px;
   background: var(--accent);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  letter-spacing: 0.08em;
   transition: background 0.2s;
 
   &:hover { background: var(--accent-hover); }
@@ -129,13 +136,15 @@ function onReset () {
   border: none;
   cursor: pointer;
   font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: 12px;
   color: var(--text-muted);
-  padding: 6px 0;
-  transition: color 0.2s;
+  padding: 7px 12px;
+  border-radius: 6px;
+  transition: all 0.2s;
 
-  &:hover { color: var(--text-primary); }
+  &:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+  }
 }
 </style>

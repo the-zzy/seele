@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "preserve": "powershell -Command \"$c = netstat -ano | findstr ':8000'; if ($c) { $id = ($c -split '\\s+')[-1]; if ($id -ne '') { taskkill /PID $id /F } }\"",
+    "preserve": "node scripts/kill-port.js 8000",
     "serve": "vue-cli-service serve --port 8000",
     "build": "vue-cli-service build",
     "lint": "vue-cli-service lint"
@@ -13,8 +13,7 @@
     "core-js": "^3.8.3",
     "echarts": "^6.0.0",
     "vue": "^3.2.13",
-    "vue-router": "^4.0.3",
-    "vuex": "^4.0.0"
+    "vue-router": "^4.0.3"
   },
   "devDependencies": {
     "@babel/core": "^7.12.16",
@@ -22,7 +21,6 @@
     "@vue/cli-plugin-babel": "~5.0.0",
     "@vue/cli-plugin-eslint": "~5.0.0",
     "@vue/cli-plugin-router": "~5.0.0",
-    "@vue/cli-plugin-vuex": "~5.0.0",
     "@vue/cli-service": "~5.0.0",
     "@vue/eslint-config-standard": "^6.1.0",
     "eslint": "^7.32.0",

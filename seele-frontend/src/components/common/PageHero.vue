@@ -32,8 +32,8 @@ defineProps({
   align-items: flex-end;
   justify-content: space-between;
   gap: 24px;
-  padding: 22px 0 18px;
-  margin: 0 0 18px;
+  padding: 16px 0 10px;
+  margin: 0 0 10px;
   border-bottom: 1px solid var(--rule);
   position: relative;
 
@@ -45,6 +45,13 @@ defineProps({
     width: 56px;
     height: 1px;
     background: var(--accent);
+  }
+
+  @media (max-width: 900px) {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 18px 0 14px;
   }
 }
 
@@ -99,7 +106,9 @@ defineProps({
   font-size: 13px;
   line-height: 1.5;
   color: var(--text-muted);
-  max-width: 56ch;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .hero-actions {
@@ -107,5 +116,11 @@ defineProps({
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+
+  @media (max-width: 900px) {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
 }
 </style>

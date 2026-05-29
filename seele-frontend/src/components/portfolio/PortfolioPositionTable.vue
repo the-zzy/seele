@@ -8,6 +8,7 @@ defineProps({
 
 const emit = defineEmits(['edit', 'update-position'])
 
+const pnlMode = ref('history') // 'history' | 'current'
 const editingSymbol = ref(null)
 const editForm = ref({})
 
@@ -77,9 +78,22 @@ function holdingDays (firstBuyDate) {
 
 <template>
   <div class="table-section">
-    <div class="section-title">
-      当前持仓
-      <span v-if="list.length" class="section-count">{{ list.length }} 只</span>
+    <div class="pnl-toggle">
+      <span class="pnl-toggle-label">盈亏显示</span>
+      <button
+        class="pnl-toggle-btn"
+        :class="{ active: pnlMode === 'history' }"
+        @click="pnlMode = 'history'"
+      >
+        历史盈亏
+      </button>
+      <button
+        class="pnl-toggle-btn"
+        :class="{ active: pnlMode === 'current' }"
+        @click="pnlMode = 'current'"
+      >
+        当前盈亏
+      </button>
     </div>
     <div class="table-wrap">
       <table class="stock-table">
@@ -91,7 +105,7 @@ function holdingDays (firstBuyDate) {
             <th class="num">平均成本</th>
             <th class="num">最新价</th>
             <th class="num">市值</th>
-            <th class="num">浮动盈亏</th>
+            <th class="num">{{ pnlMode === 'history' ? '历史盈亏' : '当前盈亏' }}</th>
             <th class="num">盈亏比例</th>
             <th>持仓天数</th>
             <th>分组</th>
@@ -117,11 +131,17 @@ function holdingDays (firstBuyDate) {
               <td class="num">{{ fmt(item.avg_cost) }}</td>
               <td class="num">{{ fmt(item.current_price) }}</td>
               <td class="num">{{ fmt(item.market_value) }}</td>
-              <td class="num" :class="pnlClass(item.unrealized_pnl)">
-                {{ fmt(item.unrealized_pnl) }}
+              <td
+                class="num"
+                :class="pnlClass(pnlMode === 'history' ? item.history_pnl : item.unrealized_pnl)"
+              >
+                {{ fmt(pnlMode === 'history' ? item.history_pnl : item.unrealized_pnl) }}
               </td>
-              <td class="num" :class="pnlClass(item.unrealized_pnl_pct)">
-                {{ fmt(item.unrealized_pnl_pct) }}%
+              <td
+                class="num"
+                :class="pnlClass(pnlMode === 'history' ? item.history_pnl_pct : item.unrealized_pnl_pct)"
+              >
+                {{ fmt(pnlMode === 'history' ? item.history_pnl_pct : item.unrealized_pnl_pct) }}%
               </td>
               <td class="num">{{ holdingDays(item.first_buy_date) }}</td>
               <td>
@@ -171,246 +191,210 @@ function holdingDays (firstBuyDate) {
 </template>
 
 <style scoped lang="scss">
-.table-section {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 16px;
-}
-
-.section-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
+.pnl-toggle {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  margin-bottom: 10px;
 }
 
-.section-count {
-  font-size: 11px;
-  font-weight: 400;
+.pnl-toggle-label {
+  font-size: 12px;
   color: var(--text-muted);
   font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+}
+
+.pnl-toggle-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--text-muted);
+  background: transparent;
+  transition: all 0.2s;
+
+  &.active {
+    color: #fff;
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  &:hover:not(.active) {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
 }
 
 .table-wrap {
   overflow: auto;
-  border: 1px solid var(--rule);
-  border-radius: 8px;
 }
 
 .stock-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
+  min-width: 960px;
+}
 
-  th, td {
-    padding: 10px 12px;
-    text-align: left;
-    border-bottom: 1px solid var(--rule);
-    white-space: nowrap;
-  }
+.num {
+  text-align: right;
+}
 
-  th {
+.alert-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--up);
+}
+
+.alert-stop-loss {
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.alert-take-profit {
+  background: rgba(16, 185, 129, 0.06);
+}
+
+.warning {
+  background: rgba(234, 179, 8, 0.06);
+}
+
+.profit {
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.group-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+
+  &.default {
     background: var(--bg-tertiary);
-    color: var(--text-faint);
-    font-family: var(--font-mono);
-    font-size: 9px;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    font-weight: 500;
-    position: sticky;
-    top: 0;
-    z-index: 1;
+    color: var(--text-muted);
   }
+
+  &.core {
+    background: rgba(59, 130, 246, 0.12);
+    color: var(--accent);
+  }
+
+  &.watch {
+    background: rgba(234, 179, 8, 0.12);
+    color: #eab308;
+  }
+
+  &.trial {
+    background: rgba(168, 85, 247, 0.12);
+    color: #a855f7;
+  }
+}
+
+.remark {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.edit-row {
+  background: var(--bg-tertiary);
 
   td {
-    color: var(--text-secondary);
+    padding: 12px 14px;
   }
+}
 
-  tr:hover td {
-    background: var(--bg-tertiary);
-  }
+.edit-form {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
 
-  tr.alert-stop-loss {
-    background: rgba(239, 68, 68, 0.06);
-  }
+.edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 
-  tr.alert-take-profit {
-    background: rgba(16, 185, 129, 0.06);
-  }
-
-  tr.warning {
-    background: rgba(245, 158, 11, 0.04);
-  }
-
-  tr.profit {
-    background: rgba(16, 185, 129, 0.04);
-  }
-
-  .num {
-    text-align: right;
+  label {
     font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-faint);
   }
 
-  .mono {
-    font-family: var(--font-mono);
-  }
-
-  .up {
-    color: var(--up);
-  }
-
-  .down {
-    color: var(--down);
-  }
-
-  .empty {
-    text-align: center;
-    color: var(--text-muted);
-    padding: 28px;
-  }
-
-  .alert-badge {
-    display: inline-block;
-    margin-left: 4px;
-    padding: 1px 5px;
-    border-radius: 3px;
-    font-size: 10px;
-    font-weight: 600;
-    color: #fff;
-    background: var(--up);
-  }
-
-  .group-tag {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-family: var(--font-mono);
-    background: var(--bg-tertiary);
-    color: var(--text-muted);
-
-    &.core {
-      background: rgba(59, 130, 246, 0.12);
-      color: #3b82f6;
-    }
-
-    &.watch {
-      background: rgba(245, 158, 11, 0.12);
-      color: #f59e0b;
-    }
-
-    &.trial {
-      background: rgba(139, 92, 246, 0.12);
-      color: #8b5cf6;
-    }
-  }
-
-  .remark {
-    max-width: 120px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .btn-edit {
-    padding: 3px 10px;
+  input,
+  select {
+    padding: 6px 8px;
+    background: var(--bg-input);
+    color: var(--text-primary);
     border: 1px solid var(--rule);
     border-radius: 4px;
-    font-size: 11px;
-    cursor: pointer;
-    color: var(--text-secondary);
-    background: transparent;
+    font-size: 12px;
+    outline: none;
+    width: 110px;
 
-    &:hover {
+    &:focus {
       border-color: var(--accent);
-      color: var(--accent);
     }
   }
+}
 
-  .edit-row {
-    td {
-      padding: 8px 12px;
-      background: var(--bg-tertiary);
-    }
+.edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.btn-edit {
+  padding: 4px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--text-muted);
+  background: transparent;
+
+  &:hover {
+    border-color: var(--accent);
+    color: var(--accent);
   }
+}
 
-  .edit-form {
-    display: flex;
-    align-items: flex-end;
-    gap: 12px;
-    flex-wrap: wrap;
+.btn-link {
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+
+  &:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
   }
+}
 
-  .edit-field {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+.btn-primary {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  color: #fff;
+  background: var(--accent);
 
-    label {
-      font-family: var(--font-mono);
-      font-size: 9px;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: var(--text-faint);
-    }
-
-    input, select {
-      padding: 6px 8px;
-      background: var(--bg-input);
-      color: var(--text-primary);
-      border: 1px solid var(--rule);
-      border-radius: 4px;
-      font-size: 12px;
-      outline: none;
-      width: 100px;
-
-      &:focus {
-        border-color: var(--border-focus);
-      }
-    }
-
-    input[type="text"] {
-      width: 140px;
-    }
-  }
-
-  .edit-actions {
-    display: flex;
-    gap: 8px;
-    margin-left: auto;
-  }
-
-  .btn-link {
-    padding: 6px 12px;
-    background: transparent;
-    color: var(--text-muted);
-    border: none;
-    font-size: 12px;
-    cursor: pointer;
-    border-radius: 4px;
-
-    &:hover {
-      color: var(--text-primary);
-      background: var(--bg-secondary);
-    }
-  }
-
-  .btn-primary {
-    padding: 6px 14px;
-    border: none;
-    border-radius: 4px;
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    color: #fff;
-    background: var(--accent);
-
-    &:hover {
-      background: var(--accent-hover);
-    }
+  &:hover {
+    background: var(--accent-hover);
   }
 }
 </style>

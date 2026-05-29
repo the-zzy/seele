@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, computed, nextTick, watch } from 'vue'
 import { useEChart } from '@/composables/useEChart'
+import { toast } from '@/composables/useToast'
 import { portfolioApi } from '@/api/portfolio'
 import PageHero from '@/components/common/PageHero.vue'
 import PortfolioStatsCards from '@/components/portfolio/PortfolioStatsCards.vue'
@@ -30,12 +31,12 @@ const loading = ref(false)
 
 // 交易记录分页
 const tradePageNum = ref(1)
-const tradePageSize = ref(20)
+const tradePageSize = ref(10)
 const tradeTotal = ref(0)
 
 // 已清仓分页
 const closedPageNum = ref(1)
-const closedPageSize = ref(20)
+const closedPageSize = ref(10)
 const closedTotal = ref(0)
 
 // 标签页
@@ -44,20 +45,11 @@ const activeTab = ref('positions') // positions | trades | closed
 // 弹窗
 const modalVisible = ref(false)
 const modalType = ref('BUY')
+const editingTrade = ref(null)
 
 // 初始资金编辑
 const capitalModalVisible = ref(false)
 const capitalInput = ref('')
-
-// 分组筛选
-const activeGroup = ref('')
-const groupOptions = [
-  { label: '全部', value: '' },
-  { label: '默认', value: 'default' },
-  { label: '核心仓', value: 'core' },
-  { label: '观察仓', value: 'watch' },
-  { label: '试错仓', value: 'trial' }
-]
 
 // 预警
 const alerts = ref([])
@@ -68,27 +60,36 @@ const trendRef = useEChart()
 const dailyPnlRef = useEChart()
 const pieRef = useEChart()
 const barRef = useEChart()
+const barCollapsed = ref(true)
 
-// 计算持仓 + 清仓的收益对比数据
+// 计算持仓 + 清仓的收益对比数据（按 symbol 合并）
 const pnlComparisonData = computed(() => {
-  const data = []
+  const map = new Map()
   positions.value.forEach(p => {
-    data.push({
-      name: p.name,
-      symbol: p.symbol,
-      value: p.unrealized_pnl || 0,
-      type: '持仓'
-    })
+    const existing = map.get(p.symbol)
+    if (existing) {
+      existing.value += p.unrealized_pnl || 0
+    } else {
+      map.set(p.symbol, {
+        name: p.name,
+        symbol: p.symbol,
+        value: p.unrealized_pnl || 0
+      })
+    }
   })
   closedList.value.slice(0, 20).forEach(c => {
-    data.push({
-      name: c.name,
-      symbol: c.symbol,
-      value: c.realized_pnl || 0,
-      type: '已清仓'
-    })
+    const existing = map.get(c.symbol)
+    if (existing) {
+      existing.value += c.realized_pnl || 0
+    } else {
+      map.set(c.symbol, {
+        name: c.name,
+        symbol: c.symbol,
+        value: c.realized_pnl || 0
+      })
+    }
   })
-  return data.sort((a, b) => b.value - a.value)
+  return Array.from(map.values()).sort((a, b) => b.value - a.value)
 })
 
 async function loadSummary () {
@@ -102,7 +103,7 @@ async function loadSummary () {
 
 async function loadPositions () {
   try {
-    const res = await portfolioApi.getPositions(activeGroup.value || undefined)
+    const res = await portfolioApi.getPositions()
     positions.value = res || []
   } catch (e) {
     console.error('加载持仓失败:', e)
@@ -124,7 +125,7 @@ async function onUpdatePosition (symbol, data) {
     await loadPositions()
     await loadAlerts()
   } catch (e) {
-    alert('更新失败: ' + (e.message || '未知错误'))
+    toast.error('更新失败: ' + (e.message || '未知错误'))
   }
 }
 
@@ -319,13 +320,23 @@ function renderBarChart () {
       yAxis: { type: 'category', show: false, data: [] },
       series: [{ type: 'bar', data: [] }]
     })
+    if (barRef.chartRef.value) {
+      barRef.chartRef.value.style.height = '160px'
+    }
     return
   }
+
+  const container = barRef.chartRef.value
+  if (container) {
+    const h = Math.max(160, data.length * 26 + 40)
+    container.style.height = h + 'px'
+  }
+
   const upColor = getThemeColor('--up')
   const downColor = getThemeColor('--down')
   barRef.init({
     tooltip: { trigger: 'axis', formatter: p => `${p[0].name}: ${Number(p[0].value).toFixed(2)}` },
-    grid: { left: 80, right: 20, top: 10, bottom: 20 },
+    grid: { left: 60, right: 20, top: 10, bottom: 20 },
     xAxis: {
       type: 'value',
       axisLine: { show: false },
@@ -347,7 +358,7 @@ function renderBarChart () {
           borderRadius: [0, 3, 3, 0]
         }
       })).reverse(),
-      barWidth: 14
+      barWidth: 16
     }]
   })
 }
@@ -357,34 +368,50 @@ async function refreshAll () {
   await Promise.all([
     loadSummary(),
     loadPositions(),
-    loadTrades(),
-    loadClosed(),
     loadDailyPnl(),
     loadDistribution(),
     loadAlerts()
   ])
+  if (activeTab.value === 'trades') {
+    await loadTrades()
+  }
+  if (activeTab.value === 'closed') {
+    await loadClosed()
+  }
   nextTick(() => {
-    renderBarChart()
+    if (!barCollapsed.value) {
+      renderBarChart()
+    }
   })
   loading.value = false
 }
+
+watch(barCollapsed, (val) => {
+  if (!val) {
+    nextTick(() => renderBarChart())
+  } else {
+    barRef.dispose()
+  }
+})
 
 async function onSyncPositions () {
   try {
     await portfolioApi.syncPositions()
     await refreshAll()
   } catch (e) {
-    alert('同步失败: ' + (e.message || '未知错误'))
+    toast.error('同步失败: ' + (e.message || '未知错误'))
   }
 }
 
-function onGroupChange (group) {
-  activeGroup.value = group
-  loadPositions()
+function openModal (type) {
+  editingTrade.value = null
+  modalType.value = type
+  modalVisible.value = true
 }
 
-function openModal (type) {
-  modalType.value = type
+function openEditModal (item) {
+  editingTrade.value = item
+  modalType.value = item.trade_type
   modalVisible.value = true
 }
 
@@ -396,7 +423,7 @@ function openCapitalModal () {
 async function onUpdateCapital () {
   const val = Number(capitalInput.value)
   if (!val || val <= 0) {
-    alert('请输入有效的初始资金')
+    toast.warning('请输入有效的初始资金')
     return
   }
   try {
@@ -404,17 +431,22 @@ async function onUpdateCapital () {
     capitalModalVisible.value = false
     await loadSummary()
   } catch (e) {
-    alert('设置失败: ' + (e.message || '未知错误'))
+    toast.error('设置失败: ' + (e.message || '未知错误'))
   }
 }
 
 async function onSubmitTrade (data) {
   try {
-    await portfolioApi.createTrade(data)
+    if (data.id != null) {
+      await portfolioApi.updateTrade(data.id, data)
+    } else {
+      await portfolioApi.createTrade(data)
+    }
     modalVisible.value = false
+    editingTrade.value = null
     await refreshAll()
   } catch (e) {
-    alert('录入失败: ' + (e.message || '未知错误'))
+    toast.error(data.id != null ? '更新失败: ' : '录入失败: ' + (e.message || '未知错误'))
   }
 }
 
@@ -423,7 +455,7 @@ async function onDeleteTrade (id) {
     await portfolioApi.deleteTrade(id)
     await refreshAll()
   } catch (e) {
-    alert('删除失败: ' + (e.message || '未知错误'))
+    toast.error('删除失败: ' + (e.message || '未知错误'))
   }
 }
 
@@ -515,8 +547,13 @@ onMounted(() => {
         <div class="chart-title">持仓占比</div>
         <div :ref="pieRef.chartRef" class="chart-body" />
       </div>
-      <div class="chart-card">
-        <div class="chart-title">个股收益</div>
+    </div>
+    <div class="chart-card bar-chart-row" :class="{ collapsed: barCollapsed }">
+      <div class="collapsible-header" @click="barCollapsed = !barCollapsed">
+        <span class="chart-title">个股收益对比</span>
+        <span class="collapse-arrow">{{ barCollapsed ? '▼' : '▲' }}</span>
+      </div>
+      <div v-show="!barCollapsed" class="collapsible-body">
         <div :ref="barRef.chartRef" class="chart-body" />
       </div>
     </div>
@@ -545,19 +582,6 @@ onMounted(() => {
       </button>
     </div>
 
-    <!-- 分组筛选 -->
-    <div v-if="activeTab === 'positions'" class="group-filter">
-      <button
-        v-for="opt in groupOptions"
-        :key="opt.value"
-        class="group-btn"
-        :class="{ active: activeGroup === opt.value }"
-        @click="onGroupChange(opt.value)"
-      >
-        {{ opt.label }}
-      </button>
-    </div>
-
     <PortfolioPositionTable
       v-if="activeTab === 'positions'"
       :list="positions"
@@ -569,6 +593,7 @@ onMounted(() => {
       <PortfolioTradeTable
         :list="trades"
         :loading="loading"
+        @edit="openEditModal"
         @delete="onDeleteTrade"
       />
       <BasePagination
@@ -642,6 +667,7 @@ onMounted(() => {
       v-model:visible="modalVisible"
       :type="modalType"
       :positions="positions"
+      :edit-data="editingTrade"
       @submit="onSubmitTrade"
     />
 
@@ -675,6 +701,10 @@ onMounted(() => {
   padding: 4px 28px 18px;
   box-sizing: border-box;
   overflow: auto;
+
+  @media (max-width: 768px) {
+    padding: 4px 16px 12px;
+  }
 }
 
 .alert-banner {
@@ -746,6 +776,17 @@ onMounted(() => {
   &.take_profit {
     background: rgba(16, 185, 129, 0.04);
   }
+
+  @media (max-width: 768px) {
+    flex-wrap: wrap;
+    gap: 6px 12px;
+
+    .alert-pnl {
+      margin-left: 0;
+      width: 100%;
+      text-align: right;
+    }
+  }
 }
 
 .alert-symbol {
@@ -787,35 +828,6 @@ onMounted(() => {
 
   &.down {
     color: var(--down);
-  }
-}
-
-.group-filter {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-  margin-bottom: 4px;
-}
-
-.group-btn {
-  padding: 5px 12px;
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  font-size: 12px;
-  cursor: pointer;
-  color: var(--text-muted);
-  background: transparent;
-  transition: all 0.2s;
-
-  &:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-
-  &.active {
-    border-color: var(--accent);
-    color: var(--accent);
-    background: rgba(59, 130, 246, 0.08);
   }
 }
 
@@ -874,20 +886,25 @@ onMounted(() => {
 
 .charts-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
+
+  @media (max-width: 1200px) {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
 }
 
 .chart-card {
   background: var(--bg-secondary);
   border: 1px solid var(--rule);
   border-radius: 8px;
-  padding: 12px 14px;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  min-height: 260px;
+  gap: 6px;
+  min-height: 200px;
 }
 
 .chart-title {
@@ -900,14 +917,49 @@ onMounted(() => {
 
 .chart-body {
   flex: 1;
-  min-height: 220px;
+  min-height: 160px;
+}
+
+.bar-chart-row {
+  margin-bottom: 12px;
+
+  &.collapsed {
+    min-height: auto;
+  }
+
+  .collapsible-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    padding: 2px 0;
+
+    &:hover .collapse-arrow {
+      color: var(--text-primary);
+    }
+  }
+
+  .collapse-arrow {
+    font-size: 10px;
+    color: var(--text-muted);
+    transition: color 0.2s;
+  }
+
+  .collapsible-body {
+    padding-top: 6px;
+  }
+
+  .chart-body {
+    min-height: 160px;
+    height: auto;
+  }
 }
 
 .tabs {
   display: flex;
   gap: 2px;
   border-bottom: 1px solid var(--rule);
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 .tab {
@@ -959,6 +1011,10 @@ onMounted(() => {
   overflow: auto;
   border: 1px solid var(--rule);
   border-radius: 8px;
+
+  .stock-table {
+    min-width: 720px;
+  }
 }
 
 .modal-overlay {
@@ -1080,60 +1136,4 @@ onMounted(() => {
   }
 }
 
-.stock-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-
-  th, td {
-    padding: 10px 12px;
-    text-align: left;
-    border-bottom: 1px solid var(--rule);
-    white-space: nowrap;
-  }
-
-  th {
-    background: var(--bg-tertiary);
-    color: var(--text-faint);
-    font-family: var(--font-mono);
-    font-size: 9px;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    font-weight: 500;
-    position: sticky;
-    top: 0;
-    z-index: 1;
-  }
-
-  td {
-    color: var(--text-secondary);
-  }
-
-  tr:hover td {
-    background: var(--bg-tertiary);
-  }
-
-  .num {
-    text-align: right;
-    font-family: var(--font-mono);
-  }
-
-  .mono {
-    font-family: var(--font-mono);
-  }
-
-  .up {
-    color: var(--up);
-  }
-
-  .down {
-    color: var(--down);
-  }
-
-  .empty {
-    text-align: center;
-    color: var(--text-muted);
-    padding: 28px;
-  }
-}
 </style>
