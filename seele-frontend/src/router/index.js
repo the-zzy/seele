@@ -7,7 +7,6 @@ import ChgDistributionView from '../views/ChgDistributionView.vue'
 import PortfolioView from '../views/PortfolioView.vue'
 import MainwavePickerView from '../views/MainwavePickerView.vue'
 import MainwaveScorerView from '../views/MainwaveScorerView.vue'
-import IndustrySentimentView from '../views/IndustrySentimentView.vue'
 import StockFinancialView from '../views/StockFinancialView.vue'
 import FinancialListView from '../views/FinancialListView.vue'
 import SyncJobLogView from '../views/SyncJobLogView.vue'
@@ -53,12 +52,6 @@ const routes = [
     name: 'chg-distribution',
     component: ChgDistributionView,
     meta: { title: '涨幅分布统计', nav: true, navOrder: 30, group: '市场情绪' }
-  },
-  {
-    path: '/industry-sentiment',
-    name: 'industry-sentiment',
-    component: IndustrySentimentView,
-    meta: { title: '板块情绪分布', nav: true, navOrder: 31, group: '市场情绪' }
   },
   {
     path: '/portfolio',

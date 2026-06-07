@@ -17,11 +17,12 @@ from app.auth import get_current_user
 from app.config import get_settings
 from app.database import engine, Base
 from app.response import success
-from app.routes import auth, financial, gallery, index, market_sentiment, pickers, portfolio, stock_basic, stock_daily, stock_indicator, sync, system_log, trade_calendar, visitor_log
+from app.routes import auth, board, financial, gallery, index, market_sentiment, pickers, portfolio, stock_basic, stock_daily, stock_indicator, sync, system_log, trade_calendar, visitor_log
 from app.agent.router import router as agent_router
 from app.scheduler import get_scheduler
 from app.scheduler_jobs import (
     scheduled_compute_indicators,
+    scheduled_sync_board_daily,
     scheduled_sync_daily,
     scheduled_sync_financial,
     scheduled_sync_stock_basic,
@@ -62,6 +63,13 @@ async def lifespan(app: FastAPI):
         trigger=CronTrigger(hour=17, minute=30, day_of_week='mon-fri'),
         id='sync_indicator',
         name='日线指标计算',
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        scheduled_sync_board_daily,
+        trigger=CronTrigger(hour=18, minute=0, day_of_week='mon-fri'),
+        id='sync_board_daily',
+        name='板块/ETF日线数据同步',
         replace_existing=True,
     )
     # 定时清理内存中超期的异步任务和 pipeline，防止无人查询时持续累积
@@ -152,6 +160,7 @@ app.include_router(market_sentiment.router, prefix="/api", dependencies=auth_dep
 app.include_router(sync.router, prefix="/api", dependencies=auth_dep)
 app.include_router(index.router, prefix="/api", dependencies=auth_dep)
 app.include_router(system_log.router, prefix="/api", dependencies=auth_dep)
+app.include_router(board.router, prefix="/api", dependencies=auth_dep)
 app.include_router(trade_calendar.router, prefix="/api", dependencies=auth_dep)
 app.include_router(agent_router, prefix="/api", dependencies=auth_dep)
 app.include_router(gallery.router, prefix="/api")

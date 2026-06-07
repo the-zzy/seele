@@ -10,6 +10,7 @@ import StockDataTable from '@/components/stock/StockDataTable.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
 import SyncProgress from '@/components/common/SyncProgress.vue'
 import PageHero from '@/components/common/PageHero.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 
 const {
   loading,
@@ -63,6 +64,54 @@ const syncProgress = computed(() => {
 
 const sortField = ref('symbol')
 const sortOrder = ref('asc')
+const confirmDialog = reactive({
+  visible: false,
+  title: '',
+  message: '',
+  detail: '',
+  confirmText: '确认',
+  cancelText: '取消',
+  resolver: null
+})
+
+function openConfirmDialog ({ title, message, detail, confirmText = '确认', cancelText = '取消' }) {
+  confirmDialog.title = title
+  confirmDialog.message = message
+  confirmDialog.detail = detail
+  confirmDialog.confirmText = confirmText
+  confirmDialog.cancelText = cancelText
+  confirmDialog.visible = true
+
+  return new Promise(resolve => {
+    confirmDialog.resolver = resolve
+  })
+}
+
+function closeConfirmDialog (value) {
+  confirmDialog.visible = false
+  if (confirmDialog.resolver) {
+    confirmDialog.resolver(value)
+    confirmDialog.resolver = null
+  }
+}
+
+function confirmSyncAction (message, context = {}) {
+  if (context.type === 'existing') {
+    return openConfirmDialog({
+      title: '继续跟踪正在运行的同步？',
+      message,
+      detail: '不会重复创建任务，只会接管当前后台进度。',
+      confirmText: '继续跟踪'
+    })
+  }
+
+  return openConfirmDialog({
+    title: '获取全市场日线数据？',
+    message: `即将从 API 获取 ${filterForm.tradeDate} 的全部 A 股基础日线数据。`,
+    detail: '同步任务会在后台异步执行，页面可实时查看进度；期间可以继续浏览其它数据。',
+    confirmText: '开始获取'
+  })
+}
 
 function handleSort (field) {
   if (sortField.value === field) {
@@ -152,6 +201,7 @@ async function handleFetchData () {
 
   await startSync(syncKey.value, () => syncApi.syncByDate(filterForm.tradeDate), {
     confirmMessage: `确定要从API获取 ${filterForm.tradeDate} 的全部A股数据吗？\n同步任务将在后台异步执行，可实时查看进度。`,
+    confirmAction: confirmSyncAction,
     existingMatcher: t => t.job_type === 'daily' && t.trade_date === tradeDateFormatted,
     interval: 3000,
     onDone: (data) => {
@@ -228,6 +278,17 @@ onMounted(async () => {
       :total="total"
       @update:page-num="handlePageChange"
       @update:page-size="handlePageSizeChange"
+    />
+
+    <ConfirmDialog
+      :visible="confirmDialog.visible"
+      :title="confirmDialog.title"
+      :message="confirmDialog.message"
+      :detail="confirmDialog.detail"
+      :confirm-text="confirmDialog.confirmText"
+      :cancel-text="confirmDialog.cancelText"
+      @confirm="closeConfirmDialog(true)"
+      @cancel="closeConfirmDialog(false)"
     />
   </div>
 </template>
