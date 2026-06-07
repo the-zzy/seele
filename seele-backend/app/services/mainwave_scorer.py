@@ -380,14 +380,18 @@ def batch_calculate_scores(
         if ind:
             holding_industries.add(ind)
 
-    # 3. 获取行业情绪数据（当日板块平均涨跌幅）
+    # 3. 获取板块指数涨跌幅（同花顺行业板块指数）
     sentiments = (
-        db.query(models.IndustrySentimentDaily)
-        .filter(models.IndustrySentimentDaily.trade_date == dt)
+        db.query(models.BoardInfo.name, models.BoardDaily.pct_chg)
+        .join(models.BoardDaily, models.BoardInfo.code == models.BoardDaily.code)
+        .filter(
+            models.BoardInfo.category == 'industry',
+            models.BoardDaily.trade_date == dt,
+        )
         .all()
     )
     sector_sentiment_map: Dict[str, float] = {
-        s.industry: s.avg_pct_chg for s in sentiments if s.avg_pct_chg is not None
+        name: float(pct_chg) for name, pct_chg in sentiments if pct_chg is not None
     }
 
     # 4. 获取大盘环境数据（沪深300优先，fallback 上证指数）

@@ -8,13 +8,12 @@ from datetime import datetime
 
 from app import crud, models, schemas
 from app.database import SessionLocal
-from app.routes.market_sentiment import (
-    _persist_industry_sentiment,
-    _persist_market_sentiment,
-)
+from app.routes.market_sentiment import _persist_market_sentiment
 from app.routes.stock_indicator import _build_indicator_for_symbol
 from app.routes.sync import (
+    _sync_board_daily_em,
     _sync_daily_bulk,
+    _sync_etf_daily_em,
     _sync_financial_bulk,
     _sync_stock_basic_from_akshare,
     _sync_stock_basic_from_baostock,
@@ -98,7 +97,6 @@ def scheduled_sync_daily(db, log_id: int) -> None:
     trade_date_obj = _datetime.strptime(trade_date, '%Y%m%d').date()
     try:
         _persist_market_sentiment(db, trade_date_obj)
-        _persist_industry_sentiment(db, trade_date_obj)
         logger.info('[SCHEDULER] 交易日 %s 市场情绪预计算完成', trade_date)
     except Exception as exc:
         logger.warning('[SCHEDULER] 市场情绪预计算失败: %s', exc)
@@ -196,5 +194,45 @@ def scheduled_compute_indicators(db, log_id: int) -> None:
         total_count=total,
         trade_date=trade_date,
         extra_info=f'indicators for {formatted_date}',
+    )
+    db.commit()
+
+
+@_with_job_log('board_daily')
+def scheduled_sync_board_daily(db, log_id: int) -> None:
+    """定时同步板块/ETF日线数据"""
+    trade_date = get_last_trade_date()
+
+    existing = db.query(models.SyncJobLog).filter(
+        models.SyncJobLog.job_type == 'board_daily',
+        models.SyncJobLog.status == 'success',
+        models.SyncJobLog.trade_date == trade_date,
+    ).first()
+
+    if existing:
+        logger.info('[SCHEDULER] 交易日 %s 的板块日线已同步，跳过', trade_date)
+        crud.sync_job_log_crud.finish(
+            db, log_id, 'skipped', extra_info=f'trade_date={trade_date} already synced'
+        )
+        db.commit()
+        return
+
+    log = crud.sync_job_log_crud.get_by_id(db, log_id)
+    if log:
+        log.trade_date = trade_date
+        db.commit()
+
+    board_result = _sync_board_daily_em()
+    etf_result = _sync_etf_daily_em()
+    total_records = board_result.get('records', 0) + etf_result.get('records', 0)
+
+    crud.sync_job_log_crud.finish(
+        db,
+        log_id,
+        status='success',
+        success_count=total_records,
+        total_count=board_result.get('total_boards', 0) + etf_result.get('total_etfs', 0),
+        trade_date=trade_date,
+        extra_info=f'board_records={board_result.get("records",0)}, etf_records={etf_result.get("records",0)}',
     )
     db.commit()

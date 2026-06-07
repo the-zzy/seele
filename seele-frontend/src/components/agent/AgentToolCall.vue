@@ -64,7 +64,6 @@ const displayName = computed(() => {
     query_sync_job_logs: '查询同步日志',
     query_db_status: '查询数据库状态',
     query_market_sentiment: '查询市场情绪',
-    query_industry_sentiment: '查询板块情绪',
     create_trade: '录入交易',
     update_position: '更新持仓',
     update_portfolio_config: '更新配置',

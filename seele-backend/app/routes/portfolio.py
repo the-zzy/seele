@@ -512,6 +512,77 @@ def create_trade(
     return success(schemas.PortfolioTradeResponse.model_validate(trade).model_dump(), message='录入成功')
 
 
+@router.post('/portfolio/day-trades')
+def create_day_trade(
+    obj_in: schemas.PortfolioDayTradeCreate,
+    db: Session = Depends(get_db),
+):
+    """录入做T交易：同一天同股票同股数的一买一卖，fee=0"""
+    if obj_in.buy_price <= 0 or obj_in.sell_price <= 0:
+        return {'code': 400, 'message': '买入价和卖出价必须大于0'}
+    if obj_in.quantity <= 0 or obj_in.quantity % 100 != 0:
+        return {'code': 400, 'message': '成交股数必须为100股的整数倍且大于0'}
+
+    trade_date_obj = _parse_trade_date_str(obj_in.trade_date)
+
+    buy_err = _validate_price_by_daily(db, obj_in.symbol, trade_date_obj, obj_in.buy_price)
+    if buy_err:
+        return {'code': 400, 'message': f'买入{buy_err}'}
+    sell_err = _validate_price_by_daily(db, obj_in.symbol, trade_date_obj, obj_in.sell_price)
+    if sell_err:
+        return {'code': 400, 'message': f'卖出{sell_err}'}
+
+    quantity = obj_in.quantity
+    buy_amount = round(obj_in.buy_price * quantity, 4)
+    sell_amount = round(obj_in.sell_price * quantity, 4)
+    remark = '[做T]'
+
+    buy_trade = models.PortfolioTrade(
+        symbol=obj_in.symbol,
+        name=obj_in.name,
+        trade_type='BUY',
+        trade_date=trade_date_obj,
+        price=obj_in.buy_price,
+        quantity=quantity,
+        amount=buy_amount,
+        fee=0,
+        dividend=0,
+        remark=remark,
+    )
+    sell_trade = models.PortfolioTrade(
+        symbol=obj_in.symbol,
+        name=obj_in.name,
+        trade_type='SELL',
+        trade_date=trade_date_obj,
+        price=obj_in.sell_price,
+        quantity=quantity,
+        amount=sell_amount,
+        fee=0,
+        dividend=0,
+        remark=remark,
+    )
+
+    db.add(buy_trade)
+    db.add(sell_trade)
+    db.flush()
+
+    _sync_position_snapshot(db, obj_in.symbol)
+
+    closed_data = _calc_closed_for_symbol(db, obj_in.symbol)
+    if closed_data:
+        db.query(models.PortfolioClosed).filter(
+            models.PortfolioClosed.symbol == obj_in.symbol
+        ).delete()
+        portfolio_closed_crud.create(db, closed_data)
+
+    missing = _rebuild_daily_data(db)
+    if missing:
+        detail = f'持仓数据缺失日线收盘价: {", ".join(missing[:5])}' + (' 等' if len(missing) > 5 else '')
+        return {'code': 400, 'message': detail, 'data': missing}
+
+    return success(message='做T录入成功')
+
+
 @router.get('/portfolio/trades')
 def get_trades(
     symbol: Optional[str] = None,

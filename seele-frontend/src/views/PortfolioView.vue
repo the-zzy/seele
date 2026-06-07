@@ -6,6 +6,7 @@ import { portfolioApi } from '@/api/portfolio'
 import PageHero from '@/components/common/PageHero.vue'
 import PortfolioStatsCards from '@/components/portfolio/PortfolioStatsCards.vue'
 import PortfolioTradeModal from '@/components/portfolio/PortfolioTradeModal.vue'
+import PortfolioDayTradeModal from '@/components/portfolio/PortfolioDayTradeModal.vue'
 import PortfolioPositionTable from '@/components/portfolio/PortfolioPositionTable.vue'
 import PortfolioTradeTable from '@/components/portfolio/PortfolioTradeTable.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
@@ -46,6 +47,7 @@ const activeTab = ref('positions') // positions | trades | closed
 const modalVisible = ref(false)
 const modalType = ref('BUY')
 const editingTrade = ref(null)
+const dayTradeModalVisible = ref(false)
 
 // 初始资金编辑
 const capitalModalVisible = ref(false)
@@ -409,6 +411,10 @@ function openModal (type) {
   modalVisible.value = true
 }
 
+function openDayTradeModal () {
+  dayTradeModalVisible.value = true
+}
+
 function openEditModal (item) {
   editingTrade.value = item
   modalType.value = item.trade_type
@@ -447,6 +453,16 @@ async function onSubmitTrade (data) {
     await refreshAll()
   } catch (e) {
     toast.error(data.id != null ? '更新失败: ' : '录入失败: ' + (e.message || '未知错误'))
+  }
+}
+
+async function onSubmitDayTrade (data) {
+  try {
+    await portfolioApi.createDayTrade(data)
+    dayTradeModalVisible.value = false
+    await refreshAll()
+  } catch (e) {
+    toast.error('做T录入失败: ' + (e.message || '未知错误'))
   }
 }
 
@@ -506,6 +522,7 @@ onMounted(() => {
         <button class="btn-config" @click="openCapitalModal">设置资金</button>
         <button class="btn-primary" @click="openModal('BUY')">+ 买入</button>
         <button class="btn-sell" @click="openModal('SELL')">- 卖出</button>
+        <button class="btn-daytrade" @click="openDayTradeModal">做T</button>
       </template>
     </PageHero>
 
@@ -669,6 +686,12 @@ onMounted(() => {
       :positions="positions"
       :edit-data="editingTrade"
       @submit="onSubmitTrade"
+    />
+
+    <PortfolioDayTradeModal
+      v-model:visible="dayTradeModalVisible"
+      :positions="positions"
+      @submit="onSubmitDayTrade"
     />
 
     <!-- 初始资金设置弹窗 -->
@@ -881,6 +904,21 @@ onMounted(() => {
 
   &:hover {
     background: #e04345;
+  }
+}
+
+.btn-daytrade {
+  padding: 7px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  color: #fff;
+  background: #8b5cf6;
+
+  &:hover {
+    background: #7c3aed;
   }
 }
 

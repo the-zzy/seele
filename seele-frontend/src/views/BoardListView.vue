@@ -1,37 +1,31 @@
 <script setup>
-import { reactive, ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import PageHero from '@/components/common/PageHero.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
+import { boardApi, tradeCalendarApi } from '@/api/stock'
 
 const router = useRouter()
 
-const activeTab = ref('industry') // 'industry' | 'board'
+const activeTab = ref('industry')
 const loading = ref(false)
+const latestTradeDate = ref('')
+const queryDate = ref('')
 
-// 申万行业数据
-const industryList = ref([])
-const industryKeyword = ref('')
-const industryTotal = computed(() => filteredIndustryList.value.length)
-const industryPageNum = ref(1)
-const industryPageSize = ref(50)
-
-// 板块/ETF 数据
-const boardList = ref([])
-const boardTotal = ref(0)
-const boardPageNum = ref(1)
-const boardPageSize = ref(50)
-const boardFilter = reactive({
-  category: '',
-  keyword: ''
-})
-
-const categoryOptions = [
-  { value: '', label: '全部' },
-  { value: 'industry', label: '行业板块' },
-  { value: 'concept', label: '概念板块' },
-  { value: 'etf', label: 'ETF' }
+// 三个标签页共用的配置
+const TABS = [
+  { key: 'industry', label: '行业板块', category: 'industry', count: 0 },
+  { key: 'concept', label: '概念板块', category: 'concept', count: 0 },
+  { key: 'etf', label: 'ETF', category: 'etf', count: 0 },
 ]
+
+// 各标签页数据
+const tabData = ref({
+  industry: { list: [], total: 0, pageNum: 1, pageSize: 10 },
+  concept: { list: [], total: 0, pageNum: 1, pageSize: 10 },
+  etf: { list: [], total: 0, pageNum: 1, pageSize: 10 },
+})
+const keyword = ref('')
 
 function categoryLabel (category) {
   const map = { industry: '行业', concept: '概念', etf: 'ETF' }
@@ -53,7 +47,7 @@ function getPriceClass (val) {
 function formatChg (val) {
   if (val === null || val === undefined) return '—'
   const sign = val > 0 ? '+' : ''
-  return `${sign}${val}%`
+  return `${sign}${val.toFixed(2)}%`
 }
 
 function formatAmount (val) {
@@ -63,109 +57,93 @@ function formatAmount (val) {
   return val.toFixed(0)
 }
 
-// 申万行业过滤后的列表
-const filteredIndustryList = computed(() => {
-  if (!industryKeyword.value.trim()) return industryList.value
-  const kw = industryKeyword.value.trim().toLowerCase()
-  return industryList.value.filter(item =>
-    item.name?.toLowerCase().includes(kw) ||
-    item.industry?.toLowerCase().includes(kw)
-  )
-})
-
-const pagedIndustryList = computed(() => {
-  const start = (industryPageNum.value - 1) * industryPageSize.value
-  return filteredIndustryList.value.slice(start, start + industryPageSize.value)
-})
-
-async function loadIndustryData () {
-  loading.value = true
-  try {
-    // boardApi 已废弃（后端 board 模块已移除）
-    industryList.value = []
-    industryPageNum.value = 1
-  } catch (error) {
-    console.error('加载申万行业数据失败:', error)
-    industryList.value = []
-  } finally {
-    loading.value = false
-  }
+function formatDate (d) {
+  if (!d) return '—'
+  const m = String(d).match(/^(\d{4})-?(\d{2})-?(\d{2})/)
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`
+  return String(d)
 }
 
-async function loadBoardData () {
+function currentTab () {
+  return tabData.value[activeTab.value]
+}
+
+async function loadTabData (tabKey) {
+  const tab = tabData.value[tabKey]
+  if (!tab) return
   loading.value = true
   try {
     const params = {
-      page_num: boardPageNum.value,
-      page_size: boardPageSize.value
+      page_num: tab.pageNum,
+      page_size: tab.pageSize,
+      category: tabKey,
     }
-    if (boardFilter.category) {
-      params.category = boardFilter.category
+    if (keyword.value.trim()) {
+      params.keyword = keyword.value.trim()
     }
-    if (boardFilter.keyword?.trim()) {
-      params.keyword = boardFilter.keyword.trim()
+    if (queryDate.value) {
+      params.trade_date = queryDate.value
     }
-    // boardApi 已废弃（后端 board 模块已移除）
-    boardList.value = []
-    boardTotal.value = 0
+    const res = await boardApi.getList(params)
+    tab.list = res?.list || []
+    tab.total = res?.total || 0
   } catch (error) {
-    console.error('加载板块列表失败:', error)
-    boardList.value = []
-    boardTotal.value = 0
+    console.error(`加载${tabKey}数据失败:`, error)
+    tab.list = []
   } finally {
     loading.value = false
   }
 }
 
-function handleTabChange (tab) {
-  activeTab.value = tab
-  if (tab === 'industry' && industryList.value.length === 0) {
-    loadIndustryData()
-  }
-  if (tab === 'board' && boardList.value.length === 0) {
-    loadBoardData()
+function handleTabChange (tabKey) {
+  activeTab.value = tabKey
+  const tab = tabData.value[tabKey]
+  if (tab && tab.list.length === 0) {
+    loadTabData(tabKey)
   }
 }
 
-async function handleIndustrySearch () {
-  industryPageNum.value = 1
+function handleSearch () {
+  const tab = currentTab()
+  if (tab) {
+    tab.pageNum = 1
+    loadTabData(activeTab.value)
+  }
 }
 
-async function handleIndustryReset () {
-  industryKeyword.value = ''
-  industryPageNum.value = 1
+function handleReset () {
+  keyword.value = ''
+  const tab = currentTab()
+  if (tab) {
+    tab.pageNum = 1
+    loadTabData(activeTab.value)
+  }
 }
 
-async function handleIndustryPageChange (newPage) {
-  industryPageNum.value = newPage
+function handlePageChange (newPage) {
+  const tab = currentTab()
+  if (tab) {
+    tab.pageNum = newPage
+    loadTabData(activeTab.value)
+  }
 }
 
-async function handleIndustryPageSizeChange (newSize) {
-  industryPageSize.value = newSize
-  industryPageNum.value = 1
+function handlePageSizeChange (newSize) {
+  const tab = currentTab()
+  if (tab) {
+    tab.pageSize = newSize
+    tab.pageNum = 1
+    loadTabData(activeTab.value)
+  }
 }
 
-async function handleBoardSearch () {
-  boardPageNum.value = 1
-  await loadBoardData()
-}
-
-async function handleBoardReset () {
-  boardFilter.category = ''
-  boardFilter.keyword = ''
-  boardPageNum.value = 1
-  await loadBoardData()
-}
-
-async function handleBoardPageChange (newPage) {
-  boardPageNum.value = newPage
-  await loadBoardData()
-}
-
-async function handleBoardPageSizeChange (newSize) {
-  boardPageSize.value = newSize
-  boardPageNum.value = 1
-  await loadBoardData()
+function handleDateQuery () {
+  // 重新加载当前标签页，带上日期参数
+  const tab = currentTab()
+  if (tab) {
+    tab.pageNum = 1
+    loadTabData(activeTab.value)
+  }
 }
 
 function handleRowClick (item) {
@@ -175,8 +153,15 @@ function handleRowClick (item) {
   })
 }
 
-onMounted(() => {
-  loadIndustryData()
+onMounted(async () => {
+  try {
+    const res = await tradeCalendarApi.getLatest()
+    if (res) {
+      latestTradeDate.value = formatDate(res)
+      queryDate.value = formatDate(res)
+    }
+  } catch (_) { /* ignore */ }
+  loadTabData('industry')
 })
 </script>
 
@@ -186,181 +171,148 @@ onMounted(() => {
       section="市场数据"
       number="02"
       title="板块 / ETF"
-      description="申万行业实时行情与板块/ETF 基础信息一览。"
+      :description="latestTradeDate ? `同花顺行业/概念板块 + ETF 行情 · 数据截至 ${latestTradeDate}` : '同花顺行业/概念板块 + ETF 行情'"
       meta="板块索引"
     />
 
+    <!-- 全局日期查询 -->
+    <div class="date-filter">
+      <label class="date-label">交易日</label>
+      <input
+        v-model="queryDate"
+        type="date"
+        class="date-input"
+        @change="handleDateQuery"
+      />
+      <span class="date-hint">切换日期查看历史行情</span>
+    </div>
+
+    <!-- 标签页 -->
     <div class="tab-bar">
       <button
+        v-for="t in TABS"
+        :key="t.key"
         class="tab-btn"
-        :class="{ active: activeTab === 'industry' }"
-        @click="handleTabChange('industry')"
+        :class="{ active: activeTab === t.key }"
+        @click="handleTabChange(t.key)"
       >
-        申万行业
-      </button>
-      <button
-        class="tab-btn"
-        :class="{ active: activeTab === 'board' }"
-        @click="handleTabChange('board')"
-      >
-        板块 / ETF
+        {{ t.label }}
+        <span v-if="currentTab()?.total > 0" class="tab-count">{{ currentTab().total }}</span>
       </button>
     </div>
 
-    <!-- 申万行业 -->
-    <template v-if="activeTab === 'industry'">
-      <div class="filter-section">
-        <div class="filter-item">
-          <label>关键词</label>
-          <input
-            v-model="industryKeyword"
-            type="text"
-            placeholder="行业名称搜索"
-            @keyup.enter="handleIndustrySearch"
+    <!-- 筛选栏 -->
+    <div class="filter-section">
+      <div class="filter-item">
+        <label>关键词</label>
+        <input
+          v-model="keyword"
+          type="text"
+          placeholder="名称模糊搜索"
+          @keyup.enter="handleSearch"
+        />
+      </div>
+      <div class="filter-item filter-actions">
+        <button class="btn-primary" @click="handleSearch">查询</button>
+        <button class="btn-secondary" @click="handleReset">重置</button>
+      </div>
+    </div>
+
+    <!-- 数据表格 -->
+    <div class="table-section">
+      <div v-if="loading" class="state loading">加载中…</div>
+      <div v-else-if="!currentTab()?.list?.length" class="state empty">暂无数据</div>
+      <table v-else class="stock-table">
+        <thead>
+          <tr>
+            <th>代码</th>
+            <th>名称</th>
+            <th>类型</th>
+            <th>最新涨幅</th>
+            <th>5日涨幅</th>
+            <th>10日涨幅</th>
+            <th>成交额</th>
+            <th>成分股</th>
+            <th>来源</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="item in currentTab()?.list"
+            :key="item.code"
+            class="data-row"
+            @click="handleRowClick(item)"
           >
-        </div>
-        <div class="filter-item filter-actions">
-          <button class="btn-primary" @click="handleIndustrySearch">查询</button>
-          <button class="btn-secondary" @click="handleIndustryReset">重置</button>
-        </div>
-      </div>
+            <td class="code">{{ item.code }}</td>
+            <td class="name">{{ item.name }}</td>
+            <td>
+              <span class="category-tag" :class="categoryClass(item.category)">
+                {{ categoryLabel(item.category) }}
+              </span>
+            </td>
+            <td :class="getPriceClass(item.latest_pct_chg)">
+              {{ formatChg(item.latest_pct_chg) }}
+            </td>
+            <td :class="getPriceClass(item.chg_5d)">
+              {{ formatChg(item.chg_5d) }}
+            </td>
+            <td :class="getPriceClass(item.chg_10d)">
+              {{ formatChg(item.chg_10d) }}
+            </td>
+            <td>{{ formatAmount(item.amount) }}</td>
+            <td class="constituent">{{ item.constituent_count || 0 }}</td>
+            <td>{{ item.source || '—' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
-      <div class="table-section">
-        <div v-if="loading" class="state loading">加载中…</div>
-        <div v-else-if="pagedIndustryList.length === 0" class="state empty">暂无数据</div>
-        <table v-else class="stock-table">
-          <thead>
-            <tr>
-              <th>行业名称</th>
-              <th>股票数</th>
-              <th>最新涨幅</th>
-              <th>5日涨幅</th>
-              <th>10日涨幅</th>
-              <th>成交额</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="item in pagedIndustryList"
-              :key="item.industry"
-            >
-              <td class="name">{{ item.name }}</td>
-              <td>{{ item.stock_count }}</td>
-              <td :class="getPriceClass(item.latest_pct_chg)">
-                {{ formatChg(item.latest_pct_chg) }}
-              </td>
-              <td :class="getPriceClass(item.chg_5d)">
-                {{ formatChg(item.chg_5d) }}
-              </td>
-              <td :class="getPriceClass(item.chg_10d)">
-                {{ formatChg(item.chg_10d) }}
-              </td>
-              <td>{{ formatAmount(item.amount_sum) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <BasePagination
-        v-if="industryTotal > 0"
-        :page-num="industryPageNum"
-        :page-size="industryPageSize"
-        :total="industryTotal"
-        @update:page-num="handleIndustryPageChange"
-        @update:page-size="handleIndustryPageSizeChange"
-      />
-    </template>
-
-    <!-- 板块/ETF -->
-    <template v-else>
-      <div class="filter-section">
-        <div class="filter-item">
-          <label>类型</label>
-          <select v-model="boardFilter.category">
-            <option
-              v-for="opt in categoryOptions"
-              :key="opt.value"
-              :value="opt.value"
-            >
-              {{ opt.label }}
-            </option>
-          </select>
-        </div>
-        <div class="filter-item">
-          <label>关键词</label>
-          <input
-            v-model="boardFilter.keyword"
-            type="text"
-            placeholder="名称模糊搜索"
-            @keyup.enter="handleBoardSearch"
-          >
-        </div>
-        <div class="filter-item filter-actions">
-          <button class="btn-primary" @click="handleBoardSearch">查询</button>
-          <button class="btn-secondary" @click="handleBoardReset">重置</button>
-        </div>
-      </div>
-
-      <div class="table-section">
-        <div v-if="loading" class="state loading">加载中…</div>
-        <div v-else-if="boardList.length === 0" class="state empty">暂无数据</div>
-        <table v-else class="stock-table">
-          <thead>
-            <tr>
-              <th>代码</th>
-              <th>名称</th>
-              <th>类型</th>
-              <th>最新涨幅</th>
-              <th>5日涨幅</th>
-              <th>10日涨幅</th>
-              <th>交易所</th>
-              <th>来源</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="item in boardList"
-              :key="item.code"
-              class="data-row"
-              @click="handleRowClick(item)"
-            >
-              <td class="code">{{ item.code }}</td>
-              <td class="name">{{ item.name }}</td>
-              <td>
-                <span class="category-tag" :class="categoryClass(item.category)">
-                  {{ categoryLabel(item.category) }}
-                </span>
-              </td>
-              <td :class="getPriceClass(item.latest_pct_chg)">
-                {{ formatChg(item.latest_pct_chg) }}
-              </td>
-              <td :class="getPriceClass(item.chg_5d)">
-                {{ formatChg(item.chg_5d) }}
-              </td>
-              <td :class="getPriceClass(item.chg_10d)">
-                {{ formatChg(item.chg_10d) }}
-              </td>
-              <td>{{ item.exchange || '—' }}</td>
-              <td>{{ item.source || '—' }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <BasePagination
-        v-if="boardTotal > 0"
-        :page-num="boardPageNum"
-        :page-size="boardPageSize"
-        :total="boardTotal"
-        @update:page-num="handleBoardPageChange"
-        @update:page-size="handleBoardPageSizeChange"
-      />
-    </template>
+    <BasePagination
+      v-if="(currentTab()?.total || 0) > 0"
+      :page-num="currentTab()?.pageNum || 1"
+      :page-size="currentTab()?.pageSize || 50"
+      :total="currentTab()?.total || 0"
+      @update:page-num="handlePageChange"
+      @update:page-size="handlePageSizeChange"
+    />
   </div>
 </template>
 
 <style scoped lang="scss">
 @import '~@/styles/picker';
+
+.date-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+
+.date-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-family: var(--font-display);
+}
+
+.date-input {
+  padding: 4px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+
+.date-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+}
 
 .tab-bar {
   display: flex;
@@ -380,6 +332,7 @@ onMounted(() => {
   color: var(--text-muted);
   cursor: pointer;
   transition: all 0.15s;
+  position: relative;
 
   &:hover {
     color: var(--text-secondary);
@@ -389,6 +342,18 @@ onMounted(() => {
     color: var(--accent);
     border-bottom-color: var(--accent);
   }
+}
+
+.tab-count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 18px;
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  color: var(--text-faint);
+  font-family: var(--font-mono);
 }
 
 .category-tag {

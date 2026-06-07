@@ -577,7 +577,6 @@ async def query_db_status(db: Session):
         ('portfolio_closed', models.PortfolioClosed),
         ('portfolio_daily_summary', models.PortfolioDailySummary),
         ('market_sentiment_daily', models.MarketSentimentDaily),
-        ('industry_sentiment_daily', models.IndustrySentimentDaily),
         ('stock_financial_indicator', models.StockFinancialIndicator),
         ('sync_job_log', models.SyncJobLog),
     ]
@@ -641,50 +640,6 @@ async def query_market_sentiment(db: Session, start_date: Optional[str] = None, 
                 'avg_pct_chg': r.avg_pct_chg,
                 'strong_count': r.strong_count,
                 'strong_percent': r.strong_percent,
-            }
-            for r in rows
-        ],
-    }
-
-
-@registry.register(
-    name='query_industry_sentiment',
-    description='查询某交易日各板块情绪统计。如果不传日期，默认查最近一个交易日。',
-    parameters={
-        'type': 'object',
-        'properties': {
-            'trade_date': {'type': 'string', 'description': '交易日期 YYYY-MM-DD，可选'},
-        },
-    },
-    category='read',
-)
-async def query_industry_sentiment(db: Session, trade_date: Optional[str] = None):
-    if trade_date:
-        d = datetime.strptime(trade_date, '%Y-%m-%d').date()
-    else:
-        from sqlalchemy import func
-        latest = db.query(func.max(models.IndustrySentimentDaily.trade_date)).scalar()
-        if not latest:
-            return {'total': 0, 'list': []}
-        d = latest
-    rows = (
-        db.query(models.IndustrySentimentDaily)
-        .filter(models.IndustrySentimentDaily.trade_date == d)
-        .order_by(models.IndustrySentimentDaily.avg_pct_chg.desc())
-        .all()
-    )
-    return {
-        'total': len(rows),
-        'list': [
-            {
-                'industry': r.industry,
-                'stock_count': r.stock_count,
-                'up_count': r.up_count,
-                'down_count': r.down_count,
-                'avg_pct_chg': r.avg_pct_chg,
-                'max_pct_chg': r.max_pct_chg,
-                'min_pct_chg': r.min_pct_chg,
-                'strong_count': r.strong_count,
             }
             for r in rows
         ],

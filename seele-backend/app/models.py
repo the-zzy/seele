@@ -223,29 +223,6 @@ class MarketSentimentDaily(Base):
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
 
 
-class IndustrySentimentDaily(Base):
-    """每日板块情绪统计表"""
-    __tablename__ = 'industry_sentiment_daily'
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    trade_date = Column(Date, nullable=False, index=True, comment='交易日期')
-    industry = Column(String(50), nullable=False, comment='行业名称')
-    stock_count = Column(Integer, nullable=False, default=0, comment='板块内股票总数')
-    up_count = Column(Integer, default=0, comment='上涨家数')
-    down_count = Column(Integer, default=0, comment='下跌家数')
-    flat_count = Column(Integer, default=0, comment='平盘家数')
-    avg_pct_chg = Column(Numeric(18, 4), comment='板块平均涨跌幅')
-    max_pct_chg = Column(Numeric(18, 4), comment='板块最大涨幅')
-    min_pct_chg = Column(Numeric(18, 4), comment='板块最大跌幅')
-    strong_count = Column(Integer, default=0, comment='强势家数（涨幅>=阈值）')
-    amount_sum = Column(Numeric(18, 4), comment='板块总成交额')
-    created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
-    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
-
-    __table_args__ = (
-        UniqueConstraint('trade_date', 'industry', name='uq_industry_sentiment_date_industry'),
-    )
-
 
 class StockFinancialIndicator(Base):
     """股票财务指标表（仅保留最新一期）"""
@@ -351,6 +328,7 @@ class BoardConstituent(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     board_code = Column(String(20), nullable=False, index=True, comment='板块/ETF代码')
     constituent_symbol = Column(String(20), nullable=False, index=True, comment='成分股代码')
+    name = Column(String(100), comment='成分股名称')
     update_date = Column(Date, comment='更新日期')
 
     __table_args__ = (

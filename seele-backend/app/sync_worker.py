@@ -84,17 +84,22 @@ def _fetch_baostock_batch(symbols: list, trade_date: str) -> tuple:
     fields = 'date,code,open,high,low,close,preclose,volume,amount,turn,pctChg'
     date_fmt = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:]}" if len(trade_date) == 8 else trade_date
 
-    lg = bs.login()
-    if lg.error_code != '0':
-        return [], [], [{'symbol': 'ALL', 'reason': f'Baostock login failed: {lg.error_msg}'}]
-
     records = []
     skipped = []
     failed = []
 
     old_timeout = socket.getdefaulttimeout()
     socket.setdefaulttimeout(30)
+
+    def _login():
+        lg = bs.login()
+        return lg.error_code == '0', lg.error_msg
+
     try:
+        ok, msg = _login()
+        if not ok:
+            return [], [], [{'symbol': 'ALL', 'reason': f'Baostock login failed: {msg}'}]
+
         for symbol in symbols:
             if symbol.startswith('6'):
                 prefix = 'sh'
@@ -104,26 +109,48 @@ def _fetch_baostock_batch(symbols: list, trade_date: str) -> tuple:
                 prefix = 'bj'
             code = f'{prefix}.{symbol}'
 
-            try:
-                rs = bs.query_history_k_data_plus(
-                    code, fields,
-                    start_date=date_fmt, end_date=date_fmt,
-                    frequency='d', adjustflag='2'
-                )
-                rows = []
-                count = 0
-                while (rs.error_code == '0') and rs.next():
-                    rows.append(rs.get_row_data())
-                    count += 1
-                    if count >= 10:
+            rows = []
+            rs = None
+            for attempt in range(2):
+                try:
+                    rs = bs.query_history_k_data_plus(
+                        code, fields,
+                        start_date=date_fmt, end_date=date_fmt,
+                        frequency='d', adjustflag='2'
+                    )
+                    rows = []
+                    count = 0
+                    while (rs.error_code == '0') and rs.next():
+                        rows.append(rs.get_row_data())
+                        count += 1
+                        if count >= 10:
+                            break
+                    if rs.error_code == '0':
                         break
-            except socket.timeout:
-                failed.append({'symbol': symbol, 'reason': 'baostock request timeout (30s)'})
-                continue
-            except Exception as e:
-                failed.append({'symbol': symbol, 'reason': str(e)})
-                continue
 
+                    if '用户未登录' in (rs.error_msg or '') and attempt == 0:
+                        try:
+                            bs.logout()
+                        except Exception:
+                            pass
+                        ok, msg = _login()
+                        if not ok:
+                            failed.append({'symbol': symbol, 'reason': f'Baostock relogin failed: {msg}'})
+                            rs = None
+                            break
+                        continue
+                    break
+                except socket.timeout:
+                    failed.append({'symbol': symbol, 'reason': 'baostock request timeout (30s)'})
+                    rs = None
+                    break
+                except Exception as e:
+                    failed.append({'symbol': symbol, 'reason': str(e)})
+                    rs = None
+                    break
+
+            if rs is None:
+                continue
             if rs.error_code != '0':
                 failed.append({'symbol': symbol, 'reason': rs.error_msg})
                 continue

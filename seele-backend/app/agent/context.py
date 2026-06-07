@@ -100,9 +100,6 @@ Seele 是一个中文 A 股数据管理与分析平台，核心模块如下：
 ### market_sentiment_daily — 市场情绪
 - trade_date, total_stocks, up_count, down_count, flat_count, avg_pct_chg, strong_count, strong_percent
 
-### industry_sentiment_daily — 板块情绪
-- trade_date, industry, stock_count, up_count, down_count, avg_pct_chg, max_pct_chg, min_pct_chg, strong_count
-
 ### sync_job_log — 同步任务日志
 - job_type, trigger_type, status, started_at, ended_at, success_count, failed_count
 
@@ -113,7 +110,7 @@ Seele 是一个中文 A 股数据管理与分析平台，核心模块如下：
 - 写操作（录入交易、修改持仓等）需要用户明确授权。
 - 回答应简洁专业，数据分析要给出明确的结论和建议。
 - 当查询结果为空时，明确告知用户未找到数据。
-- **工具选择**：用户询问"市场情绪"时应调用 query_market_sentiment；询问"板块情绪"时应调用 query_industry_sentiment；询问"某只股票"时才调用 query_stock_daily / query_stock_indicator。
+- **工具选择**：用户询问"市场情绪"时应调用 query_market_sentiment；询问"某只股票"时才调用 query_stock_daily / query_stock_indicator。
 - **单次调用限制**：每次请求最多同时调用 10 个工具。分析多只股票时优先批量查询，避免逐只分别调用导致超限。
 - **主升浪选股默认参数**：用户未指定参数时，必须按流通市值≥200亿、股价≤300元、10日换手≥2%、10日成交额≥2亿、均线多头=true、最近交易日来筛选。不要返回全市场普涨列表。
 """

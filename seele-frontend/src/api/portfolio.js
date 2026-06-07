@@ -24,6 +24,24 @@ export const portfolioApi = {
   },
 
   /**
+   * 录入做T交易记录
+   * @param {Object} data
+   * @param {string} data.symbol - 股票代码
+   * @param {string} data.name - 股票名称
+   * @param {string} data.trade_date - 交易日期 YYYY-MM-DD
+   * @param {number} data.buy_price - 买入价格
+   * @param {number} data.sell_price - 卖出价格
+   * @param {number} data.quantity - 成交股数
+   */
+  createDayTrade (data) {
+    return request({
+      url: '/portfolio/day-trades',
+      method: 'post',
+      data
+    })
+  },
+
+  /**
    * 查询交易记录列表
    * @param {Object} params
    */
