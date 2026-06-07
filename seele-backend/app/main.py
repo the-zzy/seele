@@ -3,6 +3,7 @@ Seele 股票数据管理后端 - 主应用入口
 """
 
 import asyncio
+import decimal
 from contextlib import asynccontextmanager
 
 from apscheduler.triggers.cron import CronTrigger
@@ -116,8 +117,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Seele 股票数据管理API",
     description="基于FastAPI的股票数据管理后端服务",
-    version="1.0.0",
+    version="2.1.0",
     lifespan=lifespan,
+    json_encoders={
+        decimal.Decimal: float,
+    },
 )
 
 # 全局异常处理器
