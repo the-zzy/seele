@@ -16,14 +16,14 @@ const queryDate = ref('')
 const TABS = [
   { key: 'industry', label: '行业板块', category: 'industry', count: 0 },
   { key: 'concept', label: '概念板块', category: 'concept', count: 0 },
-  { key: 'etf', label: 'ETF', category: 'etf', count: 0 },
+  { key: 'etf', label: 'ETF', category: 'etf', count: 0 }
 ]
 
 // 各标签页数据
 const tabData = ref({
   industry: { list: [], total: 0, pageNum: 1, pageSize: 10 },
   concept: { list: [], total: 0, pageNum: 1, pageSize: 10 },
-  etf: { list: [], total: 0, pageNum: 1, pageSize: 10 },
+  etf: { list: [], total: 0, pageNum: 1, pageSize: 10 }
 })
 const keyword = ref('')
 
@@ -76,7 +76,7 @@ async function loadTabData (tabKey) {
     const params = {
       page_num: tab.pageNum,
       page_size: tab.pageSize,
-      category: tabKey,
+      category: tabKey
     }
     if (keyword.value.trim()) {
       params.keyword = keyword.value.trim()
