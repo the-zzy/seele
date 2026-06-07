@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { toast } from '@/composables/useToast'
-import { syncApi } from '@/api/stock'
+import { syncApi, tradeCalendarApi } from '@/api/stock'
 import { useSyncTask } from '@/composables/useSyncTask'
 import PageHero from '@/components/common/PageHero.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
@@ -18,12 +18,24 @@ const pipeline = ref(null)
 const pipelinePollTimer = ref(null)
 const pipelineLoading = ref(false)
 
-const todayStr = new Date().toISOString().slice(0, 10)
 const pipelineDateMap = ref({
-  daily: todayStr,
-  full: todayStr,
-  board: todayStr
+  daily: '',
+  full: '',
+  board: ''
 })
+
+async function loadLatestTradeDate () {
+  try {
+    const date = await tradeCalendarApi.getLatest()
+    if (date) {
+      pipelineDateMap.value.daily = date
+      pipelineDateMap.value.full = date
+      pipelineDateMap.value.board = date
+    }
+  } catch (_) {
+    // 静默失败，用户可手动输入日期
+  }
+}
 
 const chainDefinitions = {
   daily: {
@@ -172,6 +184,7 @@ function formatNumber (n) {
 }
 
 onMounted(async () => {
+  await loadLatestTradeDate()
   await loadDetailedStatus()
 
   // 恢复正在运行的同步任务跟踪
@@ -283,46 +296,113 @@ onUnmounted(() => {
       </div>
 
       <div class="top-section">
-        <div class="stock-basic-card" v-if="detailedStatus">
-          <div class="stock-basic-header">
-            <h3 class="card-title">股票基础信息</h3>
-          </div>
-          <div class="stock-basic-total">
-            <span class="total-value">{{ formatNumber(detailedStatus.stock_basic.total) }}</span>
-            <span class="total-label">只股票</span>
-          </div>
-          <div class="stock-basic-meta">
-            <span class="meta-item">
-              <span class="meta-dot valid"></span>
-              有效 {{ formatNumber(detailedStatus.stock_basic.valid_count) }}
-            </span>
-            <span class="meta-item">
-              <span class="meta-dot st"></span>
-              ST {{ formatNumber(detailedStatus.stock_basic.st_count) }}
-            </span>
-            <span class="meta-item">
-              <span class="meta-dot delisted"></span>
-              退市 {{ formatNumber(detailedStatus.stock_basic.delisted_count) }}
-            </span>
-          </div>
-          <div class="market-list">
-            <div
-              v-for="(count, market) in detailedStatus.stock_basic.market_distribution"
-              :key="market"
-              class="market-row"
-            >
-              <span class="market-name">{{ market }}</span>
-              <span class="market-bar-wrap">
-                <span
-                  class="market-bar"
-                  :style="{ width: `${(count / detailedStatus.stock_basic.total) * 100}%` }"
-                />
+        <div class="left-cards">
+          <div class="stock-basic-card" v-if="detailedStatus">
+            <div class="stock-basic-header">
+              <h3 class="card-title">股票基础信息</h3>
+            </div>
+            <div class="stock-basic-total">
+              <span class="total-value">{{ formatNumber(detailedStatus.stock_basic.total) }}</span>
+              <span class="total-label">只股票</span>
+            </div>
+            <div class="stock-basic-meta">
+              <span class="meta-item">
+                <span class="meta-dot valid"></span>
+                有效 {{ formatNumber(detailedStatus.stock_basic.valid_count) }}
               </span>
-              <span class="market-count">{{ formatNumber(count) }}</span>
+              <span class="meta-item">
+                <span class="meta-dot st"></span>
+                ST {{ formatNumber(detailedStatus.stock_basic.st_count) }}
+              </span>
+              <span class="meta-item">
+                <span class="meta-dot delisted"></span>
+                退市 {{ formatNumber(detailedStatus.stock_basic.delisted_count) }}
+              </span>
+            </div>
+            <div class="market-list">
+              <div
+                v-for="(count, market) in detailedStatus.stock_basic.market_distribution"
+                :key="market"
+                class="market-row"
+              >
+                <span class="market-name">{{ market }}</span>
+                <span class="market-bar-wrap">
+                  <span
+                    class="market-bar"
+                    :style="{ width: `${(count / detailedStatus.stock_basic.total) * 100}%` }"
+                  />
+                </span>
+                <span class="market-count">{{ formatNumber(count) }}</span>
+              </div>
+            </div>
+            <div class="last-sync">
+              最近同步: {{ formatTime(detailedStatus.stock_basic.last_sync) }}
             </div>
           </div>
-          <div class="last-sync">
-            最近同步: {{ formatTime(detailedStatus.stock_basic.last_sync) }}
+
+          <div class="stock-basic-card" v-if="detailedStatus?.board">
+            <div class="stock-basic-header">
+              <h3 class="card-title">板块/ETF</h3>
+            </div>
+            <div class="stock-basic-total">
+              <span class="total-value">{{ formatNumber(detailedStatus.board.total) }}</span>
+              <span class="total-label">个板块/ETF</span>
+            </div>
+            <div class="stock-basic-meta">
+              <span class="meta-item">
+                <span class="meta-dot valid"></span>
+                行业 {{ formatNumber(detailedStatus.board.industry_count) }}
+              </span>
+              <span class="meta-item">
+                <span class="meta-dot concept"></span>
+                概念 {{ formatNumber(detailedStatus.board.concept_count) }}
+              </span>
+              <span class="meta-item">
+                <span class="meta-dot etf"></span>
+                ETF {{ formatNumber(detailedStatus.board.etf_count) }}
+              </span>
+            </div>
+            <div class="market-list">
+              <div class="market-row">
+                <span class="market-name">行业</span>
+                <span class="market-bar-wrap">
+                  <span
+                    class="market-bar"
+                    :style="{ width: `${(detailedStatus.board.industry_count / detailedStatus.board.total) * 100}%` }"
+                  />
+                </span>
+                <span class="market-count">{{ formatNumber(detailedStatus.board.industry_count) }}</span>
+              </div>
+              <div class="market-row">
+                <span class="market-name">概念</span>
+                <span class="market-bar-wrap">
+                  <span
+                    class="market-bar"
+                    :style="{ width: `${(detailedStatus.board.concept_count / detailedStatus.board.total) * 100}%` }"
+                  />
+                </span>
+                <span class="market-count">{{ formatNumber(detailedStatus.board.concept_count) }}</span>
+              </div>
+              <div class="market-row">
+                <span class="market-name">ETF</span>
+                <span class="market-bar-wrap">
+                  <span
+                    class="market-bar"
+                    :style="{ width: `${(detailedStatus.board.etf_count / detailedStatus.board.total) * 100}%` }"
+                  />
+                </span>
+                <span class="market-count">{{ formatNumber(detailedStatus.board.etf_count) }}</span>
+              </div>
+            </div>
+            <div class="last-sync">
+              最近同步: {{ formatTime(detailedStatus.board.last_sync) }}
+              <span v-if="detailedStatus.board.latest_daily_date" class="last-sync-extra">
+                · 日线至 {{ detailedStatus.board.latest_daily_date }}
+              </span>
+            </div>
+            <div class="last-sync-extra-row">
+              成分股 {{ formatNumber(detailedStatus.board.constituent_count) }} 条
+            </div>
           </div>
         </div>
 
@@ -412,64 +492,6 @@ onUnmounted(() => {
           />
         </div>
       </div>
-
-      <!-- 板块/ETF 同步状态 -->
-      <div class="board-section" v-if="detailedStatus?.board">
-        <h3 class="section-title">板块/ETF 同步状态</h3>
-        <div class="board-cards">
-          <div class="board-card">
-            <div class="board-card-header">
-              <span class="board-card-title">板块/ETF 列表</span>
-            </div>
-            <div class="board-card-body">
-              <div class="board-metrics">
-                <div class="metric-box">
-                  <span class="metric-value">{{ formatNumber(detailedStatus.board.total) }}</span>
-                  <span class="metric-label">合计</span>
-                </div>
-                <div class="metric-box">
-                  <span class="metric-value">{{ formatNumber(detailedStatus.board.industry_count) }}</span>
-                  <span class="metric-label">行业</span>
-                </div>
-                <div class="metric-box">
-                  <span class="metric-value">{{ formatNumber(detailedStatus.board.concept_count) }}</span>
-                  <span class="metric-label">概念</span>
-                </div>
-                <div class="metric-box">
-                  <span class="metric-value">{{ formatNumber(detailedStatus.board.etf_count) }}</span>
-                  <span class="metric-label">ETF</span>
-                </div>
-              </div>
-            </div>
-            <div class="board-card-footer">
-              <span class="last-sync-item">最近同步: {{ formatTime(detailedStatus.board.last_sync) }}</span>
-            </div>
-          </div>
-
-          <div class="board-card">
-            <div class="board-card-header">
-              <span class="board-card-title">日线数据</span>
-            </div>
-            <div class="board-card-body">
-              <div class="board-metrics">
-                <div class="metric-box">
-                  <span class="metric-value highlight">{{ formatNumber(detailedStatus.board.constituent_count) }}</span>
-                  <span class="metric-label">成分股记录</span>
-                </div>
-                <div class="metric-box">
-                  <span class="metric-value" :class="detailedStatus.board.latest_daily_date ? '' : 'muted'">
-                    {{ detailedStatus.board.latest_daily_date || '-' }}
-                  </span>
-                  <span class="metric-label">最新数据日</span>
-                </div>
-              </div>
-            </div>
-            <div class="board-card-footer">
-              <span class="last-sync-item">日线同步: {{ formatTime(detailedStatus.board.last_daily_sync) }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 </template>
@@ -499,9 +521,16 @@ onUnmounted(() => {
 
 .top-section {
   display: grid;
-  grid-template-columns: minmax(260px, 25%) 1fr;
+  grid-template-columns: minmax(280px, 30%) 1fr;
   gap: 20px;
   min-height: 0;
+}
+
+.left-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
 }
 
 .stock-basic-card {
@@ -579,6 +608,14 @@ onUnmounted(() => {
       &.delisted {
         background: var(--up);
       }
+
+      &.concept {
+        background: var(--accent);
+      }
+
+      &.etf {
+        background: #9b59b6;
+      }
     }
   }
 
@@ -628,6 +665,18 @@ onUnmounted(() => {
     font-family: var(--font-mono);
     padding-top: 8px;
     border-top: 1px solid var(--rule);
+  }
+
+  .last-sync-extra {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .last-sync-extra-row {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    padding-top: 4px;
   }
 }
 
@@ -740,7 +789,6 @@ onUnmounted(() => {
     cursor: not-allowed;
   }
 }
-
 
 @media (max-width: 1200px) {
   .top-section {
@@ -1187,104 +1235,4 @@ onUnmounted(() => {
   }
 }
 
-/* Board/ETF 同步状态 */
-.board-section {
-  display: flex;
-  flex-direction: column;
-}
-
-.board-cards {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-
-.board-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.board-card-header {
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--rule);
-}
-
-.board-card-title {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-primary);
-}
-
-.board-card-body {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.board-metrics {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-}
-
-.metric-box {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  background: var(--bg-primary);
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  padding: 8px 10px;
-  text-align: center;
-}
-
-.metric-value {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-}
-
-.metric-value.highlight {
-  color: var(--accent);
-}
-
-.metric-value.muted {
-  color: var(--text-muted);
-}
-
-.metric-label {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.board-card-footer {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  padding-top: 8px;
-  border-top: 1px solid var(--rule);
-}
-
-.last-sync-item {
-  display: block;
-}
-
-@media (max-width: 900px) {
-  .board-cards {
-    grid-template-columns: 1fr;
-  }
-
-  .board-metrics {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
 </style>
