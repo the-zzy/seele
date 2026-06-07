@@ -641,7 +641,7 @@ def update_trade(
         ]
         sell_qty = update_data.get('quantity', trade.quantity)
         fifo_cost = _calc_new_sell_comprehensive_cost(existing_trades, sell_qty)
-        amount = update_data.get('amount', trade.amount)
+        amount = update_data.get('amount', float(trade.amount))
         theoretical_pnl = amount - fifo_cost
         new_fee = round(theoretical_pnl - update_data['realized_pnl'], 4)
         if new_fee < 0:
