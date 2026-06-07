@@ -187,7 +187,7 @@ def _sync_position_snapshot(db: Session, symbol: str) -> Optional[models.Portfol
 
     avg_cost = cost / qty if qty > 0 else 0
     current_price = _get_latest_close(db, symbol)
-    market_value = round(current_price * qty, 4) if current_price else None
+    market_value = round(float(current_price) * qty, 4) if current_price else None
     unrealized_pnl = round(market_value - cost, 4) if market_value else None
     unrealized_pnl_pct = round(unrealized_pnl / cost * 100, 4) if unrealized_pnl and cost > 0 else None
 
@@ -255,7 +255,7 @@ def _sync_all_positions(db: Session) -> None:
 
         avg_cost = cost / qty if qty > 0 else 0
         current_price = price_map.get(symbol)
-        market_value = round(current_price * qty, 4) if current_price else None
+        market_value = round(float(current_price) * qty, 4) if current_price else None
         unrealized_pnl = round(market_value - cost, 4) if market_value else None
         unrealized_pnl_pct = round(unrealized_pnl / cost * 100, 4) if unrealized_pnl and cost > 0 else None
 
@@ -358,7 +358,7 @@ def _rebuild_daily_data(db: Session) -> list[str]:
             close_price = daily_map.get(d)
             if qty > 0 and close_price is None:
                 missing_data.append(f'{symbol}@{d}')
-            market_value = qty * close_price if close_price else 0
+            market_value = qty * float(close_price) if close_price else 0
             unrealized_pnl = market_value - rem_cost if qty > 0 else 0
             symbol_day_details[symbol][d] = {
                 'qty': qty,
@@ -398,7 +398,7 @@ def _rebuild_daily_data(db: Session) -> list[str]:
             det = symbol_day_details[s][d]
             q = det['qty']
             cp = det['close_price']
-            mv = q * cp if q > 0 and cp else 0.0
+            mv = q * float(cp) if q > 0 and cp else 0.0
             today_mv += mv
             today_buy += det['day_buy']
             today_sell += det['day_sell']
@@ -742,6 +742,7 @@ def get_positions(
         data = schemas.PortfolioPositionResponse.model_validate(p).model_dump()
         latest_price = price_map.get(p.symbol)
         if latest_price is not None:
+            latest_price = float(latest_price)
             data['current_price'] = round(latest_price, 4)
             data['market_value'] = round(latest_price * int(p.quantity), 4)
             data['unrealized_pnl'] = round(data['market_value'] - float(p.avg_cost) * int(p.quantity), 4)
@@ -806,8 +807,8 @@ def get_alerts(db: Session = Depends(get_db)):
 
     result = []
     for p in alerts:
-        live_price = price_map.get(p.symbol) or p.current_price
-        if p.stop_loss_price and live_price <= p.stop_loss_price:
+        live_price = float(price_map.get(p.symbol) or p.current_price)
+        if p.stop_loss_price and live_price <= float(p.stop_loss_price):
             alert_type = 'stop_loss'
             target_price = p.stop_loss_price
         else:
@@ -883,7 +884,7 @@ def get_summary(db: Session = Depends(get_db)):
     total_unrealized = 0.0
     for p in positions:
         latest_price = price_map.get(p.symbol)
-        mv = latest_price * int(p.quantity) if latest_price else float(p.market_value or 0)
+        mv = float(latest_price) * int(p.quantity) if latest_price else float(p.market_value or 0)
         total_market_value += mv
 
         symbol_trades = trades_by_symbol.get(p.symbol, [])
@@ -953,7 +954,7 @@ def get_distribution(db: Session = Depends(get_db)):
     position_mvs = []
     for p in positions:
         latest_price = price_map.get(p.symbol)
-        mv = latest_price * int(p.quantity) if latest_price else float(p.market_value or 0)
+        mv = float(latest_price) * int(p.quantity) if latest_price else float(p.market_value or 0)
         total_market_value += mv
         position_mvs.append((p, mv))
     unrealized_pnl = total_market_value - total_invested
