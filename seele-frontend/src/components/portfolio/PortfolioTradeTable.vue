@@ -17,8 +17,17 @@ function onEdit (item) {
   emit('edit', item)
 }
 
+function isDayTrade (item) {
+  return item.remark && item.remark.includes('[做T]')
+}
+
+function typeLabel (item) {
+  if (isDayTrade(item)) return '做T'
+  return item.trade_type === 'BUY' ? '买入' : '卖出'
+}
+
 function onDelete (item) {
-  if (confirm(`确定删除该笔 ${item.trade_type === 'BUY' ? '买入' : '卖出'} 记录？`)) {
+  if (confirm(`确定删除该笔 ${typeLabel(item)} 记录？`)) {
     emit('delete', item.id)
   }
 }
@@ -55,8 +64,11 @@ function onDelete (item) {
           <tr v-for="item in list" :key="item.id">
             <td class="mono">{{ item.trade_date }}</td>
             <td>
-              <span class="tag" :class="item.trade_type.toLowerCase()">
-                {{ item.trade_type === 'BUY' ? '买入' : '卖出' }}
+              <span
+                class="tag"
+                :class="isDayTrade(item) ? 'daytrade' : item.trade_type.toLowerCase()"
+              >
+                {{ typeLabel(item) }}
               </span>
             </td>
             <td class="mono">{{ item.symbol }}</td>

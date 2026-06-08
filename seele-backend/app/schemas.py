@@ -111,6 +111,24 @@ class MainwavePickerQuery(StockBasicQuery):
     ma_bull: Optional[bool] = Field(None, description="均线多头排列")
 
 
+class MainwaveDetectQuery(BaseModel):
+    """主升浪阶段检测-单只股票"""
+    symbol: str = Field(..., description="股票代码")
+    min_gain_pct: float = Field(default=180.0, description="最小涨幅阈值(%)")
+    window_days: int = Field(default=30, description="窗口交易日数")
+    start_date: Optional[str] = Field(None, description="查询起始日期 YYYY-MM-DD")
+    end_date: Optional[str] = Field(None, description="查询结束日期 YYYY-MM-DD")
+
+
+class MainwaveBatchDetectQuery(BaseModel):
+    """主升浪阶段检测-批量"""
+    symbols: List[str] = Field(..., description="股票代码列表")
+    min_gain_pct: float = Field(default=180.0, description="最小涨幅阈值(%)")
+    window_days: int = Field(default=30, description="窗口交易日数")
+    start_date: Optional[str] = Field(None, description="查询起始日期 YYYY-MM-DD")
+    end_date: Optional[str] = Field(None, description="查询结束日期 YYYY-MM-DD")
+
+
 # ==================== 股票停牌信息 ====================
 
 
@@ -301,10 +319,6 @@ class DailySentimentQuery(BaseModel):
     end_date: str = Field(..., description='结束日期')
 
 
-class IndustrySentimentQuery(BaseModel):
-    """板块情绪查询参数"""
-    trade_date: str = Field(..., description='交易日期')
-
 
 # ==================== 数据同步 ====================
 
@@ -425,6 +439,25 @@ class PortfolioTradeCreate(BaseModel):
         if price is not None and quantity is not None:
             return round(price * quantity, 4)
         return v
+
+
+class PortfolioDayTradeCreate(BaseModel):
+    """做T交易记录-创建"""
+    symbol: str = Field(..., description='股票代码')
+    name: str = Field(..., description='股票名称')
+    trade_date: str = Field(..., description='交易日期')
+    buy_price: float = Field(..., description='买入价格')
+    sell_price: float = Field(..., description='卖出价格')
+    quantity: int = Field(..., description='成交股数')
+
+    @field_validator('trade_date', mode='before')
+    @classmethod
+    def validate_trade_date(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d')
+        return str(v)
 
 
 class PortfolioTradeResponse(BaseModel):
@@ -851,12 +884,23 @@ class BoardInfoQuery(BaseModel):
     page_size: int = Field(default=50, ge=1, le=500, description='每页条数')
     category: Optional[str] = Field(None, description='类型过滤: industry/concept/etf')
     keyword: Optional[str] = Field(None, description='名称模糊搜索')
+    trade_date: Optional[str] = Field(None, description='指定交易日 YYYY-MM-DD，不传则取最新')
+
+
+class BoardDailyQuery(BaseModel):
+    """板块日线-分页查询"""
+    code: str = Field(..., description='板块/ETF代码')
+    page_num: int = Field(default=1, ge=1, description='页码')
+    page_size: int = Field(default=50, ge=1, le=500, description='每页条数')
+    start_date: Optional[str] = Field(None, description='开始日期 YYYY-MM-DD')
+    end_date: Optional[str] = Field(None, description='结束日期 YYYY-MM-DD')
 
 
 class BoardConstituentCreate(BaseModel):
     """板块成分股-创建"""
     board_code: str = Field(..., description='板块/ETF代码')
     constituent_symbol: str = Field(..., description='成分股代码')
+    name: Optional[str] = Field(None, description='成分股名称')
     update_date: Optional[date] = Field(None, description='更新日期')
 
 

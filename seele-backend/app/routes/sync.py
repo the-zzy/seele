@@ -439,7 +439,8 @@ def _sync_daily_bulk(trade_date: str, source: str = 'akshare', task_id: str | No
                 "summary": "无需要同步的股票",
             }
 
-        # 使用多进程并行拉取数据，绕过 akshare py_mini_racer 锁和 baostock 全局连接限制
+        # 使用多进程并行拉取数据，绕过 akshare py_mini_racer 锁。
+        # Baostock 登录态不支持多进程并发，必须单连接串行，否则容易出现“用户未登录”。
         # Windows spawn 模式下进程启动开销极大，workers 不宜过多
         cpu_count = os.cpu_count() or 4
         workers = min(cpu_count, 6)
@@ -449,48 +450,127 @@ def _sync_daily_bulk(trade_date: str, source: str = 'akshare', task_id: str | No
             workers = min(cpu_count, 4)
 
         symbol_list = [s.symbol for s in all_stocks]
-        # 固定 chunk 大小，让进度更新更频繁，避免长时间卡在 0%
-        chunk_size = 100
+        # 固定 chunk 大小，让进度更新更频繁；小批次也能降低单个卡死请求的影响面
+        chunk_size = 50
         chunks = [symbol_list[i:i + chunk_size] for i in range(0, len(symbol_list), chunk_size)]
         workers = min(workers, len(chunks))
+        chunk_timeout = 180
 
-        with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as executor:
-            if source == 'akshare':
-                futures = [
-                    executor.submit(_fetch_akshare_batch, chunk, trade_date, preclose_map)
-                    for chunk in chunks
-                ]
-            else:
-                futures = [
-                    executor.submit(_fetch_baostock_batch, chunk, trade_date)
-                    for chunk in chunks
-                ]
+        def _consume_batch(records, skipped, failed):
+            with _lock:
+                _results.extend(records)
+                _skipped.extend(skipped)
+                _failed.extend(failed)
+                _counter[0] += len(records) + len(skipped) + len(failed)
 
-            for future in concurrent.futures.as_completed(futures):
+                if len(_results) >= 1500:
+                    _flush_results()
+
+                _push_progress(_counter[0], "running", {
+                    "symbol": "",
+                    "success": _upserted_total[0] + len(_results),
+                    "skipped": len(_skipped),
+                    "failed": len(_failed)
+                })
+
+        if source == 'baostock':
+            for chunk in chunks:
                 try:
-                    records, skipped, failed = future.result(timeout=1800)
-                except concurrent.futures.TimeoutError:
-                    logger.error('[SYNC_DAILY_BULK] 子进程批次处理超时(1800s)')
-                    continue
+                    records, skipped, failed = _fetch_baostock_batch(chunk, trade_date)
                 except Exception as exc:
-                    logger.error('[SYNC_DAILY_BULK] 子进程批次异常: %s', exc)
-                    continue
+                    logger.error(
+                        '[SYNC_DAILY_BULK] Baostock 串行批次异常，股票 %s~%s，数量 %s，错误: %s',
+                        chunk[0], chunk[-1], len(chunk), exc
+                    )
+                    records = []
+                    skipped = []
+                    failed = [
+                        {"symbol": symbol, "reason": f"baostock batch exception: {exc}"}
+                        for symbol in chunk
+                    ]
+                _consume_batch(records, skipped, failed)
+        else:
+            executor = concurrent.futures.ProcessPoolExecutor(max_workers=workers)
+            try:
+                future_meta = {}
+                next_chunk_idx = 0
 
-                with _lock:
-                    _results.extend(records)
-                    _skipped.extend(skipped)
-                    _failed.extend(failed)
-                    _counter[0] += len(records) + len(skipped) + len(failed)
+                def _submit_next_chunk():
+                    nonlocal next_chunk_idx
+                    if next_chunk_idx >= len(chunks):
+                        return None
+                    chunk = chunks[next_chunk_idx]
+                    next_chunk_idx += 1
+                    future = executor.submit(_fetch_akshare_batch, chunk, trade_date, preclose_map)
+                    future_meta[future] = {
+                        "symbols": chunk,
+                        "started_at": time.monotonic(),
+                    }
+                    return future
 
-                    if len(_results) >= 1500:
-                        _flush_results()
+                pending = set()
+                for _ in range(workers):
+                    future = _submit_next_chunk()
+                    if future is not None:
+                        pending.add(future)
 
-                    _push_progress(_counter[0], "running", {
-                        "symbol": "",
-                        "success": len(_results),
-                        "skipped": len(_skipped),
-                        "failed": len(_failed)
-                    })
+                while pending:
+                    done, pending = concurrent.futures.wait(
+                        pending,
+                        timeout=5,
+                        return_when=concurrent.futures.FIRST_COMPLETED,
+                    )
+
+                    for future in done:
+                        meta = future_meta[future]
+                        try:
+                            records, skipped, failed = future.result()
+                        except Exception as exc:
+                            symbols = meta["symbols"]
+                            logger.error(
+                                '[SYNC_DAILY_BULK] 子进程批次异常，股票 %s~%s，数量 %s，错误: %s',
+                                symbols[0], symbols[-1], len(symbols), exc
+                            )
+                            failed = [
+                                {"symbol": symbol, "reason": f"batch exception: {exc}"}
+                                for symbol in symbols
+                            ]
+                            _consume_batch([], [], failed)
+                            next_future = _submit_next_chunk()
+                            if next_future is not None:
+                                pending.add(next_future)
+                            continue
+
+                        _consume_batch(records, skipped, failed)
+                        next_future = _submit_next_chunk()
+                        if next_future is not None:
+                            pending.add(next_future)
+
+                    now = time.monotonic()
+                    timed_out = [
+                        future for future in pending
+                        if now - future_meta[future]["started_at"] > chunk_timeout
+                    ]
+                    for future in timed_out:
+                        pending.remove(future)
+                        meta = future_meta[future]
+                        symbols = meta["symbols"]
+                        cancelled = future.cancel()
+                        logger.error(
+                            '[SYNC_DAILY_BULK] 子进程批次超时(%ss)，股票 %s~%s，数量 %s，cancelled=%s',
+                            chunk_timeout, symbols[0], symbols[-1], len(symbols), cancelled
+                        )
+                        failed = [
+                            {"symbol": symbol, "reason": f"batch timeout ({chunk_timeout}s)"}
+                            for symbol in symbols
+                        ]
+                        _consume_batch([], [], failed)
+                        next_future = _submit_next_chunk()
+                        if next_future is not None:
+                            pending.add(next_future)
+            finally:
+                # Do not block forever on a child process that already timed out at chunk level.
+                executor.shutdown(wait=False, cancel_futures=True)
     finally:
         pass
 
@@ -498,6 +578,9 @@ def _sync_daily_bulk(trade_date: str, source: str = 'akshare', task_id: str | No
         _flush_results()
 
     _write_failed_log(trade_date, _skipped, _failed)
+
+    if task_id:
+        _update_task_progress(task_id, _total_stocks, _total_stocks)
 
     with _lock:
         return {
@@ -517,27 +600,17 @@ def _sync_daily_bulk(trade_date: str, source: str = 'akshare', task_id: str | No
 
 
 def _run_sync_bg(task_id: str, trade_date: str, log_id: int, only_missing: bool = False) -> None:
-    """后台执行同步任务（优先 baostock，失败 fallback 到 akshare）"""
+    """后台执行同步任务（仅使用 baostock）"""
     db = SessionLocal()
     try:
         source = 'baostock'
         if not _test_baostock():
-            logger.warning('[SYNC_BG] Baostock 探测不可用，自动切换 AkShare')
-            source = 'akshare'
+            raise RuntimeError('Baostock 探测不可用，已按配置禁止回退 AkShare')
         result = _sync_daily_bulk(trade_date, source=source, task_id=task_id, only_missing=only_missing)
         upserted = result.get('upserted', 0)
         failed = result.get('failed', 0)
         skipped = result.get('skipped', 0)
         total = result.get('total_stocks', 0)
-
-        # baostock 全部失败 fallback 到 akshare
-        if source == 'baostock' and upserted == 0 and failed > 0:
-            logger.warning('[SYNC_BG] Baostock 同步全部失败，自动切换 AkShare 重试')
-            result = _sync_daily_bulk(trade_date, source='akshare', task_id=task_id, only_missing=only_missing)
-            upserted = result.get('upserted', 0)
-            failed = result.get('failed', 0)
-            skipped = result.get('skipped', 0)
-            total = result.get('total_stocks', 0)
 
         # 如果全部失败且没有任何写入或跳过，标记为 failed
         status = 'failed' if (upserted == 0 and skipped == 0 and failed > 0) else 'success'
@@ -545,10 +618,9 @@ def _run_sync_bg(task_id: str, trade_date: str, log_id: int, only_missing: bool 
         # 日线同步成功后自动预计算市场情绪
         if status == 'success':
             try:
-                from app.routes.market_sentiment import _persist_market_sentiment, _persist_industry_sentiment
+                from app.routes.market_sentiment import _persist_market_sentiment
                 trade_date_obj = datetime.strptime(trade_date, '%Y%m%d').date()
                 _persist_market_sentiment(db, trade_date_obj)
-                _persist_industry_sentiment(db, trade_date_obj)
                 logger.info('[SYNC_DAILY_BG] 市场情绪预计算完成: %s', trade_date)
             except Exception as exc:
                 logger.warning('[SYNC_DAILY_BG] 市场情绪预计算失败: %s', exc)
@@ -602,7 +674,7 @@ def post_sync_daily_by_date(
 ):
     """
     按日期同步全部A股日线数据（后台异步版）
-    - 优先从 AkShare 新浪源获取，失败回退 Baostock
+    - 仅使用 Baostock 获取日线数据
     - 更新到数据库（存在则更新，不存在则插入）
     """
     formatted_date = trade_date.replace("-", "")
@@ -1295,15 +1367,24 @@ def post_sync_financial(
 def get_sync_job_logs(
     days: int = Query(5, description="最近N天"),
     job_type: Optional[str] = Query(None, description="任务类型过滤"),
+    page_num: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(10, ge=1, le=100, description="每页条数"),
     db: Session = Depends(get_db),
 ):
     """查询同步任务执行日志（自动清理超时任务）"""
     _cleanup_db_timeout_tasks(db)
-    query = schemas.SyncJobLogQuery(page_num=1, page_size=1000, days=days, job_type=job_type)
+    query = schemas.SyncJobLogQuery(
+        page_num=page_num,
+        page_size=page_size,
+        days=days,
+        job_type=job_type,
+    )
     list_data, total = crud.sync_job_log_crud.get_list(db, query)
     return success({
         "list": list_data,
         "total": total,
+        "page_num": page_num,
+        "page_size": page_size,
     })
 
 
@@ -1528,7 +1609,11 @@ def post_sync_indicator(
 
 # 3.10 查询详细同步状态
 @router.get("/detailed-status")
-def get_detailed_status(db: Session = Depends(get_db)):
+def get_detailed_status(
+    daily_page_num: int = Query(1, ge=1, description="交易日状态页码"),
+    daily_page_size: int = Query(5, ge=1, le=30, description="每页交易日数量"),
+    db: Session = Depends(get_db),
+):
     """查询同步任务详细数据库状态"""
     from sqlalchemy import func
 
@@ -1557,8 +1642,16 @@ def get_detailed_status(db: Session = Depends(get_db)):
         .all()
     )
 
-    # 2. 最近5个交易日的日线/指标状态（从交易日历取，避免大表 DISTINCT）
+    # 2. 交易日的日线/指标状态（从交易日历取，避免大表 DISTINCT）
     today = date.today()
+    daily_total = (
+        db.query(func.count(models.TradeCalendar.trade_date))
+        .filter(
+            models.TradeCalendar.is_trading_day == 1,
+            models.TradeCalendar.trade_date <= today,
+        )
+        .scalar()
+    ) or 0
     trade_dates = (
         db.query(models.TradeCalendar.trade_date)
         .filter(
@@ -1566,7 +1659,8 @@ def get_detailed_status(db: Session = Depends(get_db)):
             models.TradeCalendar.trade_date <= today,
         )
         .order_by(models.TradeCalendar.trade_date.desc())
-        .limit(5)
+        .offset((daily_page_num - 1) * daily_page_size)
+        .limit(daily_page_size)
         .all()
     )
     if not trade_dates:
@@ -1706,6 +1800,39 @@ def get_detailed_status(db: Session = Depends(get_db)):
         .all()
     )
 
+    # 4. 板块/ETF统计
+    board_category_counts = (
+        db.query(
+            models.BoardInfo.category,
+            func.count(models.BoardInfo.code),
+        )
+        .group_by(models.BoardInfo.category)
+        .all()
+    )
+    board_counts = {c: n for c, n in board_category_counts}
+    last_board_list_sync = (
+        db.query(models.SyncJobLog.started_at)
+        .filter(models.SyncJobLog.job_type == 'board_list')
+        .order_by(models.SyncJobLog.started_at.desc())
+        .first()
+    )
+    last_board_daily_sync = (
+        db.query(models.SyncJobLog.started_at)
+        .filter(models.SyncJobLog.job_type == 'board_daily')
+        .order_by(models.SyncJobLog.started_at.desc())
+        .first()
+    )
+    # 板块日线最新交易日
+    latest_board_daily = (
+        db.query(func.max(models.BoardDaily.trade_date))
+        .scalar()
+    )
+    # 成分股总数
+    constituent_total = (
+        db.query(func.count(models.BoardConstituent.id))
+        .scalar()
+    ) or 0
+
     return success({
         'stock_basic': {
             'total': total_basic,
@@ -1716,6 +1843,9 @@ def get_detailed_status(db: Session = Depends(get_db)):
             'market_distribution': {m: c for m, c in market_dist},
         },
         'daily': daily_status,
+        'daily_total': daily_total,
+        'daily_page_num': daily_page_num,
+        'daily_page_size': daily_page_size,
         'financial': {
             'total': financial_total,
             'expected': total_basic,
@@ -1725,6 +1855,16 @@ def get_detailed_status(db: Session = Depends(get_db)):
                 {'date': d.isoformat() if d else None, 'count': c}
                 for d, c in report_dist
             ],
+        },
+        'board': {
+            'total': sum(board_counts.values()),
+            'industry_count': board_counts.get('industry', 0),
+            'concept_count': board_counts.get('concept', 0),
+            'etf_count': board_counts.get('etf', 0),
+            'last_sync': last_board_list_sync[0].isoformat() if last_board_list_sync else None,
+            'last_daily_sync': last_board_daily_sync[0].isoformat() if last_board_daily_sync else None,
+            'latest_daily_date': latest_board_daily.isoformat() if latest_board_daily else None,
+            'constituent_count': constituent_total,
         },
     })
 
@@ -1910,8 +2050,8 @@ def _sync_index_constituents(index_symbol: str) -> dict:
 # ==================== 板块/ETF数据同步 ====================
 
 
-def _sync_board_list_ths(db: Session) -> dict:
-    """从同花顺同步行业/概念板块列表"""
+def _sync_board_list_em(db: Session) -> dict:
+    """从东方财富同步行业/概念板块列表"""
     import akshare as ak
 
     records = []
@@ -1920,31 +2060,31 @@ def _sync_board_list_ths(db: Session) -> dict:
 
     try:
         with akshare_lock:
-            df_industry = ak.stock_board_industry_name_ths()
+            df_industry = ak.stock_board_industry_name_em()
         for _, row in df_industry.iterrows():
             records.append(schemas.BoardInfoCreate(
-                code=str(row['code']).strip(),
-                name=str(row['name']).strip(),
+                code=str(row['板块代码']).strip(),
+                name=str(row['板块名称']).strip(),
                 category='industry',
-                source='ths',
+                source='em',
             ))
         industry_count = len(df_industry)
     except Exception as exc:
-        logger.warning('[SYNC_BOARD_LIST] 获取同花顺行业板块失败: %s', exc)
+        logger.warning('[SYNC_BOARD_LIST] 获取东方财富行业板块失败: %s', exc)
 
     try:
         with akshare_lock:
-            df_concept = ak.stock_board_concept_name_ths()
+            df_concept = ak.stock_board_concept_name_em()
         for _, row in df_concept.iterrows():
             records.append(schemas.BoardInfoCreate(
-                code=str(row['code']).strip(),
-                name=str(row['name']).strip(),
+                code=str(row['板块代码']).strip(),
+                name=str(row['板块名称']).strip(),
                 category='concept',
-                source='ths',
+                source='em',
             ))
         concept_count = len(df_concept)
     except Exception as exc:
-        logger.warning('[SYNC_BOARD_LIST] 获取同花顺概念板块失败: %s', exc)
+        logger.warning('[SYNC_BOARD_LIST] 获取东方财富概念板块失败: %s', exc)
 
     result = crud.board_info_crud.upsert_batch(db, records)
     return {
@@ -1992,25 +2132,21 @@ def _sync_etf_list_sina(db: Session) -> dict:
     }
 
 
-def _parse_board_daily_ths(df, board_code: str) -> List[dict]:
-    """解析同花顺板块日线 DataFrame 为记录列表"""
+def _parse_board_daily_em(df, board_code: str) -> List[dict]:
+    """解析东方财富板块日线 DataFrame 为记录列表（自带涨跌幅）"""
     if df is None or df.empty:
         return []
 
     records = []
-    prev_close = None
     for _, row in df.iterrows():
         trade_date = str(row['日期']).strip()
-        close = float(row['收盘价']) if pd.notna(row['收盘价']) else None
-        open_price = float(row['开盘价']) if pd.notna(row['开盘价']) else None
-        high = float(row['最高价']) if pd.notna(row['最高价']) else None
-        low = float(row['最低价']) if pd.notna(row['最低价']) else None
+        close = float(row['收盘']) if pd.notna(row['收盘']) else None
+        open_price = float(row['开盘']) if pd.notna(row['开盘']) else None
+        high = float(row['最高']) if pd.notna(row['最高']) else None
+        low = float(row['最低']) if pd.notna(row['最低']) else None
         volume = float(row['成交量']) if pd.notna(row['成交量']) else None
         amount = float(row['成交额']) if pd.notna(row['成交额']) else None
-
-        pct_chg = None
-        if close is not None and prev_close:
-            pct_chg = round((close - prev_close) / prev_close * 100, 4)
+        pct_chg = float(row['涨跌幅']) if pd.notna(row['涨跌幅']) else None
 
         records.append({
             'code': board_code,
@@ -2023,20 +2159,18 @@ def _parse_board_daily_ths(df, board_code: str) -> List[dict]:
             'amount': amount,
             'pct_chg': pct_chg,
         })
-        if close is not None:
-            prev_close = close
 
     return records
 
 
-def _sync_board_daily_ths(
+def _sync_board_daily_em(
     task_id: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
     only_industry: bool = False,
     only_concept: bool = False,
 ) -> dict:
-    """同步板块日线（同花顺源，多线程版）"""
+    """同步板块日线（东方财富源，多线程版）"""
     import akshare as ak
 
     db = SessionLocal()
@@ -2055,6 +2189,9 @@ def _sync_board_daily_ths(
     if not boards:
         return {'total_boards': 0, 'success': 0, 'failed': 0, 'records': 0}
 
+    em_start = start_date or '20000101'
+    em_end = end_date or '20500101'
+
     _counter = [0]
     _success = [0]
     _failed = [0]
@@ -2066,12 +2203,24 @@ def _sync_board_daily_ths(
         try:
             if board.category == 'industry':
                 with akshare_lock:
-                    df = ak.stock_board_industry_index_ths(symbol=board.name)
+                    df = ak.stock_board_industry_hist_em(
+                        symbol=board.code,
+                        start_date=em_start,
+                        end_date=em_end,
+                        period='日k',
+                        adjust='',
+                    )
             else:
                 with akshare_lock:
-                    df = ak.stock_board_concept_index_ths(symbol=board.name)
+                    df = ak.stock_board_concept_hist_em(
+                        symbol=board.code,
+                        period='daily',
+                        start_date=em_start,
+                        end_date=em_end,
+                        adjust='',
+                    )
 
-            records = _parse_board_daily_ths(df, board.code)
+            records = _parse_board_daily_em(df, board.code)
 
             # 日期过滤
             if start_date or end_date:
@@ -2280,10 +2429,12 @@ def _sync_board_constituent_em(task_id: str | None = None) -> dict:
             if df is not None and not df.empty:
                 for _, row in df.iterrows():
                     symbol = str(row.get('代码', '')).strip().zfill(6)
+                    name = str(row.get('名称', '')).strip()
                     if symbol.isdigit():
                         records.append({
                             'board_code': board.code,
                             'constituent_symbol': symbol,
+                            'name': name or None,
                             'update_date': datetime.now().date(),
                         })
         except Exception as exc:
@@ -2326,90 +2477,19 @@ def _sync_board_constituent_em(task_id: str | None = None) -> dict:
             except Exception as exc:
                 logger.error('[SYNC_CONSTITUENT] 处理板块异常: %s', exc)
 
-    # 对行业板块执行兜底：从 stock_basic.industry 聚合
-    industry_fallback = _build_industry_constituents_from_basic()
-
+    # EM 接口自带成分股数据，无需兜底
     return {
         'total_boards': len(boards),
         'success': _success[0],
         'failed': _failed[0],
-        'industry_fallback': industry_fallback,
     }
-
-
-def _build_industry_constituents_from_basic() -> dict:
-    """从 stock_basic.industry 构建行业板块成分股映射（兜底方案）
-
-    注意：stock_basic.industry 是申万行业分类（如 "J 银行业"），
-    而同花顺行业板块名称（如 "银行"）属于不同分类体系，名称不完全一致。
-    这里只做能精确匹配（去掉前缀后）的映射，未匹配上的留待东方财富源同步时补全。
-    """
-    db = SessionLocal()
-    try:
-        stocks = (
-            db.query(models.StockBasic.symbol, models.StockBasic.industry)
-            .filter(models.StockBasic.industry.isnot(None))
-            .all()
-        )
-
-        board_map = {}
-        boards = db.query(models.BoardInfo).filter(models.BoardInfo.category == 'industry').all()
-        for b in boards:
-            board_map[b.name.strip()] = b.code
-
-        records = []
-        for symbol, industry in stocks:
-            raw = industry.strip()
-            clean = raw.split(' ', 1)[-1] if ' ' in raw else raw
-            # 精确匹配 + 结尾匹配（如 "汽车制造业" 匹配 "汽车整车" 不行，
-            # 但 "综合" 可匹配 "综合"）
-            if clean in board_map:
-                records.append({
-                    'board_code': board_map[clean],
-                    'constituent_symbol': symbol,
-                    'update_date': datetime.now().date(),
-                })
-            else:
-                # 尝试后缀匹配：如 "银行业" -> "银行"
-                for bname, bcode in board_map.items():
-                    if bname in clean or clean in bname:
-                        records.append({
-                            'board_code': bcode,
-                            'constituent_symbol': symbol,
-                            'update_date': datetime.now().date(),
-                        })
-                        break
-
-        board_codes = set(r['board_code'] for r in records)
-        for code in board_codes:
-            crud.board_constituent_crud.delete_by_board(db, code)
-
-        batch = []
-        for r in records:
-            batch.append(schemas.BoardConstituentCreate(**r))
-            if len(batch) >= 500:
-                crud.board_constituent_crud.upsert_batch(db, batch)
-                batch = []
-        if batch:
-            crud.board_constituent_crud.upsert_batch(db, batch)
-
-        db.commit()
-        return {
-            'mapped_stocks': len(records),
-            'mapped_boards': len(board_codes),
-        }
-    except Exception as exc:
-        logger.error('[BUILD_INDUSTRY_CONSTITUENTS] 兜底构建失败: %s', exc)
-        return {'mapped_stocks': 0, 'mapped_boards': 0, 'error': str(exc)}
-    finally:
-        db.close()
 
 
 def _run_sync_board_list_bg(task_id: str, log_id: int) -> None:
     """后台执行板块/ETF列表同步"""
     db = SessionLocal()
     try:
-        board_result = _sync_board_list_ths(db)
+        board_result = _sync_board_list_em(db)
         etf_result = _sync_etf_list_sina(db)
         total = board_result.get('total', 0) + etf_result.get('total', 0)
         created = board_result.get('created', 0) + etf_result.get('created', 0)
@@ -2462,7 +2542,7 @@ def _run_sync_board_daily_bg(
     """后台执行板块/ETF日线同步"""
     db = SessionLocal()
     try:
-        board_result = _sync_board_daily_ths(task_id=task_id, start_date=start_date, end_date=end_date)
+        board_result = _sync_board_daily_em(task_id=task_id, start_date=start_date, end_date=end_date)
         etf_result = _sync_etf_daily_em(task_id=task_id, start_date=start_date, end_date=end_date)
         total_records = board_result.get('records', 0) + etf_result.get('records', 0)
         crud.sync_job_log_crud.finish(

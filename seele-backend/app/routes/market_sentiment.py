@@ -6,10 +6,10 @@
 """
 
 from datetime import date
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, func
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import models
@@ -51,49 +51,6 @@ def _compute_market_sentiment(db: Session, trade_date: date, threshold: float = 
     }
 
 
-def _compute_industry_sentiment(db: Session, trade_date: date, threshold: float = 2.0) -> List[dict]:
-    """计算单日板块情绪统计"""
-    rows = (
-        db.query(
-            models.StockBasic.industry,
-            func.count(models.StockDaily.id).label("stock_count"),
-            func.sum(func.if_(models.StockDaily.pct_chg > 0, 1, 0)).label("up"),
-            func.sum(func.if_(models.StockDaily.pct_chg < 0, 1, 0)).label("down"),
-            func.sum(func.if_(models.StockDaily.pct_chg == 0, 1, 0)).label("flat"),
-            func.avg(models.StockDaily.pct_chg).label("avg_pct_chg"),
-            func.max(models.StockDaily.pct_chg).label("max_pct_chg"),
-            func.min(models.StockDaily.pct_chg).label("min_pct_chg"),
-            func.sum(func.if_(models.StockDaily.pct_chg >= threshold, 1, 0)).label("strong"),
-            func.sum(models.StockDaily.amount).label("amount_sum"),
-        )
-        .join(models.StockBasic, models.StockDaily.symbol == models.StockBasic.symbol)
-        .filter(
-            models.StockDaily.trade_date == trade_date,
-            models.StockBasic.industry.isnot(None),
-        )
-        .group_by(models.StockBasic.industry)
-        .order_by(func.avg(models.StockDaily.pct_chg).desc())
-        .all()
-    )
-
-    result = []
-    for row in rows:
-        result.append({
-            "trade_date": str(trade_date),
-            "industry": row.industry,
-            "stock_count": row.stock_count,
-            "up_count": row.up or 0,
-            "down_count": row.down or 0,
-            "flat_count": row.flat or 0,
-            "avg_pct_chg": round(row.avg_pct_chg, 4) if row.avg_pct_chg else 0.0,
-            "max_pct_chg": round(row.max_pct_chg, 4) if row.max_pct_chg else 0.0,
-            "min_pct_chg": round(row.min_pct_chg, 4) if row.min_pct_chg else 0.0,
-            "strong_count": row.strong or 0,
-            "amount_sum": round(row.amount_sum, 2) if row.amount_sum else 0.0,
-        })
-    return result
-
-
 def _persist_market_sentiment(db: Session, trade_date: date, threshold: float = 2.0):
     """计算并持久化单日市场情绪"""
     data = _compute_market_sentiment(db, trade_date, threshold)
@@ -126,30 +83,6 @@ def _persist_market_sentiment(db: Session, trade_date: date, threshold: float = 
     db.commit()
 
 
-def _persist_industry_sentiment(db: Session, trade_date: date, threshold: float = 2.0):
-    """计算并持久化单日板块情绪"""
-    db.query(models.IndustrySentimentDaily).filter(
-        models.IndustrySentimentDaily.trade_date == trade_date
-    ).delete(synchronize_session=False)
-
-    data_list = _compute_industry_sentiment(db, trade_date, threshold)
-    for data in data_list:
-        db.add(models.IndustrySentimentDaily(
-            trade_date=trade_date,
-            industry=data["industry"],
-            stock_count=data["stock_count"],
-            up_count=data["up_count"],
-            down_count=data["down_count"],
-            flat_count=data["flat_count"],
-            avg_pct_chg=data["avg_pct_chg"],
-            max_pct_chg=data["max_pct_chg"],
-            min_pct_chg=data["min_pct_chg"],
-            strong_count=data["strong_count"],
-            amount_sum=data["amount_sum"],
-        ))
-    db.commit()
-
-
 @router.post("/compute")
 def post_compute_sentiment(
     trade_date: str = Query(..., description="交易日期，格式 YYYY-MM-DD"),
@@ -160,7 +93,6 @@ def post_compute_sentiment(
     from datetime import date as _date
     date_obj = _date.fromisoformat(trade_date)
     _persist_market_sentiment(db, date_obj, threshold)
-    _persist_industry_sentiment(db, date_obj, threshold)
     return success({
         "trade_date": trade_date,
         "status": "computed",
@@ -238,44 +170,5 @@ def get_daily_sentiment(
         "threshold": threshold,
         "list": result,
     })
-
-
-@router.get("/industry")
-def get_industry_sentiment(
-    trade_date: str = Query(..., description="交易日期，格式 YYYY-MM-DD"),
-    threshold: float = Query(2.0, description="强势阈值，默认 2.0"),
-    db: Session = Depends(get_db),
-):
-    """查询某日的板块情绪统计"""
-    from datetime import date as _date
-    date_obj = _date.fromisoformat(trade_date)
-
-    rows = (
-        db.query(models.IndustrySentimentDaily)
-        .filter(models.IndustrySentimentDaily.trade_date == date_obj)
-        .order_by(models.IndustrySentimentDaily.avg_pct_chg.desc())
-        .all()
-    )
-
-    if rows:
-        result = []
-        for row in rows:
-            result.append({
-                "trade_date": str(row.trade_date),
-                "industry": row.industry,
-                "stock_count": row.stock_count,
-                "up_count": row.up_count,
-                "down_count": row.down_count,
-                "flat_count": row.flat_count,
-                "avg_pct_chg": float(row.avg_pct_chg) if row.avg_pct_chg else 0.0,
-                "max_pct_chg": float(row.max_pct_chg) if row.max_pct_chg else 0.0,
-                "min_pct_chg": float(row.min_pct_chg) if row.min_pct_chg else 0.0,
-                "strong_count": row.strong_count,
-                "amount_sum": float(row.amount_sum) if row.amount_sum else 0.0,
-            })
-        return success({"trade_date": trade_date, "list": result})
-
-    # 缺失数据不再实时计算（应在同步任务链中预计算）
-    return success({"trade_date": trade_date, "list": []})
 
 

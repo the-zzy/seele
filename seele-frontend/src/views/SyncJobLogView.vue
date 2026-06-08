@@ -1,15 +1,15 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { toast } from '@/composables/useToast'
-import { syncApi } from '@/api/stock'
+import { syncApi, tradeCalendarApi } from '@/api/stock'
 import { useSyncTask } from '@/composables/useSyncTask'
 import PageHero from '@/components/common/PageHero.vue'
+import BasePagination from '@/components/common/BasePagination.vue'
 
-const logs = ref([])
-const loading = ref(false)
-const days = ref(5)
-const jobType = ref('')
 const detailedStatus = ref(null)
+const dailyTotal = ref(0)
+const dailyPageNum = ref(1)
+const dailyPageSize = ref(5)
 const incrementalMap = ref({})
 
 const { syncing, progress: taskProgress, startSync, restoreTasks, clearPoll } = useSyncTask()
@@ -18,12 +18,24 @@ const pipeline = ref(null)
 const pipelinePollTimer = ref(null)
 const pipelineLoading = ref(false)
 
-const todayStr = new Date().toISOString().slice(0, 10)
 const pipelineDateMap = ref({
-  daily: todayStr,
-  full: todayStr,
-  board: todayStr
+  daily: '',
+  full: '',
+  board: ''
 })
+
+async function loadLatestTradeDate () {
+  try {
+    const date = await tradeCalendarApi.getLatest()
+    if (date) {
+      pipelineDateMap.value.daily = date
+      pipelineDateMap.value.full = date
+      pipelineDateMap.value.board = date
+    }
+  } catch (_) {
+    // 静默失败，用户可手动输入日期
+  }
+}
 
 const chainDefinitions = {
   daily: {
@@ -43,13 +55,6 @@ const chainDefinitions = {
   }
 }
 
-const jobTypeMap = {
-  stock_basic: '股票基础信息',
-  daily: '日线数据',
-  financial: '财务指标',
-  indicator: '指标计算'
-}
-
 const statusMap = {
   running: '运行中',
   success: '成功',
@@ -65,7 +70,6 @@ const statusClass = {
 }
 
 const onSyncDone = async () => {
-  await loadLogs()
   await loadDetailedStatus()
 }
 
@@ -100,7 +104,6 @@ function pollPipeline (pipelineId) {
       pipeline.value = data
       if (data?.status === 'success' || data?.status === 'failed') {
         stopPipelinePoll()
-        await loadLogs()
         await loadDetailedStatus()
       }
     } catch (err) {
@@ -124,7 +127,6 @@ async function handleCancelPipeline () {
   try {
     await syncApi.cancelPipeline(pipeline.value.pipeline_id)
     stopPipelinePoll()
-    await loadLogs()
   } catch (error) {
     toast.error('取消失败: ' + (error.response?.data?.detail || error.message))
   }
@@ -144,76 +146,34 @@ async function restorePipeline () {
   }
 }
 
-function handleStockBasicSync () {
-  startSync('stock_basic', syncApi.syncStockBasic, { onDone: onSyncDone })
-}
-
-function handleDailySync (date) {
-  const dateFmt = date.replace(/-/g, '')
-  const key = 'daily_' + dateFmt
-  const onlyMissing = !!incrementalMap.value[date]
-  startSync(key, () => syncApi.syncByDate(dateFmt, onlyMissing), {
-    existingMatcher: t => t.job_type === 'daily' && t.trade_date === dateFmt,
-    onDone: onSyncDone
-  })
-}
-
-function handleIndicatorSync (date) {
-  const dateFmt = date.replace(/-/g, '')
-  const key = 'indicator_' + dateFmt
-  const onlyMissing = !!incrementalMap.value[date]
-  startSync(key, () => syncApi.syncIndicator(date, onlyMissing), {
-    existingMatcher: t => t.job_type === 'indicator' && t.trade_date === date,
-    onDone: onSyncDone
-  })
-}
-
-async function handleCancelJob (logId) {
-  if (!confirm('确定要停止该任务吗？')) return
-  try {
-    await syncApi.cancelJobLog(logId)
-    await loadLogs()
-  } catch (error) {
-    toast.error('停止失败: ' + (error.response?.data?.detail || error.message))
-  }
-}
-
-async function loadLogs () {
-  loading.value = true
-  try {
-    const res = await syncApi.getJobLogs(days.value, jobType.value || null)
-    logs.value = res?.list || []
-  } catch (error) {
-    console.error('加载任务日志失败:', error)
-  } finally {
-    loading.value = false
-  }
-}
-
 async function loadDetailedStatus () {
   try {
-    const res = await syncApi.getDetailedStatus()
+    const res = await syncApi.getDetailedStatus(dailyPageNum.value, dailyPageSize.value)
     detailedStatus.value = res
+    dailyTotal.value = res?.daily_total || 0
   } catch (error) {
     console.error('加载详细同步状态失败:', error)
   }
 }
 
 async function handleRefresh () {
-  loading.value = true
-  await Promise.all([loadLogs(), loadDetailedStatus()])
-  loading.value = false
+  await loadDetailedStatus()
+}
+
+async function handleDailyPageChange (newPage) {
+  dailyPageNum.value = newPage
+  await loadDetailedStatus()
+}
+
+async function handleDailyPageSizeChange (newSize) {
+  dailyPageSize.value = newSize
+  dailyPageNum.value = 1
+  await loadDetailedStatus()
 }
 
 function formatTime (ts) {
   if (!ts) return '-'
   return ts
-}
-
-function formatDuration (s) {
-  if (s === null || s === undefined) return '-'
-  if (s < 60) return `${s}秒`
-  return `${Math.floor(s / 60)}分${s % 60}秒`
 }
 
 function formatNumber (n) {
@@ -223,13 +183,8 @@ function formatNumber (n) {
   return n.toLocaleString()
 }
 
-function formatDate (dateStr) {
-  if (!dateStr) return '-'
-  return dateStr
-}
-
 onMounted(async () => {
-  await loadLogs()
+  await loadLatestTradeDate()
   await loadDetailedStatus()
 
   // 恢复正在运行的同步任务跟踪
@@ -259,31 +214,13 @@ onUnmounted(() => {
       meta="任务日志"
     >
       <template #actions>
-        <div class="filter-bar">
-          <select v-model="jobType" class="filter-select" @change="loadLogs">
-            <option value="">全部类型</option>
-            <option value="stock_basic">股票基础信息</option>
-            <option value="daily">日线数据</option>
-            <option value="financial">财务指标</option>
-            <option value="indicator">指标计算</option>
-          </select>
-          <select v-model="days" class="filter-select" @change="loadLogs">
-            <option :value="3">最近3天</option>
-            <option :value="5">最近5天</option>
-            <option :value="7">最近7天</option>
-            <option :value="30">最近30天</option>
-          </select>
-          <button class="btn-refresh" :disabled="loading" @click="handleRefresh">
-            {{ loading ? '加载中...' : '刷新' }}
-          </button>
-        </div>
+        <button class="btn-refresh" @click="handleRefresh">刷新</button>
       </template>
     </PageHero>
 
     <div class="content-wrap">
       <!-- 一键同步区域 -->
       <div class="pipeline-section">
-        <h3 class="section-title">一键同步</h3>
         <div class="pipeline-cards">
           <div
             v-for="(cfg, key) in chainDefinitions"
@@ -359,64 +296,120 @@ onUnmounted(() => {
       </div>
 
       <div class="top-section">
-        <div class="stock-basic-card" v-if="detailedStatus">
-          <div class="stock-basic-header">
-            <h3 class="card-title">股票基础信息</h3>
-            <button
-              class="btn-sync-small"
-              :disabled="syncing.stock_basic"
-              @click="handleStockBasicSync"
-            >
-              {{ syncing.stock_basic
-                ? (taskProgress.stock_basic?.total > 0
-                  ? `同步中 ${taskProgress.stock_basic.current}/${taskProgress.stock_basic.total}`
-                  : '同步中...')
-                : '同步' }}
-            </button>
-          </div>
-          <div class="stock-basic-total">
-            <span class="total-value">{{ formatNumber(detailedStatus.stock_basic.total) }}</span>
-            <span class="total-label">只股票</span>
-          </div>
-          <div class="stock-basic-meta">
-            <span class="meta-item">
-              <span class="meta-dot valid"></span>
-              有效 {{ formatNumber(detailedStatus.stock_basic.valid_count) }}
-            </span>
-            <span class="meta-item">
-              <span class="meta-dot st"></span>
-              ST {{ formatNumber(detailedStatus.stock_basic.st_count) }}
-            </span>
-            <span class="meta-item">
-              <span class="meta-dot delisted"></span>
-              退市 {{ formatNumber(detailedStatus.stock_basic.delisted_count) }}
-            </span>
-          </div>
-          <div class="market-list">
-            <div
-              v-for="(count, market) in detailedStatus.stock_basic.market_distribution"
-              :key="market"
-              class="market-row"
-            >
-              <span class="market-name">{{ market }}</span>
-              <span class="market-bar-wrap">
-                <span
-                  class="market-bar"
-                  :style="{ width: `${(count / detailedStatus.stock_basic.total) * 100}%` }"
-                />
+        <div class="left-cards">
+          <div class="stock-basic-card" v-if="detailedStatus">
+            <div class="stock-basic-header">
+              <h3 class="card-title">股票基础信息</h3>
+            </div>
+            <div class="stock-basic-total">
+              <span class="total-value">{{ formatNumber(detailedStatus.stock_basic.total) }}</span>
+              <span class="total-label">只股票</span>
+            </div>
+            <div class="stock-basic-meta">
+              <span class="meta-item">
+                <span class="meta-dot valid"></span>
+                有效 {{ formatNumber(detailedStatus.stock_basic.valid_count) }}
               </span>
-              <span class="market-count">{{ formatNumber(count) }}</span>
+              <span class="meta-item">
+                <span class="meta-dot st"></span>
+                ST {{ formatNumber(detailedStatus.stock_basic.st_count) }}
+              </span>
+              <span class="meta-item">
+                <span class="meta-dot delisted"></span>
+                退市 {{ formatNumber(detailedStatus.stock_basic.delisted_count) }}
+              </span>
+            </div>
+            <div class="market-list">
+              <div
+                v-for="(count, market) in detailedStatus.stock_basic.market_distribution"
+                :key="market"
+                class="market-row"
+              >
+                <span class="market-name">{{ market }}</span>
+                <span class="market-bar-wrap">
+                  <span
+                    class="market-bar"
+                    :style="{ width: `${(count / detailedStatus.stock_basic.total) * 100}%` }"
+                  />
+                </span>
+                <span class="market-count">{{ formatNumber(count) }}</span>
+              </div>
+            </div>
+            <div class="last-sync">
+              最近同步: {{ formatTime(detailedStatus.stock_basic.last_sync) }}
             </div>
           </div>
-          <div class="last-sync">
-            最近同步: {{ formatTime(detailedStatus.stock_basic.last_sync) }}
+
+          <div class="stock-basic-card" v-if="detailedStatus?.board">
+            <div class="stock-basic-header">
+              <h3 class="card-title">板块/ETF</h3>
+            </div>
+            <div class="stock-basic-total">
+              <span class="total-value">{{ formatNumber(detailedStatus.board.total) }}</span>
+              <span class="total-label">个板块/ETF</span>
+            </div>
+            <div class="stock-basic-meta">
+              <span class="meta-item">
+                <span class="meta-dot valid"></span>
+                行业 {{ formatNumber(detailedStatus.board.industry_count) }}
+              </span>
+              <span class="meta-item">
+                <span class="meta-dot concept"></span>
+                概念 {{ formatNumber(detailedStatus.board.concept_count) }}
+              </span>
+              <span class="meta-item">
+                <span class="meta-dot etf"></span>
+                ETF {{ formatNumber(detailedStatus.board.etf_count) }}
+              </span>
+            </div>
+            <div class="market-list">
+              <div class="market-row">
+                <span class="market-name">行业</span>
+                <span class="market-bar-wrap">
+                  <span
+                    class="market-bar"
+                    :style="{ width: `${(detailedStatus.board.industry_count / detailedStatus.board.total) * 100}%` }"
+                  />
+                </span>
+                <span class="market-count">{{ formatNumber(detailedStatus.board.industry_count) }}</span>
+              </div>
+              <div class="market-row">
+                <span class="market-name">概念</span>
+                <span class="market-bar-wrap">
+                  <span
+                    class="market-bar"
+                    :style="{ width: `${(detailedStatus.board.concept_count / detailedStatus.board.total) * 100}%` }"
+                  />
+                </span>
+                <span class="market-count">{{ formatNumber(detailedStatus.board.concept_count) }}</span>
+              </div>
+              <div class="market-row">
+                <span class="market-name">ETF</span>
+                <span class="market-bar-wrap">
+                  <span
+                    class="market-bar"
+                    :style="{ width: `${(detailedStatus.board.etf_count / detailedStatus.board.total) * 100}%` }"
+                  />
+                </span>
+                <span class="market-count">{{ formatNumber(detailedStatus.board.etf_count) }}</span>
+              </div>
+            </div>
+            <div class="last-sync">
+              最近同步: {{ formatTime(detailedStatus.board.last_sync) }}
+              <span v-if="detailedStatus.board.latest_daily_date" class="last-sync-extra">
+                · 日线至 {{ detailedStatus.board.latest_daily_date }}
+              </span>
+            </div>
+            <div class="last-sync-extra-row">
+              成分股 {{ formatNumber(detailedStatus.board.constituent_count) }} 条
+            </div>
           </div>
         </div>
 
         <div class="daily-section" v-if="detailedStatus">
           <div class="daily-section-header">
             <h3 class="section-title">最近五个交易日</h3>
-            <span class="section-note">统计范围不含北交所</span>
+            <span class="section-note">统计范围不含北交所 · 每页 5 条</span>
           </div>
           <div class="daily-table-wrap">
             <table class="daily-table">
@@ -489,68 +482,14 @@ onUnmounted(() => {
               </tbody>
             </table>
           </div>
-        </div>
-      </div>
-
-      <div class="table-section">
-        <h3 class="section-title">最近执行记录</h3>
-        <div class="table-wrap">
-          <table class="log-table">
-            <thead>
-              <tr>
-                <th>任务类型</th>
-                <th>触发方式</th>
-                <th>状态</th>
-                <th>开始时间</th>
-                <th>耗时</th>
-                <th>成功</th>
-                <th>失败</th>
-                <th>跳过</th>
-                <th>总计</th>
-                <th>交易日</th>
-                <th>错误信息</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="log in logs" :key="log.id">
-                <td>{{ jobTypeMap[log.job_type] || log.job_type }}</td>
-                <td>
-                  <span class="tag" :class="log.trigger_type === 'scheduled' ? 'tag-auto' : 'tag-manual'">
-                    {{ log.trigger_type === 'scheduled' ? '定时' : '手动' }}
-                  </span>
-                </td>
-                <td>
-                  <span class="status-dot" :class="statusClass[log.status]">
-                    {{ statusMap[log.status] || log.status }}
-                  </span>
-                </td>
-                <td>{{ formatTime(log.started_at) }}</td>
-                <td>{{ formatDuration(log.duration_seconds) }}</td>
-                <td>{{ log.success_count ?? '-' }}</td>
-                <td>{{ log.failed_count ?? '-' }}</td>
-                <td>{{ log.skipped_count ?? '-' }}</td>
-                <td>{{ log.total_count ?? '-' }}</td>
-                <td>{{ log.trade_date || '-' }}</td>
-                <td class="error-cell" :title="log.error_message">
-                  {{ log.error_message || '-' }}
-                </td>
-                <td>
-                  <button
-                    v-if="log.status === 'running'"
-                    class="btn-sync-small"
-                    @click="handleCancelJob(log.id)"
-                  >
-                    停止
-                  </button>
-                  <span v-else class="text-muted">-</span>
-                </td>
-              </tr>
-              <tr v-if="logs.length === 0 && !loading">
-                <td colspan="12" class="empty">暂无任务记录</td>
-              </tr>
-            </tbody>
-          </table>
+          <BasePagination
+            v-if="dailyTotal > 0"
+            :page-num="dailyPageNum"
+            :page-size="dailyPageSize"
+            :total="dailyTotal"
+            @update:page-num="handleDailyPageChange"
+            @update:page-size="handleDailyPageSizeChange"
+          />
         </div>
       </div>
     </div>
@@ -574,7 +513,7 @@ onUnmounted(() => {
 .content-wrap {
   flex: 1;
   overflow: auto;
-  margin-top: 16px;
+  margin-top: 8px;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -582,9 +521,16 @@ onUnmounted(() => {
 
 .top-section {
   display: grid;
-  grid-template-columns: minmax(260px, 25%) 1fr;
+  grid-template-columns: minmax(280px, 30%) 1fr;
   gap: 20px;
   min-height: 0;
+}
+
+.left-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
 }
 
 .stock-basic-card {
@@ -662,6 +608,14 @@ onUnmounted(() => {
       &.delisted {
         background: var(--up);
       }
+
+      &.concept {
+        background: var(--accent);
+      }
+
+      &.etf {
+        background: #9b59b6;
+      }
     }
   }
 
@@ -711,6 +665,18 @@ onUnmounted(() => {
     font-family: var(--font-mono);
     padding-top: 8px;
     border-top: 1px solid var(--rule);
+  }
+
+  .last-sync-extra {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .last-sync-extra-row {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    padding-top: 4px;
   }
 }
 
@@ -805,28 +771,6 @@ onUnmounted(() => {
   margin: 0 0 12px;
 }
 
-.filter-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.filter-select {
-  padding: 7px 12px;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  cursor: pointer;
-  outline: none;
-
-  &:focus {
-    border-color: var(--accent);
-  }
-}
-
 .btn-refresh {
   padding: 7px 16px;
   background: var(--text-primary);
@@ -846,196 +790,10 @@ onUnmounted(() => {
   }
 }
 
-.table-wrap {
-  overflow: auto;
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-}
-
-.log-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-
-  th, td {
-    padding: 10px 12px;
-    text-align: left;
-    border-bottom: 1px solid var(--rule);
-    white-space: nowrap;
-  }
-
-  th {
-    position: sticky;
-    top: 0;
-    background: var(--bg-secondary);
-    color: var(--text-muted);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    z-index: 1;
-  }
-
-  td {
-    color: var(--text-secondary);
-  }
-
-  tr:hover td {
-    background: var(--bg-secondary);
-  }
-}
-
-.tag {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 2px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-
-  &.tag-auto {
-    background: var(--accent-subtle);
-    color: var(--accent);
-  }
-
-  &.tag-manual {
-    background: var(--bg-tertiary);
-    color: var(--text-muted);
-  }
-}
-
-.status-dot {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-
-  &::before {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    display: inline-block;
-  }
-
-  &.status-running::before {
-    background: var(--accent);
-  }
-
-  &.status-success::before {
-    background: var(--down);
-  }
-
-  &.status-failed::before {
-    background: var(--up);
-  }
-
-  &.status-skipped::before {
-    background: var(--text-muted);
-  }
-}
-
-.error-cell {
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.empty {
-  text-align: center;
-  color: var(--text-muted);
-  padding: 40px;
-}
-
 @media (max-width: 1200px) {
   .top-section {
     grid-template-columns: 1fr;
   }
-}
-
-/* 模块7：同步数据库状态 */
-.detail-section {
-  margin-top: 4px;
-}
-
-.detail-grid {
-  display: grid;
-  grid-template-columns: 320px 1fr 320px;
-  gap: 16px;
-}
-
-.detail-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.detail-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--rule);
-}
-
-.detail-card-title {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-primary);
-}
-
-.detail-card-meta {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-}
-
-.detail-metrics {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-.metric {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  background: var(--bg-primary);
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  padding: 8px 10px;
-}
-
-.metric-value {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-}
-
-.metric-value.highlight {
-  color: var(--accent);
-}
-
-.metric-value.warn {
-  color: #f5a623;
-}
-
-.metric-value.danger {
-  color: var(--up);
-}
-
-.metric-label {
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
 .market-dist {
@@ -1225,7 +983,6 @@ onUnmounted(() => {
 .pipeline-section {
   display: flex;
   flex-direction: column;
-  gap: 16px;
 }
 
 .pipeline-cards {
@@ -1477,4 +1234,5 @@ onUnmounted(() => {
     grid-template-columns: 1fr;
   }
 }
+
 </style>

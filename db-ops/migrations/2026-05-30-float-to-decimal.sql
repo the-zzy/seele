@@ -1,0 +1,148 @@
+-- 将金融数据字段从 FLOAT 改为 DECIMAL(18,4)，消除浮点误差
+-- 执行前请备份数据库
+
+-- 股票基础信息
+ALTER TABLE stock_basic
+  MODIFY COLUMN float_market_cap DECIMAL(18,4) COMMENT '流通市值(亿元)';
+
+-- 股票日线数据
+ALTER TABLE stock_daily
+  MODIFY COLUMN open DECIMAL(18,4) COMMENT '开盘价',
+  MODIFY COLUMN high DECIMAL(18,4) COMMENT '最高价',
+  MODIFY COLUMN low DECIMAL(18,4) COMMENT '最低价',
+  MODIFY COLUMN close DECIMAL(18,4) COMMENT '收盘价',
+  MODIFY COLUMN volume DECIMAL(18,4) COMMENT '成交量',
+  MODIFY COLUMN amount DECIMAL(18,4) COMMENT '成交额',
+  MODIFY COLUMN amplitude DECIMAL(18,4) COMMENT '振幅',
+  MODIFY COLUMN pct_chg DECIMAL(18,4) COMMENT '涨跌幅',
+  MODIFY COLUMN price_change DECIMAL(18,4) COMMENT '涨跌额',
+  MODIFY COLUMN turnover DECIMAL(18,4) COMMENT '换手率';
+
+-- 股票日线指标
+ALTER TABLE stock_daily_indicator
+  MODIFY COLUMN ma5 DECIMAL(18,4) COMMENT '5日均线',
+  MODIFY COLUMN ma10 DECIMAL(18,4) COMMENT '10日均线',
+  MODIFY COLUMN ma20 DECIMAL(18,4) COMMENT '20日均线',
+  MODIFY COLUMN ma30 DECIMAL(18,4) COMMENT '30日均线',
+  MODIFY COLUMN ma60 DECIMAL(18,4) COMMENT '60日均线',
+  MODIFY COLUMN turnover_ma5 DECIMAL(18,4) COMMENT '5日平均换手率(%)',
+  MODIFY COLUMN turnover_ma10 DECIMAL(18,4) COMMENT '10日平均换手率(%)',
+  MODIFY COLUMN chg_5d DECIMAL(18,4) COMMENT '5日涨幅(%)',
+  MODIFY COLUMN chg_10d DECIMAL(18,4) COMMENT '10日涨幅(%)',
+  MODIFY COLUMN macd_dif DECIMAL(18,4) COMMENT 'MACD DIF',
+  MODIFY COLUMN macd_dea DECIMAL(18,4) COMMENT 'MACD DEA',
+  MODIFY COLUMN macd_hist DECIMAL(18,4) COMMENT 'MACD 柱状图',
+  MODIFY COLUMN rsi_6 DECIMAL(18,4) COMMENT 'RSI 6日',
+  MODIFY COLUMN rsi_12 DECIMAL(18,4) COMMENT 'RSI 12日',
+  MODIFY COLUMN rsi_24 DECIMAL(18,4) COMMENT 'RSI 24日',
+  MODIFY COLUMN kdj_k DECIMAL(18,4) COMMENT 'KDJ K值',
+  MODIFY COLUMN kdj_d DECIMAL(18,4) COMMENT 'KDJ D值',
+  MODIFY COLUMN kdj_j DECIMAL(18,4) COMMENT 'KDJ J值',
+  MODIFY COLUMN boll_upper DECIMAL(18,4) COMMENT '布林上轨',
+  MODIFY COLUMN boll_middle DECIMAL(18,4) COMMENT '布林中轨',
+  MODIFY COLUMN boll_lower DECIMAL(18,4) COMMENT '布林下轨',
+  MODIFY COLUMN adx DECIMAL(18,4) COMMENT 'ADX趋势强度';
+
+-- 持仓交易记录
+ALTER TABLE portfolio_trade
+  MODIFY COLUMN price DECIMAL(18,4) NOT NULL COMMENT '成交价格',
+  MODIFY COLUMN amount DECIMAL(18,4) NOT NULL COMMENT '成交金额',
+  MODIFY COLUMN fee DECIMAL(18,4) DEFAULT 0 COMMENT '交易手续费',
+  MODIFY COLUMN dividend DECIMAL(18,4) DEFAULT 0 COMMENT '分红金额';
+
+-- 持仓快照
+ALTER TABLE portfolio_position
+  MODIFY COLUMN avg_cost DECIMAL(18,4) NOT NULL DEFAULT 0 COMMENT '平均成本',
+  MODIFY COLUMN current_price DECIMAL(18,4) COMMENT '最新收盘价',
+  MODIFY COLUMN market_value DECIMAL(18,4) COMMENT '市值',
+  MODIFY COLUMN unrealized_pnl DECIMAL(18,4) COMMENT '浮动盈亏',
+  MODIFY COLUMN unrealized_pnl_pct DECIMAL(18,4) COMMENT '浮动盈亏百分比',
+  MODIFY COLUMN stop_loss_price DECIMAL(18,4) COMMENT '止损价',
+  MODIFY COLUMN take_profit_price DECIMAL(18,4) COMMENT '止盈价';
+
+-- 清仓盈亏记录
+ALTER TABLE portfolio_closed
+  MODIFY COLUMN total_buy_amount DECIMAL(18,4) NOT NULL COMMENT '总买入金额',
+  MODIFY COLUMN total_sell_amount DECIMAL(18,4) NOT NULL COMMENT '总卖出金额',
+  MODIFY COLUMN avg_buy_price DECIMAL(18,4) NOT NULL COMMENT '平均买入价',
+  MODIFY COLUMN avg_sell_price DECIMAL(18,4) NOT NULL COMMENT '平均卖出价',
+  MODIFY COLUMN realized_pnl DECIMAL(18,4) NOT NULL COMMENT '实现盈亏',
+  MODIFY COLUMN pnl_pct DECIMAL(18,4) NOT NULL COMMENT '盈亏百分比',
+  MODIFY COLUMN total_fee DECIMAL(18,4) DEFAULT 0 COMMENT '总手续费';
+
+-- 每日持仓明细
+ALTER TABLE portfolio_daily_position
+  MODIFY COLUMN avg_cost DECIMAL(18,4) NOT NULL DEFAULT 0 COMMENT '平均成本',
+  MODIFY COLUMN close_price DECIMAL(18,4) COMMENT '当日收盘价',
+  MODIFY COLUMN market_value DECIMAL(18,4) DEFAULT 0 COMMENT '当日市值',
+  MODIFY COLUMN day_buy DECIMAL(18,4) DEFAULT 0 COMMENT '当日买入金额',
+  MODIFY COLUMN day_sell DECIMAL(18,4) DEFAULT 0 COMMENT '当日卖出金额',
+  MODIFY COLUMN unrealized_pnl DECIMAL(18,4) DEFAULT 0 COMMENT '当日浮动盈亏';
+
+-- 每日资产汇总
+ALTER TABLE portfolio_daily_summary
+  MODIFY COLUMN total_invested DECIMAL(18,4) DEFAULT 0 COMMENT '总投入成本',
+  MODIFY COLUMN total_market_value DECIMAL(18,4) DEFAULT 0 COMMENT '当日收盘总市值',
+  MODIFY COLUMN daily_pnl DECIMAL(18,4) DEFAULT 0 COMMENT '当日盈亏',
+  MODIFY COLUMN cumulative_pnl DECIMAL(18,4) DEFAULT 0 COMMENT '累计盈亏',
+  MODIFY COLUMN realized_pnl DECIMAL(18,4) DEFAULT 0 COMMENT '已实现盈亏',
+  MODIFY COLUMN unrealized_pnl DECIMAL(18,4) DEFAULT 0 COMMENT '浮动盈亏';
+
+-- 持仓配置
+ALTER TABLE portfolio_config
+  MODIFY COLUMN initial_capital DECIMAL(18,4) NOT NULL DEFAULT 35000.0 COMMENT '初始资金';
+
+-- 市场情绪
+ALTER TABLE market_sentiment_daily
+  MODIFY COLUMN avg_pct_chg DECIMAL(18,4) COMMENT '平均涨跌幅',
+  MODIFY COLUMN strong_threshold DECIMAL(18,4) NOT NULL DEFAULT 2.0 COMMENT '强势阈值%',
+  MODIFY COLUMN strong_percent DECIMAL(18,4) COMMENT '强势占比%';
+
+-- 板块情绪
+ALTER TABLE industry_sentiment_daily
+  MODIFY COLUMN avg_pct_chg DECIMAL(18,4) COMMENT '板块平均涨跌幅',
+  MODIFY COLUMN max_pct_chg DECIMAL(18,4) COMMENT '板块最大涨幅',
+  MODIFY COLUMN min_pct_chg DECIMAL(18,4) COMMENT '板块最大跌幅',
+  MODIFY COLUMN amount_sum DECIMAL(18,4) COMMENT '板块总成交额';
+
+-- 财务指标
+ALTER TABLE stock_financial_indicator
+  MODIFY COLUMN net_profit DECIMAL(18,4) COMMENT '净利润',
+  MODIFY COLUMN net_profit_yoy DECIMAL(18,4) COMMENT '净利润同比增长率(%)',
+  MODIFY COLUMN deduct_net_profit DECIMAL(18,4) COMMENT '扣非净利润',
+  MODIFY COLUMN total_revenue DECIMAL(18,4) COMMENT '营业总收入',
+  MODIFY COLUMN revenue_yoy DECIMAL(18,4) COMMENT '营收同比增长率(%)',
+  MODIFY COLUMN gross_profit_ratio DECIMAL(18,4) COMMENT '销售毛利率(%)',
+  MODIFY COLUMN net_profit_ratio DECIMAL(18,4) COMMENT '销售净利率(%)',
+  MODIFY COLUMN roe DECIMAL(18,4) COMMENT '净资产收益率(%)',
+  MODIFY COLUMN roe_diluted DECIMAL(18,4) COMMENT '净资产收益率-摊薄(%)',
+  MODIFY COLUMN eps DECIMAL(18,4) COMMENT '基本每股收益',
+  MODIFY COLUMN bps DECIMAL(18,4) COMMENT '每股净资产',
+  MODIFY COLUMN ops_cash_flow_per_share DECIMAL(18,4) COMMENT '每股经营现金流',
+  MODIFY COLUMN current_ratio DECIMAL(18,4) COMMENT '流动比率',
+  MODIFY COLUMN quick_ratio DECIMAL(18,4) COMMENT '速动比率',
+  MODIFY COLUMN debt_ratio DECIMAL(18,4) COMMENT '资产负债率(%)',
+  MODIFY COLUMN total_assets DECIMAL(18,4) COMMENT '资产总计(万元)',
+  MODIFY COLUMN total_equity DECIMAL(18,4) COMMENT '所有者权益合计(万元)',
+  MODIFY COLUMN operate_cash_flow DECIMAL(18,4) COMMENT '经营活动现金流净额';
+
+-- 指数日线
+ALTER TABLE index_daily
+  MODIFY COLUMN open DECIMAL(18,4) COMMENT '开盘价',
+  MODIFY COLUMN high DECIMAL(18,4) COMMENT '最高价',
+  MODIFY COLUMN low DECIMAL(18,4) COMMENT '最低价',
+  MODIFY COLUMN close DECIMAL(18,4) COMMENT '收盘价',
+  MODIFY COLUMN preclose DECIMAL(18,4) COMMENT '前收盘价',
+  MODIFY COLUMN volume DECIMAL(18,4) COMMENT '成交量',
+  MODIFY COLUMN amount DECIMAL(18,4) COMMENT '成交额',
+  MODIFY COLUMN pct_chg DECIMAL(18,4) COMMENT '涨跌幅';
+
+-- 板块日线
+ALTER TABLE board_daily
+  MODIFY COLUMN open DECIMAL(18,4) COMMENT '开盘价',
+  MODIFY COLUMN high DECIMAL(18,4) COMMENT '最高价',
+  MODIFY COLUMN low DECIMAL(18,4) COMMENT '最低价',
+  MODIFY COLUMN close DECIMAL(18,4) COMMENT '收盘价',
+  MODIFY COLUMN volume DECIMAL(18,4) COMMENT '成交量',
+  MODIFY COLUMN amount DECIMAL(18,4) COMMENT '成交额',
+  MODIFY COLUMN pct_chg DECIMAL(18,4) COMMENT '涨跌幅';

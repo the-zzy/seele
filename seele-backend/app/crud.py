@@ -1596,9 +1596,9 @@ class BoardInfoCRUD:
         db: Session,
         query: schemas.BoardInfoQuery,
     ) -> tuple[List[dict], int]:
-        """分页查询，支持 category 过滤和名称模糊搜索
+        """分页查询，支持 category 过滤、名称模糊搜索和日期筛选
 
-        返回每个板块的最新涨幅、5日涨幅、10日涨幅（基于 board_daily）。
+        返回每个板块在指定交易日（或最新）的涨跌幅。
         """
         stmt = db.query(models.BoardInfo)
         filters = []
@@ -1621,37 +1621,82 @@ class BoardInfoCRUD:
             return [], total
 
         codes = [b.code for b in board_list]
-        all_dailies = (
-            db.query(models.BoardDaily)
-            .filter(models.BoardDaily.code.in_(codes))
-            .order_by(models.BoardDaily.code, models.BoardDaily.trade_date.desc())
+
+        # 查询各板块成分股数
+        cnt_rows = (
+            db.query(models.BoardConstituent.board_code, func.count(models.BoardConstituent.id))
+            .filter(models.BoardConstituent.board_code.in_(codes))
+            .group_by(models.BoardConstituent.board_code)
             .all()
         )
+        const_cnt = {r[0]: r[1] for r in cnt_rows}
+
+        # 构建日线查询：指定日期则查该日期，否则取最新 10 条
+        daily_query = db.query(models.BoardDaily).filter(
+            models.BoardDaily.code.in_(codes)
+        )
+        if query.trade_date:
+            daily_query = daily_query.filter(
+                models.BoardDaily.trade_date <= query.trade_date
+            )
+        daily_query = daily_query.order_by(
+            models.BoardDaily.code, models.BoardDaily.trade_date.desc()
+        )
+        all_dailies = daily_query.all()
 
         daily_by_code = defaultdict(list)
         for d in all_dailies:
             if len(daily_by_code[d.code]) < 10:
                 daily_by_code[d.code].append(d)
 
+        # 如果指定了交易日，用该日期的数据作为 latest；否则用第 0 条（最新）
         result = []
         for b in board_list:
             dailies = daily_by_code.get(b.code, [])
-            latest = dailies[0] if dailies else None
+            if query.trade_date and dailies:
+                # 找到指定交易日那一条作为 latest
+                latest = next(
+                    (d for d in dailies if str(d.trade_date) == query.trade_date),
+                    dailies[0],
+                )
+            else:
+                latest = dailies[0] if dailies else None
+
             stats = {
                 'latest_close': latest.close if latest else None,
                 'latest_pct_chg': latest.pct_chg if latest else None,
                 'latest_trade_date': str(latest.trade_date) if latest else None,
+                'amount': latest.amount if latest else None,
                 'chg_5d': None,
                 'chg_10d': None,
             }
-            if len(dailies) >= 5 and dailies[4].close:
-                stats['chg_5d'] = round(
-                    (dailies[0].close - dailies[4].close) / dailies[4].close * 100, 2
+
+            # 5日/10日涨幅：从 latest 往前推
+            if latest and query.trade_date:
+                # 有指定日期时，找该日期当天及之前的记录
+                idx = next(
+                    (i for i, d in enumerate(dailies) if str(d.trade_date) == str(latest.trade_date)),
+                    None,
                 )
-            if len(dailies) >= 10 and dailies[9].close:
-                stats['chg_10d'] = round(
-                    (dailies[0].close - dailies[9].close) / dailies[9].close * 100, 2
-                )
+                if idx is not None:
+                    if idx + 4 < len(dailies) and dailies[idx + 4].close:
+                        stats['chg_5d'] = round(
+                            (latest.close - dailies[idx + 4].close) / dailies[idx + 4].close * 100, 2
+                        )
+                    if idx + 9 < len(dailies) and dailies[idx + 9].close:
+                        stats['chg_10d'] = round(
+                            (latest.close - dailies[idx + 9].close) / dailies[idx + 9].close * 100, 2
+                        )
+            else:
+                # 无指定日期：dailies[0] 就是最新，直接按索引取
+                if len(dailies) >= 5 and dailies[4].close:
+                    stats['chg_5d'] = round(
+                        (dailies[0].close - dailies[4].close) / dailies[4].close * 100, 2
+                    )
+                if len(dailies) >= 10 and dailies[9].close:
+                    stats['chg_10d'] = round(
+                        (dailies[0].close - dailies[9].close) / dailies[9].close * 100, 2
+                    )
 
             result.append({
                 'code': b.code,
@@ -1659,6 +1704,7 @@ class BoardInfoCRUD:
                 'category': b.category,
                 'exchange': b.exchange,
                 'source': b.source,
+                'constituent_count': const_cnt.get(b.code, 0),
                 **stats,
             })
 
@@ -1696,11 +1742,36 @@ board_info_crud = BoardInfoCRUD()
 class BoardConstituentCRUD:
     """板块/ETF成分股 CRUD"""
 
-    def get_by_board(self, db: Session, board_code: str) -> List[models.BoardConstituent]:
-        """根据板块代码查询成分股"""
+    def get_by_board(self, db: Session, board_code: str) -> List:
+        """根据板块代码查询成分股，含最新行情（过滤退市股）"""
+        from sqlalchemy import and_
+
+        # 最新交易日
+        latest_date = db.query(func.max(models.StockDaily.trade_date)).scalar()
+
         return (
-            db.query(models.BoardConstituent)
+            db.query(
+                models.BoardConstituent.constituent_symbol,
+                models.BoardConstituent.name,
+                models.StockDaily.trade_date,
+                models.StockDaily.open,
+                models.StockDaily.high,
+                models.StockDaily.low,
+                models.StockDaily.close,
+                models.StockDaily.pct_chg,
+                models.StockDaily.volume,
+                models.StockDaily.amount,
+                models.BoardConstituent.update_date,
+            )
+            .outerjoin(
+                models.StockDaily,
+                and_(
+                    models.BoardConstituent.constituent_symbol == models.StockDaily.symbol,
+                    models.StockDaily.trade_date == latest_date,
+                )
+            )
             .filter(models.BoardConstituent.board_code == board_code)
+            .filter(models.BoardConstituent.name.notlike('%退'))
             .all()
         )
 
@@ -1734,6 +1805,8 @@ class BoardConstituentCRUD:
             if existing:
                 if obj.update_date is not None:
                     existing.update_date = obj.update_date
+                if obj.name is not None:
+                    existing.name = obj.name
                 updated += 1
             else:
                 db_obj = models.BoardConstituent(**obj.model_dump())

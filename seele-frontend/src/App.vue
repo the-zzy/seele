@@ -16,7 +16,7 @@
           <span class="dot">·</span>
           <span>{{ year }}</span>
           <span class="dot">·</span>
-          <span class="version">v2.0</span>
+          <span class="version">v2.1</span>
         </div>
       </div>
 
@@ -61,17 +61,6 @@
         </template>
       </nav>
 
-      <div class="masthead-footer">
-        <span class="footer-label">v2.0</span>
-        <span class="footer-edition">Internal · 数据来源 Tushare</span>
-        <a
-          href="https://beian.miit.gov.cn/"
-          target="_blank"
-          rel="noopener"
-          class="beian-link"
-        >桂ICP备2023008226号-1</a>
-        <button class="logout-btn-inline" @click="exitWorkspace">退出工作台</button>
-      </div>
     </aside>
 
     <main class="main-content">
@@ -91,6 +80,13 @@
       </header>
       <div class="page-content">
         <router-view />
+      </div>
+      <div class="main-footer">
+        <a
+          href="https://beian.miit.gov.cn/"
+          target="_blank"
+          rel="noopener"
+        >桂ICP备2023008226号-1</a>
       </div>
     </main>
 
@@ -512,58 +508,20 @@ html, body {
     }
   }
 
-  .masthead-footer {
-    padding: 14px 24px 20px;
-    border-top: 1px solid var(--rule);
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    position: relative;
-    z-index: 1;
+  .main-footer {
+    flex-shrink: 0;
+    padding: 8px 0 16px;
+    text-align: center;
 
-    .footer-label {
-      font-family: var(--font-mono);
-      font-size: 9px;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: var(--text-faint);
-    }
-
-    .footer-edition {
+    a {
       font-family: var(--font-body);
       font-size: 11px;
-      color: var(--text-muted);
-    }
-
-    .beian-link {
-      font-family: var(--font-body);
-      font-size: 10px;
       color: var(--text-faint);
       text-decoration: none;
-      margin-top: 4px;
       transition: color 0.2s;
 
       &:hover {
         color: var(--text-secondary);
-      }
-    }
-
-    .login-btn-inline {
-      margin-top: 10px;
-      width: 100%;
-      padding: 7px;
-      background: transparent;
-      border: 1px solid var(--accent);
-      border-radius: 4px;
-      color: var(--accent);
-      font-family: var(--font-body);
-      font-size: 12px;
-      cursor: pointer;
-      transition: all 0.2s;
-
-      &:hover {
-        background: var(--accent);
-        color: #fff;
       }
     }
   }
@@ -674,9 +632,6 @@ html, body {
       padding: 14px 12px 20px;
     }
 
-    .masthead-footer {
-      padding: 12px 16px 16px;
-    }
   }
 }
 
@@ -731,9 +686,6 @@ html, body {
         display: none;
       }
 
-      .masthead-footer {
-        display: none;
-      }
     }
 
     .top-bar {

@@ -58,6 +58,7 @@ export function useSyncTask () {
 
   async function startSync (taskKey, apiCall, {
     confirmMessage,
+    confirmAction,
     checkExisting = true,
     existingMatcher,
     interval = 2000,
@@ -73,7 +74,9 @@ export function useSyncTask () {
           ? tasks.find(existingMatcher)
           : null
         if (existing) {
-          if (confirm(`该任务已有同步正在运行 (${existing.progress?.current || 0}/${existing.progress?.total || 0})，是否继续跟踪？`)) {
+          const message = `该任务已有同步正在运行 (${existing.progress?.current || 0}/${existing.progress?.total || 0})，是否继续跟踪？`
+          const confirmed = confirmAction ? await confirmAction(message, { type: 'existing', task: existing }) : confirm(message)
+          if (confirmed) {
             syncing[taskKey] = true
             startPoll(taskKey, existing.task_id, { interval, onDone })
           }
@@ -84,7 +87,10 @@ export function useSyncTask () {
       }
     }
 
-    if (confirmMessage && !confirm(confirmMessage)) return
+    if (confirmMessage) {
+      const confirmed = confirmAction ? await confirmAction(confirmMessage, { type: 'start' }) : confirm(confirmMessage)
+      if (!confirmed) return
+    }
 
     syncing[taskKey] = true
     try {

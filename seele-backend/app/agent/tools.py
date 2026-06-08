@@ -313,14 +313,15 @@ async def query_portfolio_positions(db: Session, group: Optional[str] = None):
     items = []
     for p in positions:
         latest_price = price_map.get(p.symbol)
-        mv = round(latest_price * p.quantity, 4) if latest_price else (p.market_value or 0)
-        upnl = round(mv - p.avg_cost * p.quantity, 4) if latest_price else (p.unrealized_pnl or 0)
-        upnl_pct = round(upnl / (p.avg_cost * p.quantity) * 100, 4) if p.avg_cost > 0 else None
+        avg_cost = float(p.avg_cost)
+        mv = round(latest_price * int(p.quantity), 4) if latest_price else float(p.market_value or 0)
+        upnl = round(mv - avg_cost * int(p.quantity), 4) if latest_price else float(p.unrealized_pnl or 0)
+        upnl_pct = round(upnl / (avg_cost * int(p.quantity)) * 100, 4) if avg_cost > 0 else None
         items.append({
             'symbol': p.symbol,
             'name': p.name,
             'quantity': p.quantity,
-            'avg_cost': p.avg_cost,
+            'avg_cost': avg_cost,
             'current_price': latest_price or p.current_price,
             'market_value': mv,
             'unrealized_pnl': upnl,
@@ -406,13 +407,13 @@ async def query_portfolio_summary(db: Session):
     symbols = [p.symbol for p in positions]
     price_map = _get_latest_close_batch(db, symbols)
 
-    total_invested = sum(p.avg_cost * p.quantity for p in positions)
+    total_invested = sum(float(p.avg_cost) * int(p.quantity) for p in positions)
     total_market_value = 0.0
     for p in positions:
         lp = price_map.get(p.symbol)
-        total_market_value += lp * p.quantity if lp else (p.market_value or 0)
+        total_market_value += lp * int(p.quantity) if lp else float(p.market_value or 0)
     unrealized_pnl = total_market_value - total_invested
-    realized_pnl = sum(c.realized_pnl for c in closed_data)
+    realized_pnl = sum(float(c.realized_pnl) for c in closed_data)
     total_pnl = unrealized_pnl + realized_pnl
 
     total_pnl_pct = total_pnl / total_invested * 100 if total_invested > 0 else 0
@@ -514,7 +515,8 @@ async def query_portfolio_alerts(db: Session):
         else:
             alert_type = 'take_profit'
             target_price = p.take_profit_price
-        pnl_pct = round((live_price - p.avg_cost) / p.avg_cost * 100, 2) if p.avg_cost > 0 else 0
+        avg_cost = float(p.avg_cost)
+        pnl_pct = round((live_price - avg_cost) / avg_cost * 100, 2) if avg_cost > 0 else 0
         result.append({
             'symbol': p.symbol,
             'name': p.name,
@@ -577,7 +579,6 @@ async def query_db_status(db: Session):
         ('portfolio_closed', models.PortfolioClosed),
         ('portfolio_daily_summary', models.PortfolioDailySummary),
         ('market_sentiment_daily', models.MarketSentimentDaily),
-        ('industry_sentiment_daily', models.IndustrySentimentDaily),
         ('stock_financial_indicator', models.StockFinancialIndicator),
         ('sync_job_log', models.SyncJobLog),
     ]
@@ -641,50 +642,6 @@ async def query_market_sentiment(db: Session, start_date: Optional[str] = None, 
                 'avg_pct_chg': r.avg_pct_chg,
                 'strong_count': r.strong_count,
                 'strong_percent': r.strong_percent,
-            }
-            for r in rows
-        ],
-    }
-
-
-@registry.register(
-    name='query_industry_sentiment',
-    description='查询某交易日各板块情绪统计。如果不传日期，默认查最近一个交易日。',
-    parameters={
-        'type': 'object',
-        'properties': {
-            'trade_date': {'type': 'string', 'description': '交易日期 YYYY-MM-DD，可选'},
-        },
-    },
-    category='read',
-)
-async def query_industry_sentiment(db: Session, trade_date: Optional[str] = None):
-    if trade_date:
-        d = datetime.strptime(trade_date, '%Y-%m-%d').date()
-    else:
-        from sqlalchemy import func
-        latest = db.query(func.max(models.IndustrySentimentDaily.trade_date)).scalar()
-        if not latest:
-            return {'total': 0, 'list': []}
-        d = latest
-    rows = (
-        db.query(models.IndustrySentimentDaily)
-        .filter(models.IndustrySentimentDaily.trade_date == d)
-        .order_by(models.IndustrySentimentDaily.avg_pct_chg.desc())
-        .all()
-    )
-    return {
-        'total': len(rows),
-        'list': [
-            {
-                'industry': r.industry,
-                'stock_count': r.stock_count,
-                'up_count': r.up_count,
-                'down_count': r.down_count,
-                'avg_pct_chg': r.avg_pct_chg,
-                'max_pct_chg': r.max_pct_chg,
-                'min_pct_chg': r.min_pct_chg,
-                'strong_count': r.strong_count,
             }
             for r in rows
         ],

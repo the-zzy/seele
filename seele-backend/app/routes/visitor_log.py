@@ -31,16 +31,16 @@ class TrackRequest(BaseModel):
 
 
 def _get_client_ip(request: Request) -> str:
-    """获取客户端真实 IP"""
+    """获取客户端真实 IP（匿名化网段，仅保留前3段）"""
     forwarded = request.headers.get('x-forwarded-for')
-    if forwarded:
-        return forwarded.split(',')[0].strip()
-    real_ip = request.headers.get('x-real-ip')
-    if real_ip:
-        return real_ip
-    if request.client:
-        return request.client.host
-    return 'unknown'
+    ip = forwarded.split(',')[0].strip() if forwarded else None
+    if not ip:
+        real_ip = request.headers.get('x-real-ip')
+        ip = real_ip if real_ip else (request.client.host if request.client else 'unknown')
+    parts = ip.split('.')
+    if len(parts) == 4:
+        return f"{parts[0]}.{parts[1]}.{parts[2]}.x"
+    return ip
 
 
 def _persist_log(db: Session, data: dict):

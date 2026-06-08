@@ -87,24 +87,6 @@ export const indexApi = {
 }
 
 /**
- * 市场情绪 API
- */
-export const marketSentimentApi = {
-  /**
-   * 查询某日的板块情绪统计
-   * @param {string} tradeDate - 交易日期 (YYYY-MM-DD)
-   * @returns {Promise<Object>}
-   */
-  getIndustrySentiment (tradeDate) {
-    return request({
-      url: '/market/sentiment/industry',
-      method: 'get',
-      params: { trade_date: tradeDate }
-    })
-  }
-}
-
-/**
  * 股票日线指标 API
  */
 export const stockIndicatorApi = {
@@ -160,13 +142,15 @@ export const syncApi = {
     })
   },
 
-  getJobLogs (days = 5, jobType = null) {
+  getJobLogs (days = 5, jobType = null, pageNum = 1, pageSize = 10) {
     return request({
       url: '/sync/job-logs',
       method: 'get',
       params: {
         days,
-        job_type: jobType
+        job_type: jobType,
+        page_num: pageNum,
+        page_size: pageSize
       }
     })
   },
@@ -185,10 +169,14 @@ export const syncApi = {
     })
   },
 
-  getDetailedStatus () {
+  getDetailedStatus (dailyPageNum = 1, dailyPageSize = 5) {
     return request({
       url: '/sync/detailed-status',
-      method: 'get'
+      method: 'get',
+      params: {
+        daily_page_num: dailyPageNum,
+        daily_page_size: dailyPageSize
+      }
     })
   },
 
@@ -240,6 +228,42 @@ export const tradeCalendarApi = {
   getLatest () {
     return request({
       url: '/trade-calendar/latest',
+      method: 'get'
+    })
+  }
+}
+
+/**
+ * 板块/ETF API
+ */
+export const boardApi = {
+  getList (params = {}) {
+    return request({
+      url: '/board/list',
+      method: 'post',
+      data: {
+        page_num: 1,
+        page_size: 50,
+        ...params
+      }
+    })
+  },
+
+  getDaily (params = {}) {
+    return request({
+      url: '/board/daily',
+      method: 'post',
+      data: {
+        page_num: 1,
+        page_size: 50,
+        ...params
+      }
+    })
+  },
+
+  getConstituents (code) {
+    return request({
+      url: `/board/constituents/${code}`,
       method: 'get'
     })
   }
