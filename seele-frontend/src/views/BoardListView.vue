@@ -388,10 +388,10 @@ onMounted(async () => {
 }
 
 .up {
-  color: #22c55e;
+  color: var(--up);
 }
 
 .down {
-  color: #ef4444;
+  color: var(--down);
 }
 </style>

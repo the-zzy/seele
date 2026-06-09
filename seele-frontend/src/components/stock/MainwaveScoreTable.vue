@@ -14,17 +14,10 @@ const columns = [
   { key: 'symbol', label: '代码', align: 'left' },
   { key: 'name', label: '名称', align: 'left' },
   { key: 'score', label: '总分', align: 'center' },
-  { key: 'hardPass', label: '硬性门槛', align: 'center' },
-  { key: 'deviateMa5', label: '偏离MA5', align: 'center' },
-  { key: 'pullback', label: '距高点回落', align: 'center' },
-  { key: 'kRatio', label: 'K线涨跌比', align: 'center' },
-  { key: 'bigDrop', label: '大阴线', align: 'center' },
-  { key: 'upperShadow', label: '上影线', align: 'center' },
-  { key: 'direction', label: '方向分散', align: 'center' },
-  { key: 'sector', label: '板块强度', align: 'center' },
-  { key: 'earnings', label: '业绩质量', align: 'center' },
-  { key: 'liquidity', label: '市值流动', align: 'center' },
-  { key: 'catalyst', label: '催化剂', align: 'center' }
+  { key: 'trendScore', label: '趋势分', align: 'center' },
+  { key: 'strengthScore', label: '强势分', align: 'center' },
+  { key: 'momentumScore', label: '动量分', align: 'center' },
+  { key: 'hardPass', label: '硬性门槛', align: 'center' }
 ]
 
 function onSort (field) {
@@ -77,20 +70,11 @@ function getHardPassClass (score) {
 function getScoreTooltip (item) {
   const s = item.score
   if (!s) return ''
-  const trend = s.deviate_ma5 + s.pullback + s.k_ratio + s.big_drop + s.upper_shadow
   return [
     `总分: ${s.total}`,
-    `趋势形态: ${trend}/30`,
-    `  偏离MA5: ${s.deviate_ma5}`,
-    `  距高点回落: ${s.pullback}`,
-    `  K线涨跌比: ${s.k_ratio}`,
-    `  大阴线: ${s.big_drop}`,
-    `  上影线: ${s.upper_shadow}`,
-    `方向分散: ${s.direction}/20`,
-    `板块强度: ${s.sector}/20`,
-    `业绩质量: ${s.earnings}/15`,
-    `市值流动性: ${s.liquidity}/10`,
-    `催化剂: ${s.catalyst}/5`,
+    `趋势分: ${s.trend_score}`,
+    `强势分: ${s.strength_score}`,
+    `动量分: ${s.momentum_score}`,
     s.hard_pass ? '硬性门槛: 通过' : '硬性门槛: 未通过'
   ].join('\n')
 }
@@ -128,17 +112,10 @@ function getScoreTooltip (item) {
           <td :class="getScoreClass(item.score)" :title="getScoreTooltip(item)">
             {{ getScoreLabel(item.score) }}
           </td>
+          <td>{{ item.score?.trend_score ?? '—' }}</td>
+          <td>{{ item.score?.strength_score ?? '—' }}</td>
+          <td>{{ item.score?.momentum_score ?? '—' }}</td>
           <td :class="getHardPassClass(item.score)">{{ getHardPassLabel(item.score) }}</td>
-          <td>{{ item.score?.deviate_ma5 ?? '—' }}</td>
-          <td>{{ item.score?.pullback ?? '—' }}</td>
-          <td>{{ item.score?.k_ratio ?? '—' }}</td>
-          <td>{{ item.score?.big_drop ?? '—' }}</td>
-          <td>{{ item.score?.upper_shadow ?? '—' }}</td>
-          <td>{{ item.score?.direction ?? '—' }}</td>
-          <td>{{ item.score?.sector ?? '—' }}</td>
-          <td>{{ item.score?.earnings ?? '—' }}</td>
-          <td>{{ item.score?.liquidity ?? '—' }}</td>
-          <td>{{ item.score?.catalyst ?? '—' }}</td>
         </tr>
       </tbody>
     </table>
@@ -151,7 +128,7 @@ function getScoreTooltip (item) {
 }
 
 .stock-table {
-  min-width: 1400px;
+  min-width: 800px;
 
   .code {
     font-family: var(--font-mono);

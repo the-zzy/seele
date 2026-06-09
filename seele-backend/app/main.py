@@ -117,7 +117,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Seele 股票数据管理API",
     description="基于FastAPI的股票数据管理后端服务",
-    version="2.1.0",
+    version="2.2.0",
     lifespan=lifespan,
     json_encoders={
         decimal.Decimal: float,
