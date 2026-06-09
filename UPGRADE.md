@@ -71,10 +71,12 @@ git commit -m "chore: bump version to X.Y.Z"
 **分支**: `feature/mainwave-scorer-v2.2`
 
 **代码变更范围**:
-- 主线波浪评分功能迭代（v2.1 基础上继续开发）
-- 新增 `MainwaveGroupTable`、`MainwaveView` 等前端组件
-- Portfolio 相关计算和接口优化
-- Sync 异步任务和轮询逻辑完善
+- 主线波浪评分算法重构（`mainwave_scorer.py` 大改）
+- 新增 `MainwaveView` 总览页面、`MainwaveGroupTable` 分组组件
+- Portfolio 日交易（T+0）记录功能完善
+- Agent chat stream 请求 Bearer token 修复
+- Decimal → float 转换修复（agent/tools.py、portfolio.py）
+- Sync worker 与同步任务端点优化
 
 **数据库迁移**: 无（沿用 v2.1 已执行的迁移）
 
@@ -84,9 +86,12 @@ git commit -m "chore: bump version to X.Y.Z"
 
 **升级步骤**:
 1. 拉取 `feature/mainwave-scorer-v2.2` 最新代码
-2. 前端重新构建
-3. 按进程清理规则重启后端 + 前端
-4. 验证主波浪评分页面正常加载
+2. 前端重新构建 `npm run build`
+3. 按进程清理规则彻底停止旧 Python 进程
+4. 启动后端（9000 端口）
+5. 启动前端（8000 端口）
+6. 验证 `/health` 端点
+7. 验证主波浪评分页面、组合日交易功能、Agent 对话流
 
 ---
 
