@@ -16,7 +16,7 @@
           <span class="dot">·</span>
           <span>{{ year }}</span>
           <span class="dot">·</span>
-          <span class="version">v2.1</span>
+          <span class="version">v2.2</span>
         </div>
       </div>
 
