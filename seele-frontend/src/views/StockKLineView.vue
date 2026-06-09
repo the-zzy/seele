@@ -116,6 +116,12 @@ async function loadData () {
 function initChart (dates, data, volumes, list, indicatorMap) {
   if (!chartRef.value) return
 
+  // 容器尚无尺寸时延迟初始化，保证第二个 grid（成交量）能正确渲染
+  if (chartRef.value.clientHeight === 0) {
+    requestAnimationFrame(() => initChart(dates, data, volumes, list, indicatorMap))
+    return
+  }
+
   const total = dates.length
   const defaultCount = 100
   const startPercent = total > defaultCount

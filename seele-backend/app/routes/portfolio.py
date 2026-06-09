@@ -973,3 +973,14 @@ def get_distribution(db: Session = Depends(get_db)):
         })
 
     return list_success(items)
+
+
+@router.post('/portfolio/rebuild-daily')
+def rebuild_daily_data(db: Session = Depends(get_db)):
+    """手动重建 portfolio 每日资产数据（修复历史日线补齐后资产趋势断层）"""
+    missing = _rebuild_daily_data(db)
+    if missing:
+        detail = f'持仓数据缺失日线收盘价: {", ".join(missing[:5])}' + (' 等' if len(missing) > 5 else '')
+        return {'code': 400, 'message': detail, 'data': missing}
+    db.commit()
+    return success(message='资产数据重建成功')

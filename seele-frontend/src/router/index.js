@@ -5,6 +5,7 @@ import StockBasicView from '../views/StockBasicView.vue'
 import StockKLineView from '../views/StockKLineView.vue'
 import ChgDistributionView from '../views/ChgDistributionView.vue'
 import PortfolioView from '../views/PortfolioView.vue'
+import MainwaveView from '../views/MainwaveView.vue'
 import MainwavePickerView from '../views/MainwavePickerView.vue'
 import MainwaveScorerView from '../views/MainwaveScorerView.vue'
 import StockFinancialView from '../views/StockFinancialView.vue'
@@ -60,16 +61,34 @@ const routes = [
     meta: { title: '持仓管理', nav: true, navOrder: 40, section: '资产' }
   },
   {
-    path: '/mainwave-picker',
+    path: '/mainwave/picker',
     name: 'mainwave-picker',
     component: MainwavePickerView,
-    meta: { title: '主升浪选股', nav: true, navOrder: 50, section: '选股策略' }
+    meta: { title: '选股', nav: true, navOrder: 50, group: '主升浪' }
+  },
+  {
+    path: '/mainwave/scorer',
+    name: 'mainwave-scorer',
+    component: MainwaveScorerView,
+    meta: { title: '评分', nav: true, navOrder: 51, group: '主升浪' }
+  },
+  {
+    path: '/mainwave/group',
+    name: 'mainwave-group',
+    component: MainwaveView,
+    meta: { title: '分组', nav: true, navOrder: 52, group: '主升浪' }
+  },
+  {
+    path: '/mainwave',
+    redirect: '/mainwave/picker'
+  },
+  {
+    path: '/mainwave-picker',
+    redirect: '/mainwave/picker'
   },
   {
     path: '/mainwave-scorer',
-    name: 'mainwave-scorer',
-    component: MainwaveScorerView,
-    meta: { title: '主升浪评分', nav: true, navOrder: 51, section: '选股策略' }
+    redirect: '/mainwave/scorer'
   },
   {
     path: '/sync-jobs',

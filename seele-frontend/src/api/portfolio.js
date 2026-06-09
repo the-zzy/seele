@@ -92,6 +92,16 @@ export const portfolioApi = {
   },
 
   /**
+   * 重建每日资产数据（修复历史日线补齐后资产趋势断层）
+   */
+  rebuildDailyData () {
+    return request({
+      url: '/portfolio/rebuild-daily',
+      method: 'post'
+    })
+  },
+
+  /**
    * 获取当前持仓
    */
   getPositions (group) {

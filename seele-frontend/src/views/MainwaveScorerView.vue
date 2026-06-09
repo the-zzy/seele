@@ -56,10 +56,16 @@ async function loadLatestTradeDate () {
 async function loadData () {
   loading.value = true
   try {
+    const sortKeyBackendMap = {
+      trendScore: 'trend_score',
+      strengthScore: 'strength_score',
+      momentumScore: 'momentum_score'
+    }
+
     const params = {
       page_num: pageNum.value,
       page_size: pageSize.value,
-      sort_field: sortField.value,
+      sort_field: sortKeyBackendMap[sortField.value] || sortField.value,
       sort_order: sortOrder.value
     }
     if (filterForm.symbol?.trim()) {

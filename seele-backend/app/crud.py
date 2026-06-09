@@ -267,11 +267,10 @@ class StockBasicCRUD:
                 models.StockBasic.symbol.notlike("688%"),
                 models.StockBasic.symbol.notlike("689%"),
             )
-            # 市值过滤已移除：float_market_cap 数据缺失且换手率+成交额过滤已足够
             if query.close_max is not None:
                 q = q.filter(models.StockDaily.close <= query.close_max)
             if query.avg_turnover_min is not None:
-                q = q.filter(models.StockDailyIndicator.turnover_ma10 >= query.avg_turnover_min / 100)
+                q = q.filter(models.StockDailyIndicator.turnover_ma10 >= query.avg_turnover_min)
             # 前端已把亿元转换为元，直接使用
             if query.avg_amount_min is not None:
                 q = q.filter(models.StockDailyIndicator.amount_ma10 >= query.avg_amount_min)
@@ -341,6 +340,19 @@ class StockBasicCRUD:
                 net_profit_yoy,
                 roe,
             ) = row
+            # 用实时数据估算流通市值
+            # 流通市值(亿元) ≈ (成交量×100÷换手率%) × 股价 ÷ 1亿
+            effective_float_market_cap = None
+            if daily.volume and daily.turnover and daily.close:
+                try:
+                    vol = float(daily.volume)
+                    turn = float(daily.turnover)
+                    price = float(daily.close)
+                    if vol > 0 and turn > 0:
+                        total_shares = vol * 100.0 / turn
+                        effective_float_market_cap = round(total_shares * price / 100000000, 2)
+                except (ZeroDivisionError, TypeError, ValueError):
+                    pass
             return {
                 "id": daily.id,
                 "trade_date": str(daily.trade_date),
@@ -350,7 +362,7 @@ class StockBasicCRUD:
                 "industry": industry or "",
                 "market": market or "",
                 "area": area or "",
-                "float_market_cap": float_market_cap,
+                "float_market_cap": effective_float_market_cap,
                 "open": daily.open,
                 "high": daily.high,
                 "low": daily.low,
@@ -382,7 +394,17 @@ class StockBasicCRUD:
             }
 
         all_data = [_build_item(row) for row in all_results]
-        mainwave_scorer.batch_calculate_scores(db, all_data, trade_date)
+        # 流通市值过滤（DB值优先，估计值兜底，SQL无法处理计算字段）
+        if query.float_market_cap_min is not None:
+            all_data = [
+                item for item in all_data
+                if item.get("float_market_cap") is not None
+                and item["float_market_cap"] >= query.float_market_cap_min
+            ]
+        # 先计算分层与启动日，评分需要用到 launch_date；
+        # 复用返回的日线记录，避免重复查询
+        records_by_symbol = mainwave_scorer.batch_calculate_mainwave_layers(db, all_data, trade_date)
+        mainwave_scorer.batch_calculate_scores(db, all_data, trade_date, records_by_symbol)
 
         # 统一内存排序
         sort_key_map = {
@@ -416,6 +438,9 @@ class StockBasicCRUD:
             "turnoverMa10": lambda x: x.get("turnover_ma10") or 0,
             "float_market_cap": lambda x: x.get("float_market_cap") or 0,
             "score": lambda x: x.get("score", {}).get("total", 0),
+            "trend_score": lambda x: x.get("score", {}).get("trend_score", 0),
+            "strength_score": lambda x: x.get("score", {}).get("strength_score", 0),
+            "momentum_score": lambda x: x.get("score", {}).get("momentum_score", 0),
         }
         sort_key = sort_key_map.get(query.sort_field, sort_key_map["symbol"])
         reverse = query.sort_order == "desc"

@@ -26,7 +26,7 @@ from app.config import get_settings
 from app.database import SessionLocal, get_db
 from app.response import success
 from app.routes.stock_indicator import _build_indicator_for_symbol
-from app.sync_worker import _fetch_akshare_batch, _fetch_baostock_batch
+from app.sync_worker import _fetch_akshare_batch, _fetch_baostock_chunk, _fetch_akshare_single
 
 logger = logging.getLogger(__name__)
 
@@ -343,7 +343,7 @@ def _sync_daily_bulk(trade_date: str, source: str = 'akshare', task_id: str | No
 
     # 预加载所有股票的前一日收盘价，避免每只股都查一次 DB
     preclose_map: dict[str, float] = {}
-    if all_stocks and source == 'akshare':
+    if all_stocks:
         symbols = [s.symbol for s in all_stocks]
         target_date_obj = datetime.strptime(trade_date, '%Y%m%d').date()
         db_pre = SessionLocal()
@@ -439,9 +439,9 @@ def _sync_daily_bulk(trade_date: str, source: str = 'akshare', task_id: str | No
                 "summary": "无需要同步的股票",
             }
 
-        # 使用多进程并行拉取数据，绕过 akshare py_mini_racer 锁。
-        # Baostock 登录态不支持多进程并发，必须单连接串行，否则容易出现“用户未登录”。
-        # Windows spawn 模式下进程启动开销极大，workers 不宜过多
+        # 多进程并行拉取（baostock / akshare 均走 ProcessPoolExecutor）
+        # baostock：每个子进程独立登录，互不干扰
+        # akshare：绕过 py_mini_racer 全局锁
         cpu_count = os.cpu_count() or 4
         workers = min(cpu_count, 6)
         if _total_stocks < 200:
@@ -450,7 +450,6 @@ def _sync_daily_bulk(trade_date: str, source: str = 'akshare', task_id: str | No
             workers = min(cpu_count, 4)
 
         symbol_list = [s.symbol for s in all_stocks]
-        # 固定 chunk 大小，让进度更新更频繁；小批次也能降低单个卡死请求的影响面
         chunk_size = 50
         chunks = [symbol_list[i:i + chunk_size] for i in range(0, len(symbol_list), chunk_size)]
         workers = min(workers, len(chunks))
@@ -461,7 +460,7 @@ def _sync_daily_bulk(trade_date: str, source: str = 'akshare', task_id: str | No
                 _results.extend(records)
                 _skipped.extend(skipped)
                 _failed.extend(failed)
-                _counter[0] += len(records) + len(skipped) + len(failed)
+                _counter[0] += len(records) + len(skipped)
 
                 if len(_results) >= 1500:
                     _flush_results()
@@ -473,23 +472,9 @@ def _sync_daily_bulk(trade_date: str, source: str = 'akshare', task_id: str | No
                     "failed": len(_failed)
                 })
 
-        if source == 'baostock':
-            for chunk in chunks:
-                try:
-                    records, skipped, failed = _fetch_baostock_batch(chunk, trade_date)
-                except Exception as exc:
-                    logger.error(
-                        '[SYNC_DAILY_BULK] Baostock 串行批次异常，股票 %s~%s，数量 %s，错误: %s',
-                        chunk[0], chunk[-1], len(chunk), exc
-                    )
-                    records = []
-                    skipped = []
-                    failed = [
-                        {"symbol": symbol, "reason": f"baostock batch exception: {exc}"}
-                        for symbol in chunk
-                    ]
-                _consume_batch(records, skipped, failed)
-        else:
+        def _run_parallel(fetch_fn, extra_args):
+            """通用并行分片调度器，捕获 _consume_batch 等外部闭包"""
+            nonlocal _failed
             executor = concurrent.futures.ProcessPoolExecutor(max_workers=workers)
             try:
                 future_meta = {}
@@ -501,7 +486,7 @@ def _sync_daily_bulk(trade_date: str, source: str = 'akshare', task_id: str | No
                         return None
                     chunk = chunks[next_chunk_idx]
                     next_chunk_idx += 1
-                    future = executor.submit(_fetch_akshare_batch, chunk, trade_date, preclose_map)
+                    future = executor.submit(fetch_fn, chunk, *extra_args)
                     future_meta[future] = {
                         "symbols": chunk,
                         "started_at": time.monotonic(),
@@ -569,8 +554,37 @@ def _sync_daily_bulk(trade_date: str, source: str = 'akshare', task_id: str | No
                         if next_future is not None:
                             pending.add(next_future)
             finally:
-                # Do not block forever on a child process that already timed out at chunk level.
                 executor.shutdown(wait=False, cancel_futures=True)
+
+        # ----- 主数据源拉取 -----
+        if source == 'baostock':
+            _run_parallel(_fetch_baostock_chunk, (trade_date,))
+        else:
+            _run_parallel(_fetch_akshare_batch, (trade_date, preclose_map))
+
+        # ----- akshare 兜底：重试 baostock 失败的个股 -----
+        if source == 'baostock' and _failed:
+            fallback_symbols = [f['symbol'] for f in _failed]
+            _failed.clear()
+            logger.info(
+                '[SYNC_DAILY_BULK] Baostock 失败 %d 只，尝试 akshare 兜底',
+                len(fallback_symbols)
+            )
+            for symbol in fallback_symbols:
+                try:
+                    records, skipped, failed = _fetch_akshare_single(
+                        symbol, trade_date, preclose_map
+                    )
+                    _consume_batch(records, skipped, failed)
+                except Exception as exc:
+                    logger.warning(
+                        '[SYNC_DAILY_BULK] akshare 兜底失败 %s: %s', symbol, exc
+                    )
+                    _consume_batch(
+                        [], [],
+                        [{'symbol': symbol, 'reason': f'akshare fallback error: {exc}'}]
+                    )
+
     finally:
         pass
 
@@ -624,6 +638,21 @@ def _run_sync_bg(task_id: str, trade_date: str, log_id: int, only_missing: bool 
                 logger.info('[SYNC_DAILY_BG] 市场情绪预计算完成: %s', trade_date)
             except Exception as exc:
                 logger.warning('[SYNC_DAILY_BG] 市场情绪预计算失败: %s', exc)
+
+            # 日线同步成功后自动重建 portfolio 资产数据（修复历史日线补齐后资产趋势断层）
+            try:
+                from app.routes.portfolio import _rebuild_daily_data
+                db_portfolio = SessionLocal()
+                missing = _rebuild_daily_data(db_portfolio)
+                if missing:
+                    logger.warning('[SYNC_DAILY_BG] portfolio 重建发现缺失日线: %s', missing[:5])
+                else:
+                    db_portfolio.commit()
+                    logger.info('[SYNC_DAILY_BG] portfolio 资产数据重建完成')
+            except Exception as exc:
+                logger.warning('[SYNC_DAILY_BG] portfolio 重建失败: %s', exc)
+            finally:
+                db_portfolio.close()
 
         _finish_task(task_id, result=result)
         crud.sync_job_log_crud.finish(

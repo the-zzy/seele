@@ -1,6 +1,6 @@
 {
   "name": "seele",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Seele 股票数据管理系统 - 前后端统一入口",
   "private": true,
   "scripts": {
