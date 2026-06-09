@@ -130,13 +130,19 @@ function getScoreTooltip (item) {
 .stock-table {
   min-width: 800px;
 
+  td {
+    text-align: center;
+  }
+
   .code {
     font-family: var(--font-mono);
     color: var(--text-secondary);
+    text-align: left;
   }
 
   .name {
     font-weight: 500;
+    text-align: left;
   }
 
   .data-row {
