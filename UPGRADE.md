@@ -20,6 +20,7 @@
 |------|------|
 | [package.json](package.json) | `"version"` |
 | [seele-frontend/package.json](seele-frontend/package.json) | `"version"` |
+| [seele-frontend/src/App.vue](seele-frontend/src/App.vue) | 侧边栏 masthead 硬编码版本号 |
 | [seele-backend/app/__init__.py](seele-backend/app/__init__.py) | `__version__` |
 | [seele-backend/app/main.py](seele-backend/app/main.py) | `FastAPI(version=...)` |
 
@@ -112,7 +113,7 @@ git commit -m "chore: bump version to X.Y.Z"
 ## vX.Y.Z 升级检查清单
 
 ### 代码
-- [ ] 版本号已更新（package.json ×2、__init__.py、main.py）
+- [ ] 版本号已更新（package.json ×2、App.vue、__init__.py、main.py）
 - [ ] 版本号变更已提交到当前分支
 - [ ] 分支已推送远程
 
