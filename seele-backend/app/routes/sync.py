@@ -1471,11 +1471,12 @@ def _run_sync_indicator_bg(task_id: str, trade_date: str, log_id: int, only_miss
             _finish_task(task_id, error=msg)
             return
 
-        # 直接查询 symbol 列表（排除北交所，避免 get_list 的 JOIN 重复问题）
+        # 只基于当天有日线数据的股票计算指标，避免用历史数据张冠李戴
         symbols = [
-            s for (s,) in db.query(models.StockBasic.symbol)
-            .filter(models.StockBasic.market != '北交所')
-            .all()
+            row[0] for row in
+            db.query(models.StockDaily.symbol).filter(
+                models.StockDaily.trade_date == formatted_date
+            ).distinct().all()
         ]
 
         if only_missing:
