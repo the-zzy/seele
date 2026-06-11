@@ -1551,10 +1551,8 @@ def _run_sync_indicator_bg(task_id: str, trade_date: str, log_id: int, only_miss
                 _failed_count += 1
 
         if _items:
-            result = crud.stock_daily_indicator_crud.create_or_update_batch(db, _items)
+            crud.stock_daily_indicator_crud.create_or_update_batch(db, _items)
             db.commit()
-            _success_count = result['success']
-            _failed_count = result['failed']
 
         _update_task_progress(task_id, total, total)
         crud.sync_job_log_crud.finish(
