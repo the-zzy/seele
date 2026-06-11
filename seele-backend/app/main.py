@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
     )
     scheduler.add_job(
         scheduled_compute_indicators,
-        trigger=CronTrigger(hour=17, minute=30, day_of_week='mon-fri'),
+        trigger=CronTrigger(hour=18, minute=30, day_of_week='mon-fri'),
         id='sync_indicator',
         name='日线指标计算',
         replace_existing=True,
