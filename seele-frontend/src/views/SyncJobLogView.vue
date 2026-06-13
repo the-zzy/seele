@@ -601,20 +601,20 @@ onUnmounted(() => {
   margin-top: 8px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 12px;
 }
 
 .top-section {
   display: grid;
   grid-template-columns: minmax(280px, 30%) 1fr;
-  gap: 20px;
+  gap: 12px;
   min-height: 0;
 }
 
 .left-cards {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   min-width: 0;
 }
 
@@ -622,16 +622,16 @@ onUnmounted(() => {
   background: var(--bg-secondary);
   border: 1px solid var(--rule);
   border-radius: 6px;
-  padding: 16px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 
   .stock-basic-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding-bottom: 10px;
+    padding-bottom: 8px;
     border-bottom: 1px solid var(--rule);
   }
 
@@ -819,7 +819,7 @@ onUnmounted(() => {
   background: var(--bg-secondary);
   border: 1px solid var(--rule);
   border-radius: 6px;
-  padding: 16px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -829,7 +829,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   flex-shrink: 0;
 
   .section-title {
@@ -995,7 +995,7 @@ onUnmounted(() => {
   font-size: 12px;
 
   th, td {
-    padding: 8px 10px;
+    padding: 6px 10px;
     text-align: left;
     border-bottom: 1px solid var(--rule);
     white-space: nowrap;
@@ -1135,24 +1135,24 @@ onUnmounted(() => {
 .pipeline-cards {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
+  gap: 12px;
 }
 
 .pipeline-card {
   background: var(--bg-secondary);
   border: 1px solid var(--rule);
   border-radius: 6px;
-  padding: 16px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .pipeline-card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 10px;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--rule);
 }
 
