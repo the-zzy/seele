@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useEChart } from '@/composables/useEChart'
+import { useViewport } from '@/composables/useViewport'
 import { toast } from '@/composables/useToast'
 import { portfolioApi } from '@/api/portfolio'
 import PageHero from '@/components/common/PageHero.vue'
@@ -11,6 +12,7 @@ import PortfolioDayTradeModal from '@/components/portfolio/PortfolioDayTradeModa
 import PortfolioPositionTable from '@/components/portfolio/PortfolioPositionTable.vue'
 import PortfolioTradeTable from '@/components/portfolio/PortfolioTradeTable.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
+import MobileCardList from '@/components/common/MobileCardList.vue'
 
 // 统计数据
 const summary = ref({
@@ -24,6 +26,9 @@ const summary = ref({
   initial_capital: 35000,
   total_return_pct: 0
 })
+
+const router = useRouter()
+const { isMobile } = useViewport()
 
 // 列表数据
 const positions = ref([])
@@ -61,8 +66,6 @@ const alertsVisible = ref(true)
 // 缺失日线提示弹窗
 const missingDailyModalVisible = ref(false)
 const missingDailyList = ref([])
-
-const router = useRouter()
 
 // 图表
 const trendRef = useEChart()
@@ -658,7 +661,52 @@ onMounted(() => {
           已清仓记录
           <span v-if="closedTotal" class="section-count">{{ closedTotal }} 笔</span>
         </div>
-        <div class="table-wrap">
+        <div v-if="loading" class="state loading">加载中…</div>
+        <div v-else-if="!closedList.length" class="state empty">暂无记录</div>
+        <MobileCardList
+          v-else-if="isMobile"
+          :list="closedList"
+          key-field="id"
+        >
+          <template #default="{ item }">
+            <div class="closed-card">
+              <div class="card-header">
+                <span class="card-symbol">{{ item.symbol }}</span>
+                <span class="card-name">{{ item.name }}</span>
+                <span class="card-days">{{ Math.ceil((new Date(item.close_date) - new Date(item.open_date)) / (1000 * 60 * 60 * 24)) }} 天</span>
+              </div>
+              <div class="card-fields">
+                <div class="card-field">
+                  <span class="field-label">总买入</span>
+                  <span class="field-value">{{ Number(item.total_buy_amount).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">总卖出</span>
+                  <span class="field-value">{{ Number(item.total_sell_amount).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">手续费</span>
+                  <span class="field-value">{{ Number(item.total_fee || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">实现盈亏</span>
+                  <span
+                    class="field-value"
+                    :class="Number(item.realized_pnl) > 0 ? 'up' : Number(item.realized_pnl) < 0 ? 'down' : ''"
+                  >{{ Number(item.realized_pnl).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">盈亏比例</span>
+                  <span
+                    class="field-value"
+                    :class="Number(item.pnl_pct) > 0 ? 'up' : Number(item.pnl_pct) < 0 ? 'down' : ''"
+                  >{{ Number(item.pnl_pct).toFixed(2) }}%</span>
+                </div>
+              </div>
+            </div>
+          </template>
+        </MobileCardList>
+        <div v-else class="table-wrap">
           <table class="stock-table">
             <thead>
               <tr>
@@ -673,12 +721,6 @@ onMounted(() => {
               </tr>
             </thead>
             <tbody>
-              <tr v-if="loading">
-                <td colspan="8" class="empty">加载中...</td>
-              </tr>
-              <tr v-else-if="!closedList.length">
-                <td colspan="8" class="empty">暂无记录</td>
-              </tr>
               <tr v-for="item in closedList" :key="item.id">
                 <td class="mono">{{ item.symbol }}</td>
                 <td>{{ item.name }}</td>
@@ -1005,6 +1047,10 @@ onMounted(() => {
 .chart-body {
   flex: 1;
   min-height: 160px;
+
+  @media (max-width: 768px) {
+    min-height: 200px;
+  }
 }
 
 .bar-chart-row {
@@ -1071,6 +1117,64 @@ onMounted(() => {
   }
 }
 
+.closed-card {
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .card-symbol {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .card-name {
+    flex: 1;
+    font-family: var(--font-body);
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-days {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .card-fields {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px 16px;
+  }
+
+  .card-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .field-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .field-value {
+    font-size: 13px;
+    color: var(--text-primary);
+  }
+}
+
 .table-section {
   display: flex;
   flex-direction: column;
@@ -1125,6 +1229,17 @@ onMounted(() => {
 
 .capital-panel {
   width: 360px;
+}
+
+@media (max-width: 768px) {
+  .modal-panel {
+    width: calc(100% - 32px);
+    max-width: none;
+  }
+
+  .capital-panel {
+    width: calc(100% - 32px);
+  }
 }
 
 .modal-header {

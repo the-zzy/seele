@@ -147,4 +147,37 @@ function onReset () {
     background: var(--bg-tertiary);
   }
 }
+
+@media (max-width: 768px) {
+  .filter-section {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .field {
+    flex-direction: column;
+    align-items: stretch;
+    min-width: auto;
+
+    .field-label {
+      width: auto;
+      text-align: left;
+    }
+
+    input {
+      width: 100%;
+      box-sizing: border-box;
+    }
+  }
+
+  .filter-actions {
+    justify-content: stretch;
+
+    button {
+      flex: 1;
+      min-height: var(--touch-target);
+    }
+  }
+}
 </style>

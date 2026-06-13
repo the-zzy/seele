@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import { useViewport } from '@/composables/useViewport'
 
 const props = defineProps({
   pageNum: { type: Number, required: true },
@@ -8,6 +9,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:pageNum', 'update:pageSize'])
+
+const { isMobile } = useViewport()
 
 const totalPages = computed(() => Math.ceil(props.total / props.pageSize) || 1)
 
@@ -44,7 +47,7 @@ function onSizeChange (e) {
       <button :disabled="pageNum >= totalPages" class="btn-page" @click="next">下一页 →</button>
     </div>
 
-    <div class="pg-size">
+    <div v-if="!isMobile" class="pg-size">
       <span class="pg-label">Size</span>
       <select :value="pageSize" @change="onSizeChange">
         <option :value="10">10</option>
@@ -157,6 +160,23 @@ function onSizeChange (e) {
 
     &:hover, &:focus {
       border-color: var(--text-faint);
+    }
+  }
+}
+
+@media (max-width: 768px) {
+  .pagination {
+    gap: 10px;
+    padding: 12px 0;
+  }
+
+  .pg-controls {
+    flex: 1;
+
+    .btn-page {
+      flex: 1;
+      min-height: var(--touch-target);
+      padding: 8px 10px;
     }
   }
 }

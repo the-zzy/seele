@@ -7,6 +7,58 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Touch friendly base */
+button,
+input,
+select,
+textarea,
+a {
+  touch-action: manipulation;
+}
+
+button,
+[role='button'] {
+  min-height: var(--touch-target);
+}
+
+input,
+select,
+textarea {
+  min-height: var(--touch-target);
+}
+
+/* Mobile input font-size to prevent iOS zoom */
+@media (max-width: 768px) {
+  input[type='text'],
+  input[type='number'],
+  input[type='date'],
+  input[type='password'],
+  input[type='email'],
+  input[type='tel'],
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* Safe area helpers */
+.safe-bottom {
+  padding-bottom: var(--safe-bottom);
+}
+
+.safe-top {
+  padding-top: var(--safe-top);
+}
+
+/* Touch target helper */
+.touch-target {
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

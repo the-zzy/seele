@@ -9,8 +9,9 @@ from datetime import datetime
 from app import crud, models, schemas
 from app.database import SessionLocal
 from app.routes.market_sentiment import _persist_market_sentiment
-from app.routes.stock_indicator import _build_indicator_for_symbol
 from app.routes.sync import (
+    _register_task,
+    _run_sync_indicator_bg,
     _sync_board_daily_em,
     _sync_daily_bulk,
     _sync_etf_daily_em,
@@ -134,7 +135,10 @@ def scheduled_sync_financial(db, log_id: int) -> None:
 
 @_with_job_log('indicator')
 def scheduled_compute_indicators(db, log_id: int) -> None:
-    """定时计算日线指标（MACD/RSI/KDJ/BOLL等）"""
+    """定时计算日线指标（提交后台线程执行，与手动触发行为一致）"""
+    import threading
+    import uuid
+
     today = datetime.now()
     if not is_trading_day(today):
         logger.info('[SCHEDULER] 今日 %s 非交易日，跳过指标计算', today.strftime('%Y-%m-%d'))
@@ -158,44 +162,35 @@ def scheduled_compute_indicators(db, log_id: int) -> None:
         db.commit()
         return
 
-    symbols = [
-        row[0] for row in
-        db.query(models.StockDaily.symbol).filter(
-            models.StockDaily.trade_date == trade_date
-        ).distinct().all()
-    ]
+    existing_indicator = db.query(models.SyncJobLog).filter(
+        models.SyncJobLog.job_type == 'indicator',
+        models.SyncJobLog.status == 'success',
+        models.SyncJobLog.trade_date == trade_date,
+    ).first()
+    if existing_indicator:
+        logger.info('[SCHEDULER] 交易日 %s 的指标已计算，跳过', trade_date)
+        crud.sync_job_log_crud.finish(
+            db, log_id, 'skipped', extra_info=f'indicator already computed for {trade_date}'
+        )
+        db.commit()
+        return
 
-    total = len(symbols)
-    success_count = 0
-    failed_count = 0
-    items = []
+    log = crud.sync_job_log_crud.get_by_id(db, log_id)
+    if log:
+        log.trade_date = trade_date
+        db.commit()
 
-    for symbol in symbols:
-        indicator_data = _build_indicator_for_symbol(db, symbol, trade_date)
-        if indicator_data is None:
-            failed_count += 1
-            continue
-        indicator_data['symbol'] = symbol
-        indicator_data['trade_date'] = trade_date
-        items.append(indicator_data)
-        success_count += 1
-
-    if items:
-        result = crud.stock_daily_indicator_crud.create_or_update_batch(db, items)
-        success_count = result['success']
-        failed_count = result['failed']
-
-    crud.sync_job_log_crud.finish(
-        db,
-        log_id,
-        status='success',
-        success_count=success_count,
-        failed_count=failed_count,
-        total_count=total,
-        trade_date=trade_date,
-        extra_info=f'indicators for {formatted_date}',
+    task_id = str(uuid.uuid4())
+    _register_task(task_id, trade_date, job_type='indicator')
+    t = threading.Thread(
+        target=_run_sync_indicator_bg,
+        args=(task_id, formatted_date, log_id, True),
+        daemon=True,
     )
-    db.commit()
+    t.start()
+    logger.info('[SCHEDULER] 指标计算后台线程已启动, task_id=%s, log_id=%s', task_id, log_id)
+    # 后台线程自行更新日志状态，定时任务立即返回
+    return
 
 
 @_with_job_log('board_daily')

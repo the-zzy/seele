@@ -220,4 +220,12 @@ async function handleLogin () {
 .fade-leave-to {
   opacity: 0;
 }
+
+@media (max-width: 768px) {
+  .auth-modal {
+    width: calc(100% - 32px);
+    max-width: 360px;
+    padding: 32px 24px 28px;
+  }
+}
 </style>

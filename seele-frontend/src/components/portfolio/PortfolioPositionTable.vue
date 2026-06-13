@@ -1,5 +1,7 @@
 <script setup>
 import { ref } from 'vue'
+import { useViewport } from '@/composables/useViewport'
+import MobileCardList from '@/components/common/MobileCardList.vue'
 
 defineProps({
   list: { type: Array, default: () => [] },
@@ -7,6 +9,8 @@ defineProps({
 })
 
 const emit = defineEmits(['edit', 'update-position'])
+
+const { isMobile } = useViewport()
 
 const pnlMode = ref('history') // 'history' | 'current'
 const editingSymbol = ref(null)
@@ -95,7 +99,97 @@ function holdingDays (firstBuyDate) {
         当前盈亏
       </button>
     </div>
-    <div class="table-wrap">
+    <div v-if="loading" class="state loading">加载中…</div>
+    <div v-else-if="!list.length" class="state empty">暂无持仓</div>
+    <MobileCardList
+      v-else-if="isMobile"
+      :list="list"
+      key-field="symbol"
+    >
+      <template #default="{ item }">
+        <div class="position-card" :class="alertClass(item)">
+          <div class="card-header">
+            <div class="header-left">
+              <span class="card-symbol">{{ item.symbol }}</span>
+              <span v-if="alertText(item)" class="alert-badge">{{ alertText(item) }}</span>
+            </div>
+            <span class="card-name">{{ item.name }}</span>
+            <span class="group-tag" :class="item.group">{{ item.group || 'default' }}</span>
+          </div>
+          <div class="card-fields">
+            <div class="card-field">
+              <span class="field-label">持仓股数</span>
+              <span class="field-value">{{ item.quantity != null ? item.quantity.toLocaleString() : '-' }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">平均成本</span>
+              <span class="field-value">{{ fmt(item.avg_cost) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">最新价</span>
+              <span class="field-value">{{ fmt(item.current_price) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">市值</span>
+              <span class="field-value">{{ fmt(item.market_value) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">{{ pnlMode === 'history' ? '历史盈亏' : '当前盈亏' }}</span>
+              <span
+                class="field-value"
+                :class="pnlClass(pnlMode === 'history' ? item.history_pnl : item.unrealized_pnl)"
+              >{{ fmt(pnlMode === 'history' ? item.history_pnl : item.unrealized_pnl) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">盈亏比例</span>
+              <span
+                class="field-value"
+                :class="pnlClass(pnlMode === 'history' ? item.history_pnl_pct : item.unrealized_pnl_pct)"
+              >{{ fmt(pnlMode === 'history' ? item.history_pnl_pct : item.unrealized_pnl_pct) }}%</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">持仓天数</span>
+              <span class="field-value">{{ holdingDays(item.first_buy_date) }}</span>
+            </div>
+            <div class="card-field wide">
+              <span class="field-label">备注</span>
+              <span class="field-value remark">{{ item.remark || '-' }}</span>
+            </div>
+          </div>
+          <div class="card-actions">
+            <button class="btn-edit" @click.stop="startEdit(item)">编辑</button>
+          </div>
+        </div>
+        <div v-if="editingSymbol === item.symbol" class="mobile-edit-form">
+          <div class="edit-field">
+            <label>止损价</label>
+            <input v-model="editForm.stop_loss_price" placeholder="元" type="number" step="0.01">
+          </div>
+          <div class="edit-field">
+            <label>止盈价</label>
+            <input v-model="editForm.take_profit_price" placeholder="元" type="number" step="0.01">
+          </div>
+          <div class="edit-field">
+            <label>分组</label>
+            <select v-model="editForm.group">
+              <option value="default">默认</option>
+              <option value="core">核心仓</option>
+              <option value="watch">观察仓</option>
+              <option value="trial">试错仓</option>
+            </select>
+          </div>
+          <div class="edit-field wide">
+            <label>备注</label>
+            <input v-model="editForm.remark" placeholder="备注" type="text">
+          </div>
+          <div class="edit-actions">
+            <button class="btn-link" @click="cancelEdit">取消</button>
+            <button class="btn-primary" @click="saveEdit(item.symbol)">保存</button>
+          </div>
+        </div>
+      </template>
+    </MobileCardList>
+    <div v-else class="table-wrap">
       <table class="stock-table">
         <thead>
           <tr>
@@ -114,76 +208,68 @@ function holdingDays (firstBuyDate) {
           </tr>
         </thead>
         <tbody>
-          <tr v-if="loading">
-            <td colspan="12" class="empty">加载中...</td>
+          <tr v-for="item in list" :key="item.symbol">
+            <td class="mono">
+              {{ item.symbol }}
+              <span v-if="alertText(item)" class="alert-badge">{{ alertText(item) }}</span>
+            </td>
+            <td>{{ item.name }}</td>
+            <td class="num">{{ item.quantity != null ? item.quantity.toLocaleString() : '-' }}</td>
+            <td class="num">{{ fmt(item.avg_cost) }}</td>
+            <td class="num">{{ fmt(item.current_price) }}</td>
+            <td class="num">{{ fmt(item.market_value) }}</td>
+            <td
+              class="num"
+              :class="pnlClass(pnlMode === 'history' ? item.history_pnl : item.unrealized_pnl)"
+            >
+              {{ fmt(pnlMode === 'history' ? item.history_pnl : item.unrealized_pnl) }}
+            </td>
+            <td
+              class="num"
+              :class="pnlClass(pnlMode === 'history' ? item.history_pnl_pct : item.unrealized_pnl_pct)"
+            >
+              {{ fmt(pnlMode === 'history' ? item.history_pnl_pct : item.unrealized_pnl_pct) }}%
+            </td>
+            <td class="num">{{ holdingDays(item.first_buy_date) }}</td>
+            <td>
+              <span class="group-tag" :class="item.group">{{ item.group || 'default' }}</span>
+            </td>
+            <td class="remark">{{ item.remark || '-' }}</td>
+            <td>
+              <button class="btn-edit" @click="startEdit(item)">编辑</button>
+            </td>
           </tr>
-          <tr v-else-if="!list.length">
-            <td colspan="12" class="empty">暂无持仓</td>
-          </tr>
-          <template v-for="item in list" :key="item.symbol">
-            <tr :class="alertClass(item)">
-              <td class="mono">
-                {{ item.symbol }}
-                <span v-if="alertText(item)" class="alert-badge">{{ alertText(item) }}</span>
-              </td>
-              <td>{{ item.name }}</td>
-              <td class="num">{{ item.quantity != null ? item.quantity.toLocaleString() : '-' }}</td>
-              <td class="num">{{ fmt(item.avg_cost) }}</td>
-              <td class="num">{{ fmt(item.current_price) }}</td>
-              <td class="num">{{ fmt(item.market_value) }}</td>
-              <td
-                class="num"
-                :class="pnlClass(pnlMode === 'history' ? item.history_pnl : item.unrealized_pnl)"
-              >
-                {{ fmt(pnlMode === 'history' ? item.history_pnl : item.unrealized_pnl) }}
-              </td>
-              <td
-                class="num"
-                :class="pnlClass(pnlMode === 'history' ? item.history_pnl_pct : item.unrealized_pnl_pct)"
-              >
-                {{ fmt(pnlMode === 'history' ? item.history_pnl_pct : item.unrealized_pnl_pct) }}%
-              </td>
-              <td class="num">{{ holdingDays(item.first_buy_date) }}</td>
-              <td>
-                <span class="group-tag" :class="item.group">{{ item.group || 'default' }}</span>
-              </td>
-              <td class="remark">{{ item.remark || '-' }}</td>
-              <td>
-                <button class="btn-edit" @click="startEdit(item)">编辑</button>
-              </td>
-            </tr>
-            <tr v-if="editingSymbol === item.symbol" class="edit-row">
-              <td colspan="12">
-                <div class="edit-form">
-                  <div class="edit-field">
-                    <label>止损价</label>
-                    <input v-model="editForm.stop_loss_price" placeholder="元" type="number" step="0.01">
-                  </div>
-                  <div class="edit-field">
-                    <label>止盈价</label>
-                    <input v-model="editForm.take_profit_price" placeholder="元" type="number" step="0.01">
-                  </div>
-                  <div class="edit-field">
-                    <label>分组</label>
-                    <select v-model="editForm.group">
-                      <option value="default">默认</option>
-                      <option value="core">核心仓</option>
-                      <option value="watch">观察仓</option>
-                      <option value="trial">试错仓</option>
-                    </select>
-                  </div>
-                  <div class="edit-field">
-                    <label>备注</label>
-                    <input v-model="editForm.remark" placeholder="备注" type="text">
-                  </div>
-                  <div class="edit-actions">
-                    <button class="btn-link" @click="cancelEdit">取消</button>
-                    <button class="btn-primary" @click="saveEdit(item.symbol)">保存</button>
-                  </div>
+          <tr v-if="editingSymbol" class="edit-row">
+            <td colspan="12">
+              <div class="edit-form">
+                <div class="edit-field">
+                  <label>止损价</label>
+                  <input v-model="editForm.stop_loss_price" placeholder="元" type="number" step="0.01">
                 </div>
-              </td>
-            </tr>
-          </template>
+                <div class="edit-field">
+                  <label>止盈价</label>
+                  <input v-model="editForm.take_profit_price" placeholder="元" type="number" step="0.01">
+                </div>
+                <div class="edit-field">
+                  <label>分组</label>
+                  <select v-model="editForm.group">
+                    <option value="default">默认</option>
+                    <option value="core">核心仓</option>
+                    <option value="watch">观察仓</option>
+                    <option value="trial">试错仓</option>
+                  </select>
+                </div>
+                <div class="edit-field">
+                  <label>备注</label>
+                  <input v-model="editForm.remark" placeholder="备注" type="text">
+                </div>
+                <div class="edit-actions">
+                  <button class="btn-link" @click="cancelEdit">取消</button>
+                  <button class="btn-primary" @click="saveEdit(editingSymbol)">保存</button>
+                </div>
+              </div>
+            </td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -395,6 +481,108 @@ function holdingDays (firstBuyDate) {
 
   &:hover {
     background: var(--accent-hover);
+  }
+}
+
+.position-card {
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+    flex-wrap: wrap;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .card-symbol {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .card-name {
+    flex: 1;
+    font-family: var(--font-body);
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-fields {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px 16px;
+  }
+
+  .card-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+
+    &.wide {
+      grid-column: 1 / -1;
+    }
+  }
+
+  .field-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .field-value {
+    font-size: 13px;
+    color: var(--text-primary);
+  }
+
+  .card-actions {
+    margin-top: 12px;
+    display: flex;
+    justify-content: flex-end;
+  }
+}
+
+.mobile-edit-form {
+  margin-top: 10px;
+  padding: 14px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+
+  .edit-field {
+    width: 100%;
+
+    &.wide {
+      grid-column: 1 / -1;
+    }
+
+    input,
+    select {
+      width: 100%;
+      box-sizing: border-box;
+      min-height: var(--touch-target);
+    }
+  }
+
+  .edit-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
   }
 }
 </style>

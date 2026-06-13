@@ -2,7 +2,7 @@
 数据库模型模块
 """
 
-from sqlalchemy import Column, Integer, String, Float, Numeric, Date, UniqueConstraint, BigInteger, TIMESTAMP, Index
+from sqlalchemy import Column, Integer, String, Float, Numeric, Date, Text, UniqueConstraint, BigInteger, TIMESTAMP, Index
 from sqlalchemy.sql import func
 
 from app.database import Base
@@ -17,6 +17,7 @@ class StockBasic(Base):
     name = Column(String(100), nullable=False, comment="股票名称")
     area = Column(String(50), comment="所在地区")
     industry = Column(String(50), comment="所属行业")
+    industry_detail = Column(String(100), comment="细分行业（证监会行业）")
     market = Column(String(20), comment="市场板块")
     float_market_cap = Column(Numeric(18, 4), comment="流通市值(亿元)")
     list_date = Column(Date, comment="上市日期")
@@ -437,6 +438,34 @@ class GalleryImage(Base):
     mime_type = Column(String(50), nullable=False, comment='MIME类型')
     url_path = Column(String(500), nullable=False, comment='访问路径')
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False, comment='创建时间')
+
+
+class StockCompanyProfile(Base):
+    """股票公司概况表（来源：东方财富 F10）"""
+    __tablename__ = 'stock_company_profile'
+
+    symbol = Column(String(20), primary_key=True, comment='股票代码')
+    company_full_name = Column(String(200), comment='公司全称')
+    english_name = Column(String(200), comment='英文名称')
+    chairman = Column(String(100), comment='董事长')
+    general_manager = Column(String(100), comment='总经理')
+    secretary = Column(String(100), comment='董事会秘书')
+    legal_representative = Column(String(100), comment='法人代表')
+    phone = Column(String(50), comment='联系电话')
+    email = Column(String(100), comment='电子邮箱')
+    fax = Column(String(50), comment='传真')
+    website = Column(String(200), comment='公司网址')
+    office_address = Column(String(500), comment='办公地址')
+    reg_address = Column(String(500), comment='注册地址')
+    postcode = Column(String(20), comment='邮政编码')
+    reg_capital = Column(String(50), comment='注册资本')
+    employees = Column(Integer, comment='员工人数')
+    founded_date = Column(String(20), comment='成立日期')
+    company_profile = Column(Text, comment='公司简介')
+    business_scope = Column(Text, comment='经营范围')
+    industry_detail = Column(String(100), comment='所属证监会行业')
+    exchange = Column(String(50), comment='所属交易所')
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
 
 
 class VisitorLog(Base):

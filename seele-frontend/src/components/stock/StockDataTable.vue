@@ -1,4 +1,6 @@
 <script setup>
+import { useViewport } from '@/composables/useViewport'
+import MobileCardList from '@/components/common/MobileCardList.vue'
 import {
   formatDate,
   formatNumber,
@@ -17,6 +19,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['sort', 'row-dblclick'])
+
+const { isMobile } = useViewport()
 
 const columns = [
   { key: 'symbol', label: '代码', align: 'left' },
@@ -53,11 +57,23 @@ function onDblClick (item) {
   emit('row-dblclick', item)
 }
 
+function onClick (item) {
+  emit('row-dblclick', item)
+}
+
 function getChgBgClass (val) {
   if (!val) return ''
   const value = parseFloat(val)
   if (value > 0) return 'up-bg'
   if (value < 0) return 'down-bg'
+  return ''
+}
+
+function getChgClass (val) {
+  if (val == null) return ''
+  const value = parseFloat(val)
+  if (value > 0) return 'up'
+  if (value < 0) return 'down'
   return ''
 }
 </script>
@@ -66,6 +82,48 @@ function getChgBgClass (val) {
   <div class="table-section">
     <div v-if="loading" class="state loading">加载中…</div>
     <div v-else-if="list.length === 0" class="state empty">暂无数据</div>
+    <MobileCardList
+      v-else-if="isMobile"
+      :list="list"
+      key-field="id"
+      @click-item="onClick"
+    >
+      <template #default="{ item }">
+        <div class="stock-card">
+          <div class="card-header">
+            <span class="card-code">{{ extractCodeNum(item.symbol) }}</span>
+            <span class="card-name">{{ item.name }}</span>
+            <span class="card-date">{{ formatDate(item.tradeDate) }}</span>
+          </div>
+          <div class="card-fields">
+            <div class="card-field">
+              <span class="field-label">收盘</span>
+              <span class="field-value" :class="getPriceClass(item.close, item.pctChg)">{{ formatNumber(item.close) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">涨跌幅</span>
+              <span class="field-value" :class="getChgClass(item.pctChg)">{{ formatPctChg(item.pctChg) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">成交量</span>
+              <span class="field-value">{{ formatVolume(item.volume) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">成交额</span>
+              <span class="field-value">{{ formatAmount(item.amount) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">换手</span>
+              <span class="field-value">{{ formatTurnover(item.turnover) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">振幅</span>
+              <span class="field-value">{{ formatNumber(item.amplitude) }}%</span>
+            </div>
+          </div>
+        </div>
+      </template>
+    </MobileCardList>
     <table v-else class="stock-table">
       <thead>
         <tr>
@@ -116,5 +174,63 @@ function getChgBgClass (val) {
 
 .stock-table {
   min-width: 1100px;
+}
+
+.stock-card {
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .card-code {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .card-name {
+    flex: 1;
+    font-family: var(--font-body);
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-date {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .card-fields {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px 16px;
+  }
+
+  .card-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .field-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .field-value {
+    font-size: 13px;
+    color: var(--text-primary);
+  }
 }
 </style>

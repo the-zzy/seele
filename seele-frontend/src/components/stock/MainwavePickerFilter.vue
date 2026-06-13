@@ -202,4 +202,37 @@ function onReset () {
     background: var(--bg-tertiary);
   }
 }
+
+@media (max-width: 768px) {
+  .filter-section {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .field {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+
+    .field-label {
+      width: auto;
+      text-align: left;
+    }
+
+    input {
+      width: 100%;
+      box-sizing: border-box;
+    }
+  }
+
+  .filter-actions {
+    grid-column: 1 / -1;
+    justify-content: stretch;
+
+    button {
+      flex: 1;
+      min-height: var(--touch-target);
+    }
+  }
+}
 </style>

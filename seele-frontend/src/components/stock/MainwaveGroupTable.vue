@@ -1,5 +1,7 @@
 <script setup>
 import { computed, ref, watch, nextTick, onMounted } from 'vue'
+import { useViewport } from '@/composables/useViewport'
+import MobileCardList from '@/components/common/MobileCardList.vue'
 import { formatNumber } from '@/utils/formatters'
 
 const props = defineProps({
@@ -8,6 +10,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['row-dblclick'])
+
+const { isMobile } = useViewport()
 
 const layers = [20, 10, 5, 'OFF']
 
@@ -33,7 +37,6 @@ const groups = computed(() => {
 
 const activeLayer = ref(20)
 
-// 数据变化时，如果当前激活层无数据，自动切到第一个有数据的层
 watch(() => props.list, (list) => {
   if (!list.length) return
   nextTick(() => {
@@ -73,6 +76,10 @@ function onDblClick (item) {
   emit('row-dblclick', item)
 }
 
+function onClick (item) {
+  emit('row-dblclick', item)
+}
+
 function getScoreClass (score) {
   if (!score || score.total === undefined) return ''
   const total = score.total
@@ -96,6 +103,14 @@ function formatDate (dateStr) {
   const d = new Date(dateStr)
   if (isNaN(d.getTime())) return dateStr
   return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function getChgClass (val) {
+  if (val == null) return ''
+  const value = parseFloat(val)
+  if (value > 0) return 'up'
+  if (value < 0) return 'down'
+  return ''
 }
 
 function setTabRef (el, idx) {
@@ -129,14 +144,58 @@ function setTabRef (el, idx) {
         </div>
       </div>
 
-      <!-- 当前分组表格 -->
+      <!-- 当前分组内容 -->
       <div class="table-section">
         <div v-if="!currentGroup.length" class="state empty">该分组暂无数据</div>
+        <MobileCardList
+          v-else-if="isMobile"
+          :list="currentGroup"
+          key-field="symbol"
+          @click-item="onClick"
+        >
+          <template #default="{ item }">
+            <div class="stock-card" :class="{ holding: item.isHolding }">
+              <div class="card-header">
+                <span class="card-code">{{ extractCodeNum(item.symbol) }}</span>
+                <span class="card-name">{{ item.name }}</span>
+                <span v-if="item.industry" class="card-industry">{{ item.industry }}</span>
+                <span class="score-tag" :class="getScoreClass(item.score)">{{ getScoreLabel(item.score) }}</span>
+              </div>
+              <div class="card-fields">
+                <div class="card-field">
+                  <span class="field-label">股价</span>
+                  <span class="field-value">{{ item.close != null ? formatNumber(item.close) : '-' }}</span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">涨幅</span>
+                  <span class="field-value" :class="getChgClass(item.pctChg)">{{ item.pctChg != null ? (item.pctChg > 0 ? '+' : '') + item.pctChg.toFixed(2) + '%' : '-' }}</span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">MA5 / MA10 / MA20</span>
+                  <span class="field-value">
+                    {{ item.ma5 != null ? formatNumber(item.ma5) : '-' }} /
+                    {{ item.ma10 != null ? formatNumber(item.ma10) : '-' }} /
+                    {{ item.ma20 != null ? formatNumber(item.ma20) : '-' }}
+                  </span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">启动日</span>
+                  <span class="field-value">{{ formatDate(item.launchDate) }}</span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">启动至今</span>
+                  <span class="field-value" :class="getChgClass(item.launchPctChg)">{{ item.launchPctChg != null ? (item.launchPctChg > 0 ? '+' : '') + item.launchPctChg.toFixed(2) + '%' : '-' }}</span>
+                </div>
+              </div>
+            </div>
+          </template>
+        </MobileCardList>
         <table v-else class="stock-table">
           <thead>
             <tr>
               <th>代码</th>
               <th>名称</th>
+              <th>板块</th>
               <th>评分</th>
               <th>股价</th>
               <th>涨幅</th>
@@ -157,6 +216,7 @@ function setTabRef (el, idx) {
             >
               <td class="code">{{ extractCodeNum(item.symbol) }}</td>
               <td class="name">{{ item.name }}</td>
+              <td class="industry">{{ item.industry || '-' }}</td>
               <td :class="getScoreClass(item.score)">
                 {{ getScoreLabel(item.score) }}
               </td>
@@ -275,6 +335,10 @@ function setTabRef (el, idx) {
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+.stock-table .industry {
+  text-align: left;
+}
+
 .stock-table .data-row.holding {
   background: rgba(245, 158, 11, 0.08);
 }
@@ -283,4 +347,74 @@ function setTabRef (el, idx) {
 .stock-table .score-ok { color: #f59e0b; font-weight: 600; }
 .stock-table .score-weak { color: #9ca3af; }
 .stock-table .score-poor { color: var(--down); }
+
+.stock-card {
+  &.holding {
+    background: rgba(245, 158, 11, 0.08);
+    border-color: rgba(245, 158, 11, 0.2);
+  }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .card-code {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .card-name {
+    flex: 1;
+    font-family: var(--font-body);
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-industry {
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--bg-tertiary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+
+  .card-fields {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px 16px;
+  }
+
+  .card-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+
+    &:nth-child(3) {
+      grid-column: 1 / -1;
+    }
+  }
+
+  .field-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .field-value {
+    font-size: 13px;
+    color: var(--text-primary);
+  }
+}
 </style>

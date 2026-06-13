@@ -56,3 +56,28 @@ def query_board_constituents(code: str, db: Session = Depends(get_db)):
         'amount': float(c.amount) if c.amount is not None else None,
         'update_date': str(c.update_date) if c.update_date else None,
     } for c in items])
+
+
+@router.post('/constituents/save')
+def save_board_constituent(data: schemas.BoardConstituentCreate, db: Session = Depends(get_db)):
+    """保存板块-个股关联关系（存在则更新，不存在则新增）"""
+    board = crud.board_info_crud.get_by_code(db, data.board_code)
+    if not board:
+        return success({'saved': False, 'reason': f'板块代码 {data.board_code} 不存在'})
+
+    stock = crud.stock_basic_crud.get_by_symbol(db, data.constituent_symbol)
+    if not stock:
+        return success({'saved': False, 'reason': f'股票代码 {data.constituent_symbol} 不存在'})
+
+    db_obj, is_created = crud.board_constituent_crud.upsert(db, data)
+    db.commit()
+    db.refresh(db_obj)
+    return success({
+        'saved': True,
+        'is_created': is_created,
+        'id': db_obj.id,
+        'board_code': db_obj.board_code,
+        'constituent_symbol': db_obj.constituent_symbol,
+        'name': db_obj.name,
+        'update_date': str(db_obj.update_date) if db_obj.update_date else None,
+    })

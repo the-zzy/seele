@@ -3,8 +3,10 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { toast } from '@/composables/useToast'
 import { syncApi, tradeCalendarApi } from '@/api/stock'
 import { useSyncTask } from '@/composables/useSyncTask'
+import { useViewport } from '@/composables/useViewport'
 import PageHero from '@/components/common/PageHero.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
+import MobileCardList from '@/components/common/MobileCardList.vue'
 
 const detailedStatus = ref(null)
 const dailyTotal = ref(0)
@@ -13,6 +15,7 @@ const dailyPageSize = ref(10)
 const incrementalMap = ref({})
 
 const { syncing, progress: taskProgress, startSync, restoreTasks, clearPoll } = useSyncTask()
+const { isMobile } = useViewport()
 
 const pipeline = ref(null)
 const pipelinePollTimer = ref(null)
@@ -429,7 +432,71 @@ onUnmounted(() => {
             <h3 class="section-title">最近十个交易日</h3>
             <span class="section-note">统计范围不含北交所 · 每页 10 条</span>
           </div>
-          <div class="daily-table-wrap">
+          <MobileCardList
+            v-if="isMobile"
+            :list="detailedStatus.daily"
+            key-field="date"
+          >
+            <template #default="{ item }">
+              <div class="daily-card">
+                <div class="daily-card-header">
+                  <span class="daily-date">{{ item.date }}</span>
+                  <span class="daily-count">{{ item.total_stock_count }} 只</span>
+                </div>
+                <div class="daily-fields">
+                  <div class="daily-field">
+                    <span class="field-label">日线数据</span>
+                    <span class="field-value" :class="item.daily_count > 0 ? 'num-ok' : 'num-zero'">
+                      {{ item.daily_count }}
+                      <small v-if="item.missing_daily > 0" class="missing-tag">缺{{ item.missing_daily }}</small>
+                    </span>
+                  </div>
+                  <div class="daily-field">
+                    <span class="field-label">指标数据</span>
+                    <span class="field-value" :class="item.indicator_count > 0 ? 'num-ok' : 'num-zero'">
+                      {{ item.indicator_count }}
+                      <small v-if="item.missing_indicator > 0" class="missing-tag">缺{{ item.missing_indicator }}</small>
+                    </span>
+                  </div>
+                  <div class="daily-field">
+                    <span class="field-label">更新模式</span>
+                    <label class="toggle-label">
+                      <input
+                        type="checkbox"
+                        v-model="incrementalMap[item.date]"
+                      >
+                      <span class="toggle-text">{{ incrementalMap[item.date] ? '增量' : '全量' }}</span>
+                    </label>
+                  </div>
+                </div>
+                <div class="daily-actions">
+                  <button
+                    class="btn-sync-small"
+                    :disabled="syncing['daily_' + item.date.replace(/-/g, '')]"
+                    @click="handleDailySync(item.date)"
+                  >
+                    {{ syncing['daily_' + item.date.replace(/-/g, '')]
+                      ? (taskProgress['daily_' + item.date.replace(/-/g, '')]?.total > 0
+                        ? `同步中 ${taskProgress['daily_' + item.date.replace(/-/g, '')].current}/${taskProgress['daily_' + item.date.replace(/-/g, '')].total}`
+                        : '同步中...')
+                      : '日线同步' }}
+                  </button>
+                  <button
+                    class="btn-sync-small"
+                    :disabled="syncing['indicator_' + item.date.replace(/-/g, '')]"
+                    @click="handleIndicatorSync(item.date)"
+                  >
+                    {{ syncing['indicator_' + item.date.replace(/-/g, '')]
+                      ? (taskProgress['indicator_' + item.date.replace(/-/g, '')]?.total > 0
+                        ? `计算中 ${taskProgress['indicator_' + item.date.replace(/-/g, '')].current}/${taskProgress['indicator_' + item.date.replace(/-/g, '')].total}`
+                        : '计算中...')
+                      : '指标计算' }}
+                  </button>
+                </div>
+              </div>
+            </template>
+          </MobileCardList>
+          <div v-else class="daily-table-wrap">
             <table class="daily-table">
               <thead>
                 <tr>
@@ -852,6 +919,64 @@ onUnmounted(() => {
   color: var(--text-primary);
   font-family: var(--font-mono);
   font-weight: 600;
+}
+
+.daily-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 14px;
+
+  .daily-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .daily-date {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .daily-count {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .daily-fields {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px 16px;
+    margin-bottom: 14px;
+  }
+
+  .daily-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .field-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .field-value {
+    font-size: 13px;
+    color: var(--text-primary);
+  }
+
+  .daily-actions {
+    display: flex;
+    gap: 10px;
+  }
 }
 
 .daily-table-wrap {

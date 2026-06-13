@@ -2,11 +2,14 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useEChart } from '@/composables/useEChart'
+import { useViewport } from '@/composables/useViewport'
 import { boardApi } from '@/api/stock'
 import BasePagination from '@/components/common/BasePagination.vue'
+import MobileCardList from '@/components/common/MobileCardList.vue'
 
 const route = useRoute()
 const router = useRouter()
+const { isMobile } = useViewport()
 const code = route.params.code || ''
 
 const { chartRef, init, resize } = useEChart()
@@ -157,8 +160,8 @@ function initChart (list) {
         itemHeight: 3
       },
       grid: [
-        { left: '8%', right: '4%', top: '6%', height: '60%' },
-        { left: '8%', right: '4%', top: '74%', height: '14%' }
+        { left: '8%', right: '4%', top: '6%', height: isMobile.value ? '58%' : '60%' },
+        { left: '8%', right: '4%', top: isMobile.value ? '72%' : '74%', height: isMobile.value ? '16%' : '14%' }
       ],
       xAxis: [
         {
@@ -211,10 +214,10 @@ function initChart (list) {
           show: true,
           xAxisIndex: [0, 1],
           type: 'slider',
-          top: '92%',
+          top: isMobile.value ? '90%' : '92%',
           start: startPercent,
           end: 100,
-          height: 18,
+          height: isMobile.value ? 28 : 18,
           borderColor: 'transparent',
           fillerColor: 'rgba(59,130,246,0.12)',
           handleStyle: { color: '#3b82f6' },
@@ -408,6 +411,48 @@ onMounted(() => {
       <div class="table-section">
         <div v-if="constLoading" class="state loading">加载中…</div>
         <div v-else-if="constituents.length === 0" class="state empty">暂无成分股数据</div>
+        <MobileCardList
+          v-else-if="isMobile"
+          :list="constTableRows"
+          key-field="symbol"
+          @click-item="goStock"
+        >
+          <template #default="{ item }">
+            <div class="const-card">
+              <div class="card-header">
+                <span class="card-symbol">{{ item.symbol }}</span>
+                <span class="card-name">{{ item.name || '—' }}</span>
+                <span class="card-date">{{ item.trade_date || '—' }}</span>
+              </div>
+              <div class="card-fields">
+                <div class="card-field">
+                  <span class="field-label">开盘</span>
+                  <span class="field-value">{{ item.open != null ? item.open.toFixed(2) : '—' }}</span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">最高</span>
+                  <span class="field-value">{{ item.high != null ? item.high.toFixed(2) : '—' }}</span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">最低</span>
+                  <span class="field-value">{{ item.low != null ? item.low.toFixed(2) : '—' }}</span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">收盘</span>
+                  <span class="field-value" :class="getPriceClass(item.pct_chg)">{{ item.close != null ? item.close.toFixed(2) : '—' }}</span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">涨跌幅</span>
+                  <span class="field-value" :class="getPriceClass(item.pct_chg)">{{ formatChg(item.pct_chg) }}</span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">成交额</span>
+                  <span class="field-value">{{ formatAmount(item.amount) }}</span>
+                </div>
+              </div>
+            </div>
+          </template>
+        </MobileCardList>
         <table v-else class="stock-table">
           <colgroup>
             <col style="width:10%" />
@@ -666,6 +711,10 @@ onMounted(() => {
   border-radius: 4px;
   background: var(--bg-secondary);
   overflow: hidden;
+
+  @media (max-width: 768px) {
+    height: 360px;
+  }
 }
 
 .kline-chart {
@@ -696,6 +745,64 @@ onMounted(() => {
   }
 
   .name {
+    color: var(--text-primary);
+  }
+}
+
+.const-card {
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .card-symbol {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  .card-name {
+    flex: 1;
+    font-family: var(--font-body);
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-date {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .card-fields {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px 16px;
+  }
+
+  .card-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .field-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .field-value {
+    font-size: 13px;
     color: var(--text-primary);
   }
 }

@@ -485,6 +485,44 @@ class StockBasicCRUD:
         else:
             return self.create(db, obj_in)
 
+    def update_industry_detail(self, db: Session, symbol: str, industry_detail: str) -> bool:
+        """更新单只股票的细分行业（不自动 commit，由调用方统一提交）"""
+        db_obj = self.get_by_symbol(db, symbol)
+        if db_obj:
+            db_obj.industry_detail = industry_detail
+            return True
+        return False
+
+    def update_industry_detail_batch(self, db: Session, items: list[dict]) -> dict:
+        """批量更新细分行业（不自动 commit，由调用方统一提交）
+
+        items: [{'symbol': '000001', 'industry_detail': '金融业-货币金融服务'}, ...]
+        """
+        if not items:
+            return {"success": 0, "failed": 0}
+
+        symbols = [d["symbol"] for d in items]
+        existing = {
+            r.symbol: r
+            for r in db.query(models.StockBasic)
+            .filter(models.StockBasic.symbol.in_(symbols))
+            .all()
+        }
+
+        success = 0
+        failed = 0
+        for data in items:
+            symbol = data.get("symbol")
+            industry_detail = data.get("industry_detail")
+            db_obj = existing.get(symbol)
+            if db_obj and industry_detail is not None:
+                db_obj.industry_detail = industry_detail
+                success += 1
+            else:
+                failed += 1
+
+        return {"success": success, "failed": failed}
+
     def upsert_batch(self, db: Session, obj_list: list[schemas.StockBasicCreate]) -> dict:
         """批量 upsert（使用 INSERT ... ON DUPLICATE KEY UPDATE，不自动 commit）"""
         if not obj_list:
@@ -1812,31 +1850,39 @@ class BoardConstituentCRUD:
             .all()
         )
 
+    def upsert(self, db: Session, obj_in: schemas.BoardConstituentCreate) -> tuple[models.BoardConstituent, bool]:
+        """单条 upsert（存在则更新，不存在则插入），返回 (对象, 是否新建)"""
+        existing = (
+            db.query(models.BoardConstituent)
+            .filter(
+                and_(
+                    models.BoardConstituent.board_code == obj_in.board_code,
+                    models.BoardConstituent.constituent_symbol == obj_in.constituent_symbol,
+                )
+            )
+            .first()
+        )
+        if existing:
+            if obj_in.update_date is not None:
+                existing.update_date = obj_in.update_date
+            if obj_in.name is not None:
+                existing.name = obj_in.name
+            return existing, False
+        else:
+            db_obj = models.BoardConstituent(**obj_in.model_dump())
+            db.add(db_obj)
+            return db_obj, True
+
     def upsert_batch(self, db: Session, obj_list: List[schemas.BoardConstituentCreate]) -> dict:
         """批量 upsert（不自动 commit，由调用方统一提交）"""
         created = 0
         updated = 0
         for obj in obj_list:
-            existing = (
-                db.query(models.BoardConstituent)
-                .filter(
-                    and_(
-                        models.BoardConstituent.board_code == obj.board_code,
-                        models.BoardConstituent.constituent_symbol == obj.constituent_symbol,
-                    )
-                )
-                .first()
-            )
-            if existing:
-                if obj.update_date is not None:
-                    existing.update_date = obj.update_date
-                if obj.name is not None:
-                    existing.name = obj.name
-                updated += 1
-            else:
-                db_obj = models.BoardConstituent(**obj.model_dump())
-                db.add(db_obj)
+            _, is_created = self.upsert(db, obj)
+            if is_created:
                 created += 1
+            else:
+                updated += 1
         return {'created': created, 'updated': updated}
 
     def delete_by_board(self, db: Session, board_code: str) -> int:
@@ -1950,6 +1996,34 @@ class BoardDailyCRUD:
 
 
 board_daily_crud = BoardDailyCRUD()
+
+
+# ==================== 公司概况 ====================
+
+
+class StockCompanyProfileCRUD:
+    """公司概况 CRUD"""
+
+    def get_by_symbol(self, db: Session, symbol: str) -> Optional[models.StockCompanyProfile]:
+        """根据股票代码查询"""
+        return db.query(models.StockCompanyProfile).filter(models.StockCompanyProfile.symbol == symbol).first()
+
+    def create_or_update(self, db: Session, obj_in: schemas.StockCompanyProfileCreate) -> models.StockCompanyProfile:
+        """存在则更新，不存在则插入（不自动 commit，由调用方统一提交）"""
+        existing = self.get_by_symbol(db, obj_in.symbol)
+        if existing:
+            update_data = obj_in.model_dump(exclude={'symbol'})
+            for key, value in update_data.items():
+                if value is not None:
+                    setattr(existing, key, value)
+            return existing
+        else:
+            db_obj = models.StockCompanyProfile(**obj_in.model_dump())
+            db.add(db_obj)
+            return db_obj
+
+
+stock_company_profile_crud = StockCompanyProfileCRUD()
 
 
 # ==================== 交易日历 ====================

@@ -305,6 +305,17 @@ onUnmounted(() => {
   }
 }
 
+@media (max-width: 768px) {
+  .home-topbar {
+    padding: 12px 16px;
+  }
+
+  .home-btn {
+    min-height: var(--touch-target);
+    padding: 8px 14px;
+  }
+}
+
 .beian-bar {
   position: fixed;
   bottom: 0;

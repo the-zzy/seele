@@ -10,7 +10,11 @@
     </button>
 
     <!-- 聊天面板 -->
-    <div v-else class="widget-panel">
+    <div
+      v-else
+      class="widget-panel"
+      :class="{ mobile: isMobile }"
+    >
       <AgentChat mode="widget">
         <template #extra-actions>
           <button class="action-btn expand-btn" title="展开全屏" @click="goToPage">
@@ -28,9 +32,11 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useViewport } from '@/composables/useViewport'
 import AgentChat from './AgentChat.vue'
 
 const router = useRouter()
+const { isMobile } = useViewport()
 const isOpen = ref(false)
 
 function goToPage () {
@@ -79,6 +85,14 @@ function goToPage () {
   border-radius: 10px;
   overflow: hidden;
 
+  &.mobile {
+    position: fixed;
+    inset: auto 0 var(--safe-bottom) 0;
+    width: 100%;
+    height: 85vh;
+    border-radius: 12px 12px 0 0;
+  }
+
   .action-btn {
     background: transparent;
     border: 1px solid var(--rule);
@@ -93,6 +107,18 @@ function goToPage () {
       border-color: var(--text-faint);
       color: var(--text-primary);
     }
+  }
+}
+
+@media (max-width: 768px) {
+  .agent-widget {
+    right: 16px;
+    bottom: calc(16px + var(--safe-bottom));
+  }
+
+  .widget-trigger {
+    width: 56px;
+    height: 56px;
   }
 }
 </style>

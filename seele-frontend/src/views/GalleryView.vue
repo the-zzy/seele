@@ -202,6 +202,10 @@ onMounted(() => {
   overflow-y: auto;
   padding: 24px 28px;
   box-sizing: border-box;
+
+  @media (max-width: 768px) {
+    padding: 16px;
+  }
 }
 
 .gallery-header {
@@ -291,6 +295,11 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 16px;
+
+  @media (max-width: 768px) {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+  }
 }
 
 .image-card {

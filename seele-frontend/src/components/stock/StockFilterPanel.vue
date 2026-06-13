@@ -238,4 +238,43 @@ function onFetch () {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.4; transform: scale(0.7); }
 }
+
+@media (max-width: 768px) {
+  .filter-section {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
+  }
+
+  .field {
+    width: 100%;
+
+    > input {
+      min-width: auto;
+      width: 100%;
+      box-sizing: border-box;
+    }
+  }
+
+  .exclude-field {
+    min-width: auto;
+  }
+
+  .exclude-chips {
+    label {
+      flex: 1;
+      justify-content: center;
+      min-height: var(--touch-target);
+    }
+  }
+
+  .filter-actions {
+    justify-content: stretch;
+
+    button {
+      flex: 1;
+      min-height: var(--touch-target);
+    }
+  }
+}
 </style>

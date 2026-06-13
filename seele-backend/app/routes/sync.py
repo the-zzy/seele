@@ -25,7 +25,7 @@ from app.akshare_lock import akshare_lock
 from app.config import get_settings
 from app.database import SessionLocal, get_db
 from app.response import success
-from app.routes.stock_indicator import _build_indicator_for_symbol
+from app.routes.stock_indicator import _build_indicator_for_symbol, _calc_indicator_stats, INDICATOR_FIELDS
 from app.sync_worker import _fetch_akshare_batch, _fetch_baostock_chunk, _fetch_akshare_single
 
 logger = logging.getLogger(__name__)
@@ -1505,32 +1505,43 @@ def _run_sync_indicator_bg(task_id: str, trade_date: str, log_id: int, only_miss
         _success_count = 0
         _failed_count = 0
 
-        # 单线程顺序处理：每只单独查询最近 60 条数据，避免大查询导致连接断开
-        # 以及多线程共享 ORM 对象引发的 PendingRollbackError
+        # 批量预查询所有股票的历史数据，避免 N+1
         trade_date_obj = datetime.strptime(formatted_date, '%Y%m%d').date()
         start_date_obj = trade_date_obj - timedelta(days=90)
 
+        all_rows = (
+            db.query(models.StockDaily)
+            .filter(
+                models.StockDaily.symbol.in_(symbols),
+                models.StockDaily.trade_date >= start_date_obj,
+                models.StockDaily.trade_date <= trade_date_obj,
+            )
+            .order_by(models.StockDaily.symbol, models.StockDaily.trade_date.desc())
+            .options(load_only(
+                models.StockDaily.symbol,
+                models.StockDaily.trade_date,
+                models.StockDaily.close,
+                models.StockDaily.high,
+                models.StockDaily.low,
+                models.StockDaily.volume,
+                models.StockDaily.amount,
+                models.StockDaily.turnover,
+            ))
+            .all()
+        )
+        rows_by_symbol: dict[str, list] = {}
+        for row in all_rows:
+            symbol_rows = rows_by_symbol.setdefault(row.symbol, [])
+            if len(symbol_rows) < 60:
+                symbol_rows.append(row)
+
         for idx, symbol in enumerate(symbols):
             try:
-                rows = (
-                    db.query(models.StockDaily)
-                    .filter(
-                        models.StockDaily.symbol == symbol,
-                        models.StockDaily.trade_date >= start_date_obj,
-                        models.StockDaily.trade_date <= trade_date_obj,
-                    )
-                    .order_by(models.StockDaily.trade_date.desc())
-                    .limit(60)
-                    .options(load_only(
-                        models.StockDaily.symbol,
-                        models.StockDaily.trade_date,
-                        models.StockDaily.close,
-                        models.StockDaily.volume,
-                        models.StockDaily.amount,
-                        models.StockDaily.turnover,
-                    ))
-                    .all()
-                )
+                rows = rows_by_symbol.get(symbol, [])
+                if not rows:
+                    _failed_count += 1
+                    continue
+
                 indicator_data = _build_indicator_for_symbol(None, symbol, trade_date_obj, rows=rows)
                 if indicator_data is None:
                     _failed_count += 1
@@ -1556,13 +1567,14 @@ def _run_sync_indicator_bg(task_id: str, trade_date: str, log_id: int, only_miss
             db.commit()
 
         _update_task_progress(task_id, total, total)
+        indicator_stats = _calc_indicator_stats(_items) if _items else {}
         crud.sync_job_log_crud.finish(
             db, log_id, 'success',
             success_count=_success_count,
             failed_count=_failed_count,
             total_count=total,
             trade_date=formatted_date,
-            extra_info=f'indicators for {trade_date}',
+            extra_info=f'indicators for {trade_date}, stats={indicator_stats}',
         )
         db.commit()
         _finish_task(task_id, result={
@@ -1570,6 +1582,7 @@ def _run_sync_indicator_bg(task_id: str, trade_date: str, log_id: int, only_miss
             "total": total,
             "success": _success_count,
             "failed": _failed_count,
+            "indicator_stats": indicator_stats,
         })
     except Exception as exc:
         logger.error('[SYNC_INDICATOR_BG] 任务异常, log_id=%s, error=%s', log_id, exc)
@@ -1828,6 +1841,32 @@ def get_detailed_status(
         .all()
     )
 
+    # 3.5 日线指标覆盖度统计（取最新交易日）
+    latest_indicator_date = db.query(func.max(models.StockDailyIndicator.trade_date)).scalar()
+    indicator_stats = {}
+    if latest_indicator_date:
+        indicator_total = db.query(func.count(models.StockDailyIndicator.symbol)).filter(
+            models.StockDailyIndicator.trade_date == latest_indicator_date
+        ).scalar() or 0
+        for field in INDICATOR_FIELDS:
+            col = getattr(models.StockDailyIndicator, field)
+            valid = db.query(func.count(models.StockDailyIndicator.id)).filter(
+                models.StockDailyIndicator.trade_date == latest_indicator_date,
+                col.isnot(None),
+                col != -1,
+            ).scalar() or 0
+            indicator_stats[field] = {
+                'total': indicator_total,
+                'valid': valid,
+                'missing': indicator_total - valid,
+            }
+    last_indicator_sync = (
+        db.query(models.SyncJobLog.started_at)
+        .filter(models.SyncJobLog.job_type == 'indicator')
+        .order_by(models.SyncJobLog.started_at.desc())
+        .first()
+    )
+
     # 4. 板块/ETF统计
     board_category_counts = (
         db.query(
@@ -1883,6 +1922,11 @@ def get_detailed_status(
                 {'date': d.isoformat() if d else None, 'count': c}
                 for d, c in report_dist
             ],
+        },
+        'indicator': {
+            'latest_date': latest_indicator_date.isoformat() if latest_indicator_date else None,
+            'last_sync': last_indicator_sync[0].isoformat() if last_indicator_sync else None,
+            'field_stats': indicator_stats,
         },
         'board': {
             'total': sum(board_counts.values()),
@@ -3330,4 +3374,81 @@ def post_sync_history_full(
         "log_id": log.id,
         "status": "running",
         "hint": "全量历史同步任务已提交后台执行，约需 30-60 分钟，请稍后刷新页面查看",
+    })
+
+
+# ==================== 细分行业批量同步 ====================
+
+
+def _run_sync_industry_detail_bg(task_id: str, log_id: int) -> None:
+    """后台执行细分行业批量同步"""
+    from app.services.industry_detail_sync import sync_all_industry_detail
+
+    logger.info('[SYNC_INDUSTRY_DETAIL_BG] 后台任务启动 task_id=%s', task_id)
+    try:
+        def _on_progress(current: int, total: int, status: str):
+            _update_task_progress(task_id, current, total)
+
+        result = sync_all_industry_detail(max_workers=10, on_progress=_on_progress)
+        _finish_task(task_id, result=result)
+
+        db = SessionLocal()
+        try:
+            crud.sync_job_log_crud.finish(
+                db, log_id, 'success',
+                success_count=result.get('db_success', 0),
+                failed_count=result.get('failed', 0),
+                total_count=result.get('total', 0),
+                extra_info=f"industry_detail_sync, db_success={result.get('db_success',0)}",
+            )
+            db.commit()
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.error('[SYNC_INDUSTRY_DETAIL_BG] 任务异常: %s', exc)
+        logger.error(traceback.format_exc())
+        _finish_task(task_id, error=str(exc))
+        db = SessionLocal()
+        try:
+            crud.sync_job_log_crud.finish(
+                db, log_id, 'failed', error_message=str(exc)[:2000]
+            )
+            db.commit()
+        finally:
+            db.close()
+
+
+@router.post("/industry-detail")
+def post_sync_industry_detail(
+    db: Session = Depends(get_db),
+):
+    """批量同步全部股票的细分行业（后台异步版，来源：东方财富 F10）"""
+    log = crud.sync_job_log_crud.create(
+        db, schemas.SyncJobLogCreate(job_type='industry_detail', trigger_type='manual')
+    )
+    crud.system_operation_log_crud.create(
+        db,
+        schemas.SystemOperationLogCreate(
+            operation_type='sync_manual',
+            target_type='job',
+            target_id=str(log.id),
+            detail='手动触发细分行业批量同步',
+            result='success',
+        )
+    )
+    db.commit()
+    task_id = str(uuid.uuid4())
+    _register_task(task_id, "industry_detail", job_type='industry_detail')
+    t = threading.Thread(
+        target=_run_sync_industry_detail_bg,
+        args=(task_id, log.id),
+        daemon=True,
+    )
+    t.start()
+    logger.info('[SYNC_INDUSTRY_DETAIL_API] 已提交后台任务 log_id=%s', log.id)
+    return success({
+        "task_id": task_id,
+        "log_id": log.id,
+        "status": "running",
+        "hint": "细分行业同步任务已提交后台执行，约需 5-10 分钟，请稍后刷新页面查看",
     })

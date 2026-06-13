@@ -2,11 +2,15 @@
 import { ref, onMounted } from 'vue'
 import { systemLogApi } from '@/api/systemLog'
 import { syncApi } from '@/api/stock'
+import { useViewport } from '@/composables/useViewport'
 import PageHero from '@/components/common/PageHero.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
+import MobileCardList from '@/components/common/MobileCardList.vue'
 
 const activeTab = ref('errors')
 const loading = ref(false)
+
+const { isMobile } = useViewport()
 
 const overview = ref({
   today_error_count: 0,
@@ -250,7 +254,24 @@ onMounted(() => {
           </select>
         </div>
         <div class="table-wrap">
-          <table class="log-table">
+          <MobileCardList
+            v-if="isMobile"
+            :list="errorLogs.list"
+            key-field="id"
+          >
+            <template #default="{ item }">
+              <div class="log-card">
+                <div class="log-card-header">
+                  <span class="level-tag" :class="levelClass[item.level]">{{ item.level }}</span>
+                  <span class="log-source">{{ item.source }}</span>
+                  <span class="log-time">{{ formatTime(item.created_at) }}</span>
+                </div>
+                <div class="log-message">{{ item.message }}</div>
+                <div v-if="item.trace_id" class="log-trace">Trace: {{ item.trace_id }}</div>
+              </div>
+            </template>
+          </MobileCardList>
+          <table v-else class="log-table">
             <thead>
               <tr>
                 <th>级别</th>
@@ -303,7 +324,36 @@ onMounted(() => {
           </select>
         </div>
         <div class="table-wrap">
-          <table class="log-table">
+          <MobileCardList
+            v-if="isMobile"
+            :list="operationLogs.list"
+            key-field="id"
+          >
+            <template #default="{ item }">
+              <div class="log-card">
+                <div class="log-card-header">
+                  <span class="log-type">{{ operationTypeMap[item.operation_type] || item.operation_type }}</span>
+                  <span
+                    class="result-tag"
+                    :class="item.result === 'success' ? 'result-success' : 'result-failed'"
+                  >{{ item.result || '-' }}</span>
+                  <span class="log-time">{{ formatTime(item.created_at) }}</span>
+                </div>
+                <div class="log-fields">
+                  <div class="log-field">
+                    <span class="field-label">操作人</span>
+                    <span class="field-value">{{ item.operator || '-' }}</span>
+                  </div>
+                  <div class="log-field">
+                    <span class="field-label">目标</span>
+                    <span class="field-value">{{ item.target_type }} {{ item.target_id || '' }}</span>
+                  </div>
+                </div>
+                <div v-if="item.detail" class="log-message">{{ item.detail }}</div>
+              </div>
+            </template>
+          </MobileCardList>
+          <table v-else class="log-table">
             <thead>
               <tr>
                 <th>操作类型</th>
@@ -356,7 +406,50 @@ onMounted(() => {
           </select>
         </div>
         <div class="table-wrap">
-          <table class="log-table">
+          <MobileCardList
+            v-if="isMobile"
+            :list="syncLogs.list"
+            key-field="id"
+          >
+            <template #default="{ item }">
+              <div class="log-card">
+                <div class="log-card-header">
+                  <span class="log-type">{{ jobTypeMap[item.job_type] || item.job_type }}</span>
+                  <span class="tag" :class="item.trigger_type === 'scheduled' ? 'tag-auto' : 'tag-manual'">
+                    {{ item.trigger_type === 'scheduled' ? '定时' : '手动' }}
+                  </span>
+                  <span class="status-dot" :class="statusClass[item.status]">{{ statusMap[item.status] || item.status }}</span>
+                </div>
+                <div class="log-fields">
+                  <div class="log-field">
+                    <span class="field-label">开始时间</span>
+                    <span class="field-value">{{ formatTime(item.started_at) }}</span>
+                  </div>
+                  <div class="log-field">
+                    <span class="field-label">耗时</span>
+                    <span class="field-value">{{ formatDuration(item.duration_seconds) }}</span>
+                  </div>
+                  <div class="log-field">
+                    <span class="field-label">成功</span>
+                    <span class="field-value">{{ item.success_count ?? '-' }}</span>
+                  </div>
+                  <div class="log-field">
+                    <span class="field-label">失败</span>
+                    <span class="field-value">{{ item.failed_count ?? '-' }}</span>
+                  </div>
+                  <div class="log-field">
+                    <span class="field-label">总计</span>
+                    <span class="field-value">{{ item.total_count ?? '-' }}</span>
+                  </div>
+                  <div class="log-field">
+                    <span class="field-label">交易日</span>
+                    <span class="field-value">{{ item.trade_date || '-' }}</span>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </MobileCardList>
+          <table v-else class="log-table">
             <thead>
               <tr>
                 <th>任务类型</th>
@@ -743,5 +836,76 @@ onMounted(() => {
 .text-muted {
   color: var(--text-muted);
   font-size: 12px;
+}
+
+.log-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 14px;
+
+  .log-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+  }
+
+  .log-type {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .log-source {
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .log-time {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .log-message {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    word-break: break-all;
+  }
+
+  .log-trace {
+    margin-top: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-faint);
+  }
+
+  .log-fields {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px 16px;
+  }
+
+  .log-field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .field-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .field-value {
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
 }
 </style>

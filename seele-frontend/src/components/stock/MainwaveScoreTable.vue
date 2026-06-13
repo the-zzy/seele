@@ -1,4 +1,6 @@
 <script setup>
+import { useViewport } from '@/composables/useViewport'
+import MobileCardList from '@/components/common/MobileCardList.vue'
 import { formatNumber } from '@/utils/formatters'
 
 const props = defineProps({
@@ -9,6 +11,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['sort', 'row-dblclick'])
+
+const { isMobile } = useViewport()
 
 const columns = [
   { key: 'symbol', label: '代码', align: 'left' },
@@ -36,6 +40,10 @@ function extractCodeNum (symbol) {
 }
 
 function onDblClick (item) {
+  emit('row-dblclick', item)
+}
+
+function onClick (item) {
   emit('row-dblclick', item)
 }
 
@@ -84,6 +92,47 @@ function getScoreTooltip (item) {
   <div class="table-section">
     <div v-if="loading" class="state loading">加载中…</div>
     <div v-else-if="list.length === 0" class="state empty">暂无数据</div>
+    <MobileCardList
+      v-else-if="isMobile"
+      :list="list"
+      key-field="id"
+      @click-item="onClick"
+    >
+      <template #default="{ item }">
+        <div
+          class="stock-card"
+          :class="{ 'hard-fail': item.score && !item.score.hard_pass, holding: item.isHolding }"
+        >
+          <div class="card-header">
+            <span class="card-code">{{ extractCodeNum(item.symbol) }}</span>
+            <span class="card-name">{{ item.name }}</span>
+            <span
+              class="score-tag"
+              :class="getScoreClass(item.score)"
+              :title="getScoreTooltip(item)"
+            >{{ getScoreLabel(item.score) }}</span>
+          </div>
+          <div class="card-fields">
+            <div class="card-field">
+              <span class="field-label">趋势分</span>
+              <span class="field-value">{{ item.score?.trend_score ?? '—' }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">强势分</span>
+              <span class="field-value">{{ item.score?.strength_score ?? '—' }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">动量分</span>
+              <span class="field-value">{{ item.score?.momentum_score ?? '—' }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">硬性门槛</span>
+              <span class="field-value" :class="getHardPassClass(item.score)">{{ getHardPassLabel(item.score) }}</span>
+            </div>
+          </div>
+        </div>
+      </template>
+    </MobileCardList>
     <table v-else class="stock-table">
       <thead>
         <tr>
@@ -104,7 +153,7 @@ function getScoreTooltip (item) {
           v-for="item in list"
           :key="item.id"
           class="data-row"
-          :class="{ 'hard-fail': item.score && !item.score.hard_pass, 'holding': item.isHolding }"
+          :class="{ 'hard-fail': item.score && !item.score.hard_pass, holding: item.isHolding }"
           @dblclick="onDblClick(item)"
         >
           <td class="code">{{ extractCodeNum(item.symbol) }}</td>
@@ -181,5 +230,66 @@ function getScoreTooltip (item) {
 .fail {
   color: #ef4444;
   font-weight: 600;
+}
+
+.stock-card {
+  &.hard-fail {
+    opacity: 0.65;
+  }
+
+  &.holding {
+    background: rgba(245, 158, 11, 0.08);
+    border-color: rgba(245, 158, 11, 0.2);
+  }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .card-code {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .card-name {
+    flex: 1;
+    font-family: var(--font-body);
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-fields {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px 16px;
+  }
+
+  .card-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .field-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .field-value {
+    font-size: 13px;
+    color: var(--text-primary);
+  }
 }
 </style>

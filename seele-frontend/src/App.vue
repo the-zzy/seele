@@ -8,7 +8,7 @@
   />
 
   <div v-else class="app-layout">
-    <aside class="sidebar">
+    <aside v-if="!isMobile" class="sidebar">
       <div class="masthead">
         <div class="wordmark">Seele</div>
         <div class="masthead-meta">
@@ -66,6 +66,13 @@
     <main class="main-content">
       <header class="top-bar">
         <div class="breadcrumb">
+          <button
+            v-if="isMobile"
+            class="menu-toggle"
+            @click="drawerVisible = true"
+          >
+            <span>☰</span>
+          </button>
           <span class="crumb-section">{{ currentSection }}</span>
           <span v-if="currentTitle" class="crumb-divider">/</span>
           <span class="crumb-page">{{ currentTitle }}</span>
@@ -75,7 +82,10 @@
             <span v-if="theme === 'dark'">☀</span>
             <span v-else>☾</span>
           </button>
-          <button class="logout-btn" @click="exitWorkspace">退出工作台</button>
+          <button class="logout-btn" @click="exitWorkspace">
+            <span class="logout-text">退出工作台</span>
+            <span class="logout-icon">↪</span>
+          </button>
         </div>
       </header>
       <div class="page-content">
@@ -90,6 +100,7 @@
       </div>
     </main>
 
+    <MobileNavDrawer v-model="drawerVisible" :items="navItems" />
     <AgentFloatingWidget />
     <ToastContainer />
   </div>
@@ -101,24 +112,32 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useTheme } from '@/composables/useTheme'
+import { useViewport } from '@/composables/useViewport'
 import { isLoggedIn, removeToken, onAuthRequired } from '@/utils/auth'
 import { visitorApi } from '@/api/visitor'
 import AgentFloatingWidget from '@/components/agent/AgentFloatingWidget.vue'
 import ToastContainer from '@/components/common/ToastContainer.vue'
 import AuthModal from '@/components/auth/AuthModal.vue'
+import MobileNavDrawer from '@/components/common/MobileNavDrawer.vue'
 import HomeGalleryView from '@/views/HomeGalleryView.vue'
 
 const router = useRouter()
 const route = useRoute()
 const { theme, toggle: toggleTheme } = useTheme()
+const { isMobile } = useViewport()
 
 const WORKSPACE_KEY = 'seele_workspace'
 
 const workspaceMode = ref(localStorage.getItem(WORKSPACE_KEY) === '1')
 const showAuthModal = ref(false)
 const loggedIn = ref(isLoggedIn())
+const drawerVisible = ref(false)
 
 const year = new Date().getFullYear()
+
+router.afterEach(() => {
+  drawerVisible.value = false
+})
 
 function openAuth () {
   showAuthModal.value = true
@@ -555,20 +574,43 @@ html, body {
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--text-muted);
+    min-width: 0;
 
     .crumb-section {
       color: var(--text-faint);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .crumb-divider {
       color: var(--text-faint);
       opacity: 0.5;
+      flex-shrink: 0;
     }
 
     .crumb-page {
       color: var(--text-secondary);
       font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
+  }
+
+  .menu-toggle {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 8px;
+    margin: -8px 4px -8px -8px;
+    min-height: var(--touch-target);
+    min-width: var(--touch-target);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .top-actions {
@@ -609,12 +651,40 @@ html, body {
       border-color: var(--down);
       color: var(--down);
     }
+
+    .logout-icon {
+      display: none;
+    }
   }
 
   .page-content {
     flex: 1;
     min-height: 0;
     overflow: hidden;
+  }
+
+  @media (max-width: 768px) {
+    .top-bar {
+      padding: 0 var(--page-pad-x);
+      height: 56px;
+    }
+
+    .logout-btn {
+      padding: 6px 10px;
+
+      .logout-text {
+        display: none;
+      }
+
+      .logout-icon {
+        display: inline;
+        font-size: 16px;
+      }
+    }
+
+    .theme-toggle {
+      padding: 6px 10px;
+    }
   }
 }
 

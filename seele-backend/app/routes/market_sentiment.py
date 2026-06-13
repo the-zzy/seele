@@ -138,7 +138,7 @@ def get_daily_sentiment(
     result = []
     for td in range_dates:
         row = existing_map.get(td)
-        if row:
+        if row and float(row.strong_threshold) == threshold:
             result.append({
                 "trade_date": str(row.trade_date),
                 "total_stocks": row.total_stocks,
@@ -150,6 +150,9 @@ def get_daily_sentiment(
                 "strong_threshold": float(row.strong_threshold),
                 "strong_percent": float(row.strong_percent) if row.strong_percent else 0.0,
             })
+        elif row:
+            # 阈值不匹配时实时重新计算，不持久化（避免覆盖默认缓存）
+            result.append(_compute_market_sentiment(db, td, threshold))
         else:
             # 缺失数据时返回空值，不再实时计算（应在同步任务链中预计算）
             result.append({

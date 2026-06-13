@@ -1,10 +1,10 @@
 <script setup>
+import { useViewport } from '@/composables/useViewport'
+import MobileCardList from '@/components/common/MobileCardList.vue'
 import {
-  formatDate,
   formatNumber,
   formatPctChg,
   formatVolume,
-  formatAmount,
   formatTurnover
 } from '@/utils/formatters'
 
@@ -16,6 +16,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['sort', 'row-dblclick'])
+
+const { isMobile } = useViewport()
 
 const columns = [
   { key: 'symbol', label: '代码', align: 'left' },
@@ -56,6 +58,10 @@ function extractCodeNum (symbol) {
 }
 
 function onDblClick (item) {
+  emit('row-dblclick', item)
+}
+
+function onClick (item) {
   emit('row-dblclick', item)
 }
 
@@ -104,12 +110,74 @@ function getPriceClass (pctChg) {
   if (value < 0) return 'down'
   return ''
 }
+
+function getChgClass (val) {
+  if (val == null) return ''
+  const value = parseFloat(val)
+  if (value > 0) return 'up'
+  if (value < 0) return 'down'
+  return ''
+}
 </script>
 
 <template>
   <div class="table-section">
     <div v-if="loading" class="state loading">加载中…</div>
     <div v-else-if="list.length === 0" class="state empty">暂无数据</div>
+    <MobileCardList
+      v-else-if="isMobile"
+      :list="list"
+      key-field="id"
+      @click-item="onClick"
+    >
+      <template #default="{ item }">
+        <div class="stock-card">
+          <div class="card-header">
+            <span class="card-code">{{ extractCodeNum(item.symbol) }}</span>
+            <span class="card-name">{{ item.name }}</span>
+            <span
+              class="score-tag"
+              :class="getScoreClass(item.score)"
+              :title="getScoreTooltip(item)"
+            >{{ getScoreLabel(item.score) }}</span>
+          </div>
+          <div class="card-fields">
+            <div class="card-field">
+              <span class="field-label">收盘</span>
+              <span class="field-value" :class="getPriceClass(item.pctChg)">{{ formatNumber(item.close) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">涨跌幅</span>
+              <span class="field-value" :class="getChgClass(item.pctChg)">{{ formatPctChg(item.pctChg) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">成交量</span>
+              <span class="field-value">{{ formatVolume(item.volume) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">换手</span>
+              <span class="field-value">{{ formatTurnover(item.turnover) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">5日涨幅</span>
+              <span class="field-value" :class="getChgClass(item.chg5d)">{{ item.chg5d > 0 ? '+' : '' }}{{ formatNumber(item.chg5d) }}%</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">10日涨幅</span>
+              <span class="field-value" :class="getChgClass(item.chg10d)">{{ item.chg10d > 0 ? '+' : '' }}{{ formatNumber(item.chg10d) }}%</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">净利润同比</span>
+              <span class="field-value" :class="getChgClass(item.netProfitYoy)">{{ item.netProfitYoy != null ? (item.netProfitYoy > 0 ? '+' : '') + formatNumber(item.netProfitYoy) + '%' : '-' }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">ROE</span>
+              <span class="field-value">{{ item.roe != null ? formatNumber(item.roe) + '%' : '-' }}</span>
+            </div>
+          </div>
+        </div>
+      </template>
+    </MobileCardList>
     <table v-else class="stock-table">
       <thead>
         <tr>
@@ -195,6 +263,58 @@ function getPriceClass (pctChg) {
     background: rgba(239, 68, 68, 0.15);
     color: #ef4444;
     border: 1px solid rgba(239, 68, 68, 0.3);
+  }
+}
+
+.stock-card {
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .card-code {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .card-name {
+    flex: 1;
+    font-family: var(--font-body);
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-fields {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px 16px;
+  }
+
+  .card-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .field-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .field-value {
+    font-size: 13px;
+    color: var(--text-primary);
   }
 }
 </style>
