@@ -66,22 +66,22 @@ function onFetch () {
 .filter-section {
   display: flex;
   align-items: flex-end;
-  gap: 24px;
-  padding: 14px 0 16px;
+  gap: 16px;
+  padding: 10px 0 12px;
   border-bottom: 1px dashed var(--rule);
 }
 
 .filter-fields {
   display: flex;
   flex-wrap: wrap;
-  gap: 18px 24px;
+  gap: 12px 16px;
   flex: 1;
 }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
 
   .field-label {
     font-family: var(--font-mono);
@@ -92,16 +92,16 @@ function onFetch () {
   }
 
   > input {
-    padding: 7px 0;
+    padding: 5px 0;
     background: transparent;
     border: none;
     border-bottom: 1px solid var(--rule);
     border-radius: 0;
     font-family: var(--font-mono);
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-primary);
     transition: border-color 0.2s;
-    min-width: 160px;
+    min-width: 140px;
 
     &:focus {
       outline: none;
@@ -116,20 +116,20 @@ function onFetch () {
 
 .exclude-field {
   flex: 1;
-  min-width: 280px;
+  min-width: 260px;
 }
 
 .exclude-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding-top: 4px;
+  padding-top: 2px;
 
   label {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 4px 10px;
+    padding: 3px 8px;
     border: 1px solid var(--rule);
     border-radius: 999px;
     cursor: pointer;
@@ -161,12 +161,12 @@ function onFetch () {
 .filter-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   flex-shrink: 0;
 }
 
 .btn-primary {
-  padding: 8px 18px;
+  padding: 6px 14px;
   background: var(--accent);
   color: white;
   border: none;
@@ -175,7 +175,7 @@ function onFetch () {
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   transition: background 0.2s;
 
@@ -185,8 +185,8 @@ function onFetch () {
 .btn-ghost {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
+  gap: 6px;
+  padding: 6px 12px;
   background: transparent;
   color: var(--text-secondary);
   border: 1px solid var(--rule);
@@ -195,7 +195,7 @@ function onFetch () {
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 500;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   transition: all 0.2s;
 
@@ -225,10 +225,10 @@ function onFetch () {
   cursor: pointer;
   font-family: var(--font-mono);
   font-size: 11px;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-muted);
-  padding: 6px 0;
+  padding: 5px 0;
   transition: color 0.2s;
 
   &:hover { color: var(--text-primary); }
@@ -243,7 +243,7 @@ function onFetch () {
   .filter-section {
     flex-direction: column;
     align-items: stretch;
-    gap: 16px;
+    gap: 12px;
   }
 
   .field {

@@ -337,49 +337,49 @@ onMounted(async () => {
 .date-filter {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-  padding: 10px 14px;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
   background: var(--bg-secondary);
   border: 1px solid var(--rule);
   border-radius: 6px;
 }
 
 .date-label {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-secondary);
   font-family: var(--font-display);
 }
 
 .date-input {
-  padding: 4px 8px;
+  padding: 4px 6px;
   border: 1px solid var(--rule);
   border-radius: 4px;
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 12px;
   font-family: var(--font-mono);
 }
 
 .date-hint {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-faint);
 }
 
 .tab-bar {
   display: flex;
   gap: 4px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   border-bottom: 1px solid var(--rule);
 }
 
 .tab-btn {
-  padding: 8px 16px;
+  padding: 6px 12px;
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
-  font-size: 13px;
+  font-size: 12px;
   font-family: var(--font-display);
   font-weight: 600;
   color: var(--text-muted);

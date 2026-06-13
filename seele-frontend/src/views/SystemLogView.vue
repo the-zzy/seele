@@ -653,12 +653,12 @@ onMounted(() => {
 .filter-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-shrink: 0;
 }
 
 .filter-select {
-  padding: 7px 12px;
+  padding: 5px 10px;
   background: var(--bg-secondary);
   color: var(--text-primary);
   border: 1px solid var(--rule);
@@ -674,7 +674,7 @@ onMounted(() => {
 }
 
 .btn-refresh {
-  padding: 7px 16px;
+  padding: 5px 12px;
   background: var(--text-primary);
   color: var(--bg-primary);
   border: none;
@@ -683,7 +683,7 @@ onMounted(() => {
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 
   &:disabled {
