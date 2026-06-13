@@ -586,7 +586,8 @@ function onSubmit () {
   .modal-panel {
     width: 100%;
     border-radius: 12px 12px 0 0;
-    max-height: 92vh;
+    max-height: calc(92vh - var(--safe-bottom));
+    padding-bottom: var(--safe-bottom);
     position: fixed;
     bottom: 0;
     left: 0;
@@ -607,7 +608,7 @@ function onSubmit () {
   }
 
   .select-dropdown {
-    max-height: 280px;
+    max-height: 240px;
   }
 }
 </style>

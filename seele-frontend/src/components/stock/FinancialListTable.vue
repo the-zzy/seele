@@ -13,6 +13,16 @@ const emit = defineEmits(['sort', 'row-dblclick'])
 
 const { isMobile } = useViewport()
 
+const sortableColumns = [
+  { key: 'roe', label: 'ROE' },
+  { key: 'gross_profit_ratio', label: '毛利率' },
+  { key: 'net_profit_ratio', label: '净利率' },
+  { key: 'net_profit_yoy', label: '净利润同比' },
+  { key: 'revenue_yoy', label: '营收同比' },
+  { key: 'eps', label: 'EPS' },
+  { key: 'debt_ratio', label: '资产负债率' }
+]
+
 const columns = [
   { key: 'symbol', label: '股票代码', align: 'left' },
   { key: 'name', label: '股票名称', align: 'left' },
@@ -67,56 +77,70 @@ function onRowClick (item) {
   <div class="table-section">
     <div v-if="loading" class="state loading">加载中…</div>
     <div v-else-if="list.length === 0" class="state empty">暂无数据</div>
-    <MobileCardList
-      v-else-if="isMobile"
-      :list="list"
-      key-field="symbol"
-      @click-item="onRowClick"
-    >
-      <template #default="{ item }">
-        <div class="stock-card">
-          <div class="card-header">
-            <span class="card-code">{{ extractCodeNum(item.symbol) }}</span>
-            <span class="card-name">{{ item.name }}</span>
-            <span class="card-market">{{ item.market || '—' }}</span>
+    <div v-else-if="isMobile" class="mobile-table">
+      <div class="mobile-sort-bar">
+        <span class="sort-label">排序</span>
+        <button
+          v-for="col in sortableColumns"
+          :key="col.key"
+          class="sort-btn"
+          :class="{ active: sortField === col.key }"
+          @click="onSort(col.key)"
+        >
+          {{ col.label }}
+          <span v-if="sortField === col.key" class="sort-dir">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
+        </button>
+      </div>
+      <MobileCardList
+        :list="list"
+        key-field="symbol"
+        @click-item="onRowClick"
+      >
+        <template #default="{ item }">
+          <div class="stock-card">
+            <div class="card-header">
+              <span class="card-code">{{ extractCodeNum(item.symbol) }}</span>
+              <span class="card-name">{{ item.name }}</span>
+              <span class="card-market">{{ item.market || '—' }}</span>
+            </div>
+            <div class="card-fields">
+              <div class="card-field wide">
+                <span class="field-label">所属行业</span>
+                <span class="field-value">{{ item.industry || '—' }}</span>
+              </div>
+              <div class="card-field">
+                <span class="field-label">ROE</span>
+                <span class="field-value">{{ item.roe != null ? `${item.roe.toFixed(2)}%` : '—' }}</span>
+              </div>
+              <div class="card-field">
+                <span class="field-label">毛利率</span>
+                <span class="field-value">{{ item.gross_profit_ratio != null ? `${item.gross_profit_ratio.toFixed(2)}%` : '—' }}</span>
+              </div>
+              <div class="card-field">
+                <span class="field-label">净利率</span>
+                <span class="field-value">{{ item.net_profit_ratio != null ? `${item.net_profit_ratio.toFixed(2)}%` : '—' }}</span>
+              </div>
+              <div class="card-field">
+                <span class="field-label">净利润同比</span>
+                <span class="field-value" :class="getYoyClass(item.net_profit_yoy)">{{ formatPercent(item.net_profit_yoy) }}</span>
+              </div>
+              <div class="card-field">
+                <span class="field-label">营收同比</span>
+                <span class="field-value" :class="getYoyClass(item.revenue_yoy)">{{ formatPercent(item.revenue_yoy) }}</span>
+              </div>
+              <div class="card-field">
+                <span class="field-label">EPS</span>
+                <span class="field-value">{{ item.eps != null ? item.eps.toFixed(2) : '—' }}</span>
+              </div>
+              <div class="card-field">
+                <span class="field-label">资产负债率</span>
+                <span class="field-value">{{ item.debt_ratio != null ? `${item.debt_ratio.toFixed(2)}%` : '—' }}</span>
+              </div>
+            </div>
           </div>
-          <div class="card-fields">
-            <div class="card-field wide">
-              <span class="field-label">所属行业</span>
-              <span class="field-value">{{ item.industry || '—' }}</span>
-            </div>
-            <div class="card-field">
-              <span class="field-label">ROE</span>
-              <span class="field-value">{{ item.roe != null ? `${item.roe.toFixed(2)}%` : '—' }}</span>
-            </div>
-            <div class="card-field">
-              <span class="field-label">毛利率</span>
-              <span class="field-value">{{ item.gross_profit_ratio != null ? `${item.gross_profit_ratio.toFixed(2)}%` : '—' }}</span>
-            </div>
-            <div class="card-field">
-              <span class="field-label">净利率</span>
-              <span class="field-value">{{ item.net_profit_ratio != null ? `${item.net_profit_ratio.toFixed(2)}%` : '—' }}</span>
-            </div>
-            <div class="card-field">
-              <span class="field-label">净利润同比</span>
-              <span class="field-value" :class="getYoyClass(item.net_profit_yoy)">{{ formatPercent(item.net_profit_yoy) }}</span>
-            </div>
-            <div class="card-field">
-              <span class="field-label">营收同比</span>
-              <span class="field-value" :class="getYoyClass(item.revenue_yoy)">{{ formatPercent(item.revenue_yoy) }}</span>
-            </div>
-            <div class="card-field">
-              <span class="field-label">EPS</span>
-              <span class="field-value">{{ item.eps != null ? item.eps.toFixed(2) : '—' }}</span>
-            </div>
-            <div class="card-field">
-              <span class="field-label">资产负债率</span>
-              <span class="field-value">{{ item.debt_ratio != null ? `${item.debt_ratio.toFixed(2)}%` : '—' }}</span>
-            </div>
-          </div>
-        </div>
-      </template>
-    </MobileCardList>
+        </template>
+      </MobileCardList>
+    </div>
     <table v-else class="stock-table">
       <colgroup>
         <col style="width: 8%">
@@ -175,7 +199,49 @@ function onRowClick (item) {
 }
 
 .stock-table {
-  min-width: 960px;
+  width: 100%;
+}
+
+.mobile-sort-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+
+  .sort-label {
+    font-size: 11px;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    flex-shrink: 0;
+  }
+
+  .sort-btn {
+    flex-shrink: 0;
+    padding: 6px 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-family: var(--font-body);
+
+    &.active {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+  }
+
+  .sort-dir {
+    margin-left: 4px;
+    font-size: 10px;
+  }
 }
 
 .stock-card {

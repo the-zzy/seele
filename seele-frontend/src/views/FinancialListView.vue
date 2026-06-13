@@ -317,4 +317,51 @@ onMounted(() => {
     background: var(--bg-tertiary);
   }
 }
+
+@media (max-width: 768px) {
+  .filter-section {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .filter-fields {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .field {
+    min-width: 0;
+    width: 100%;
+
+    .field-label {
+      width: auto;
+      text-align: left;
+    }
+
+    input {
+      width: 100%;
+      box-sizing: border-box;
+      min-height: var(--touch-target);
+    }
+  }
+
+  .field.range {
+    min-width: 0;
+
+    input {
+      flex: 1;
+    }
+  }
+
+  .filter-actions {
+    width: 100%;
+    justify-content: stretch;
+
+    button {
+      flex: 1;
+      min-height: var(--touch-target);
+    }
+  }
+}
 </style>

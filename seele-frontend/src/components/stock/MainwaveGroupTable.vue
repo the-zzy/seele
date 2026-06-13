@@ -348,6 +348,30 @@ function setTabRef (el, idx) {
 .stock-table .score-weak { color: #9ca3af; }
 .stock-table .score-poor { color: var(--down); }
 
+@media (max-width: 768px) {
+  .tab-list {
+    scrollbar-width: auto;
+
+    &::-webkit-scrollbar {
+      display: block;
+      height: 3px;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background: var(--text-faint);
+      border-radius: 2px;
+    }
+  }
+
+  .tab-item {
+    padding: 10px 14px 12px;
+  }
+
+  .tab-desc {
+    font-size: 10px;
+  }
+}
+
 .stock-card {
   &.holding {
     background: rgba(245, 158, 11, 0.08);

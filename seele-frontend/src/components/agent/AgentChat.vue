@@ -288,9 +288,18 @@ watch(loading, () => {
 @media (max-width: 768px) {
   .chat-header {
     padding: 10px 12px;
+    flex-wrap: wrap;
+    gap: 8px;
 
     .chat-title {
       font-size: 13px;
+    }
+
+    .chat-actions {
+      flex-wrap: wrap;
+      gap: 6px;
+      width: 100%;
+      justify-content: flex-end;
     }
 
     .action-btn {

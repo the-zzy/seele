@@ -660,7 +660,7 @@ html, body {
   .page-content {
     flex: 1;
     min-height: 0;
-    overflow: hidden;
+    overflow: auto;
   }
 
   @media (max-width: 768px) {

@@ -292,3 +292,18 @@ input[type='checkbox'] {
     padding: 28px;
   }
 }
+
+@media (max-width: 768px) {
+  .stock-table {
+    th,
+    td {
+      white-space: normal;
+      padding: 8px 10px;
+      font-size: 12px;
+    }
+  }
+
+  .table-section {
+    overflow-x: auto;
+  }
+}

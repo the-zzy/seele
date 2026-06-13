@@ -3,9 +3,12 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import PageHero from '@/components/common/PageHero.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
+import MobileCardList from '@/components/common/MobileCardList.vue'
+import { useViewport } from '@/composables/useViewport'
 import { boardApi, tradeCalendarApi } from '@/api/stock'
 
 const router = useRouter()
+const { isMobile } = useViewport()
 
 const activeTab = ref('industry')
 const loading = ref(false)
@@ -222,6 +225,56 @@ onMounted(async () => {
     <div class="table-section">
       <div v-if="loading" class="state loading">加载中…</div>
       <div v-else-if="!currentTab()?.list?.length" class="state empty">暂无数据</div>
+      <MobileCardList
+        v-else-if="isMobile"
+        :list="currentTab()?.list || []"
+        key-field="code"
+        @click-item="handleRowClick"
+      >
+        <template #default="{ item }">
+          <div class="board-card">
+            <div class="board-card-header">
+              <span class="board-code">{{ item.code }}</span>
+              <span class="board-name">{{ item.name }}</span>
+              <span class="category-tag" :class="categoryClass(item.category)">
+                {{ categoryLabel(item.category) }}
+              </span>
+            </div>
+            <div class="board-fields">
+              <div class="board-field">
+                <span class="field-label">最新涨幅</span>
+                <span class="field-value" :class="getPriceClass(item.latest_pct_chg)">
+                  {{ formatChg(item.latest_pct_chg) }}
+                </span>
+              </div>
+              <div class="board-field">
+                <span class="field-label">5日涨幅</span>
+                <span class="field-value" :class="getPriceClass(item.chg_5d)">
+                  {{ formatChg(item.chg_5d) }}
+                </span>
+              </div>
+              <div class="board-field">
+                <span class="field-label">10日涨幅</span>
+                <span class="field-value" :class="getPriceClass(item.chg_10d)">
+                  {{ formatChg(item.chg_10d) }}
+                </span>
+              </div>
+              <div class="board-field">
+                <span class="field-label">成交额</span>
+                <span class="field-value">{{ formatAmount(item.amount) }}</span>
+              </div>
+              <div class="board-field">
+                <span class="field-label">成分股</span>
+                <span class="field-value">{{ item.constituent_count || 0 }}</span>
+              </div>
+              <div class="board-field">
+                <span class="field-label">来源</span>
+                <span class="field-value">{{ item.source || '—' }}</span>
+              </div>
+            </div>
+          </div>
+        </template>
+      </MobileCardList>
       <table v-else class="stock-table">
         <thead>
           <tr>
@@ -393,5 +446,116 @@ onMounted(async () => {
 
 .down {
   color: var(--down);
+}
+
+.board-card {
+  .board-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+    flex-wrap: wrap;
+  }
+
+  .board-code {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .board-name {
+    flex: 1;
+    font-family: var(--font-body);
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  .board-fields {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px 16px;
+  }
+
+  .board-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .field-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .field-value {
+    font-size: 13px;
+    color: var(--text-primary);
+  }
+}
+
+@media (max-width: 768px) {
+  .date-filter {
+    flex-wrap: wrap;
+    gap: 8px;
+
+    .date-hint {
+      width: 100%;
+      font-size: 10px;
+    }
+
+    .date-input {
+      flex: 1;
+      min-height: var(--touch-target);
+    }
+  }
+
+  .tab-bar {
+    overflow-x: auto;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+
+    .tab-btn {
+      flex-shrink: 0;
+      min-height: var(--touch-target);
+    }
+  }
+
+  .filter-section {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+
+    .filter-item {
+      width: 100%;
+
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        min-height: var(--touch-target);
+      }
+    }
+
+    .filter-actions {
+      width: 100%;
+      justify-content: stretch;
+
+      button {
+        flex: 1;
+        min-height: var(--touch-target);
+      }
+    }
+  }
 }
 </style>

@@ -112,13 +112,19 @@ function goToPage () {
 
 @media (max-width: 768px) {
   .agent-widget {
-    right: 16px;
+    right: calc(16px + var(--safe-right));
     bottom: calc(16px + var(--safe-bottom));
   }
 
   .widget-trigger {
     width: 56px;
     height: 56px;
+  }
+
+  .widget-panel {
+    &.mobile {
+      inset: auto var(--safe-right) var(--safe-bottom) var(--safe-left);
+    }
   }
 }
 </style>

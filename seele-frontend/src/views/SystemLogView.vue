@@ -908,4 +908,43 @@ onMounted(() => {
     color: var(--text-secondary);
   }
 }
+
+@media (max-width: 768px) {
+  .filter-bar {
+    flex-wrap: wrap;
+    gap: 8px;
+
+    .filter-select {
+      flex: 1;
+      min-width: 120px;
+      min-height: var(--touch-target);
+    }
+  }
+
+  .overview-card {
+    padding: 12px 14px;
+
+    .card-value {
+      font-size: 24px;
+    }
+  }
+
+  .sync-badges {
+    gap: 6px;
+  }
+
+  .sync-badge {
+    font-size: 10px;
+    padding: 3px 8px;
+  }
+
+  .tab-btn {
+    flex: 1;
+    min-height: var(--touch-target);
+  }
+
+  .log-card {
+    padding: 12px;
+  }
+}
 </style>

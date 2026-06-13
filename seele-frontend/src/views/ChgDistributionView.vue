@@ -220,6 +220,19 @@ onMounted(() => {
 
 @media (max-width: 768px) {
   .chart-filters {
+    flex-wrap: wrap;
+
+    .filter-item {
+      flex: 1 1 45%;
+      min-width: 140px;
+
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        min-height: var(--touch-target);
+      }
+    }
+
     .filter-actions {
       margin-left: 0;
       width: 100%;

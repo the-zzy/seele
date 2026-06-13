@@ -450,6 +450,39 @@ onMounted(() => {
   }
 }
 
+@media (max-width: 768px) {
+  .preview-close {
+    top: calc(12px + var(--safe-top));
+    right: 16px;
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.4);
+    border-radius: 50%;
+  }
+
+  .preview-name {
+    bottom: calc(12px + var(--safe-bottom));
+  }
+
+  .confirm-dialog {
+    width: calc(100% - 32px);
+    min-width: 0;
+    padding: 20px 24px;
+  }
+
+  .confirm-actions {
+    flex-direction: column;
+
+    button {
+      width: 100%;
+      min-height: var(--touch-target);
+    }
+  }
+}
+
 .confirm-actions {
   display: flex;
   justify-content: center;

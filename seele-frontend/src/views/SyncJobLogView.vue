@@ -1378,4 +1378,86 @@ onUnmounted(() => {
   }
 }
 
+@media (max-width: 768px) {
+  .top-section {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .pipeline-cards {
+    gap: 12px;
+  }
+
+  .pipeline-card {
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .pipeline-card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .pipeline-date-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+
+    .pipeline-date-input {
+      width: 100%;
+      box-sizing: border-box;
+      min-height: var(--touch-target);
+    }
+
+    .btn-pipeline-start {
+      width: 100%;
+      min-height: var(--touch-target);
+    }
+  }
+
+  .daily-section {
+    padding: 12px;
+  }
+
+  .daily-section-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .daily-card {
+    padding: 12px;
+
+    .daily-fields {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+
+    .daily-actions {
+      .btn-sync-small {
+        flex: 1;
+        min-height: var(--touch-target);
+        font-size: 12px;
+        padding: 8px 10px;
+      }
+    }
+  }
+
+  .stock-basic-card {
+    padding: 12px;
+
+    .stock-basic-total {
+      .total-value {
+        font-size: 24px;
+      }
+    }
+
+    .stock-basic-meta {
+      flex-wrap: wrap;
+      gap: 8px 12px;
+    }
+  }
+}
+
 </style>

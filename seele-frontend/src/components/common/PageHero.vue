@@ -123,4 +123,30 @@ defineProps({
     flex-wrap: wrap;
   }
 }
+
+@media (max-width: 768px) {
+  .page-hero {
+    gap: 12px;
+  }
+
+  .hero-title {
+    font-size: 20px;
+  }
+
+  .hero-desc {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .hero-actions {
+    gap: 8px;
+
+    > * {
+      min-height: var(--touch-target);
+    }
+  }
+}
 </style>
