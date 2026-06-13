@@ -11,7 +11,7 @@ import MobileCardList from '@/components/common/MobileCardList.vue'
 const detailedStatus = ref(null)
 const dailyTotal = ref(0)
 const dailyPageNum = ref(1)
-const dailyPageSize = ref(10)
+const dailyPageSize = ref(5)
 const incrementalMap = ref({})
 
 const { syncing, progress: taskProgress, startSync, restoreTasks, clearPoll } = useSyncTask()
@@ -429,8 +429,8 @@ onUnmounted(() => {
 
         <div class="daily-section" v-if="detailedStatus">
           <div class="daily-section-header">
-            <h3 class="section-title">最近十个交易日</h3>
-            <span class="section-note">统计范围不含北交所 · 每页 10 条</span>
+            <h3 class="section-title">最近五个交易日</h3>
+            <span class="section-note">统计范围不含北交所 · 每页 5 条</span>
           </div>
           <MobileCardList
             v-if="isMobile"
@@ -822,6 +822,7 @@ onUnmounted(() => {
   padding: 16px;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .daily-section-header {
@@ -829,6 +830,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+  flex-shrink: 0;
 
   .section-title {
     margin-bottom: 0;
@@ -983,6 +985,8 @@ onUnmounted(() => {
   overflow: auto;
   border: 1px solid var(--rule);
   border-radius: 4px;
+  flex: 1;
+  min-height: 0;
 }
 
 .daily-table {
