@@ -313,19 +313,7 @@ def batch_calculate_mainwave_layers(
     stocks: List[dict],
     trade_date: str,
 ) -> Dict[str, List]:
-    """批量计算主升浪分层数据：多头排列天数、启动日、启动日至今涨幅
-
-    直接修改 stocks 列表，附加以下字段：
-    - bull_days_5:  最近5日多头排列天数
-    - bull_days_10: 最近10日多头排列天数
-    - bull_days_20: 最近20日多头排列天数
-    - layer:        分层结果 'MAX' / 20 / 10 / 5 / 'OFF'
-    - launch_date:  启动日（YYYY-MM-DD）
-    - launch_pct_chg: 启动日至今涨幅(%)
-
-    返回按 symbol 分组的日线记录（与 _fetch_recent_records 格式一致），
-    可供 batch_calculate_scores 复用，避免重复查询。
-    """
+    """批量计算主升浪分层数据：多头排列天数、启动日、启动日至今涨幅"""
     if not stocks:
         return {}
 
@@ -348,9 +336,6 @@ def batch_calculate_mainwave_layers(
         stock['bull_days_20'] = bull_days_20
 
         # 分层判断（优先级从高到低）
-        # 二十日分组：最近20天中 >= 16 天多头排列（80%）
-        # 十日分组：最近10天中 >= 7 天多头排列（70%）
-        # 五日分组：最近5天中 >= 4 天多头排列（80%）
         if bull_days_20 >= 16:
             layer = 20
             window = 20
@@ -362,7 +347,7 @@ def batch_calculate_mainwave_layers(
             window = 5
         else:
             layer = 'OFF'
-            window = 5  # 兜底也用5日区间找启动日
+            window = 5
 
         stock['layer'] = layer
 

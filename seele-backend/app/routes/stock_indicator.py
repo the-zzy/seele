@@ -69,7 +69,7 @@ def _build_indicator_for_symbol(
     db: Session,
     symbol: str,
     trade_date: date,
-    lookback: int = 60,
+    lookback: int = 30,
     rows: list | None = None,
 ) -> Optional[dict]:
     """为单只股票计算指定日期的指标。如果传入 rows 则直接使用，否则查询数据库。
