@@ -4,3 +4,4 @@ node_modules/
 *.zip
 miyoushe_images/
 seele_dump_*.sql
+deploy/changelog/
