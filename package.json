@@ -1,7 +1,7 @@
 {
   "name": "seele",
-  "version": "2.3.0",
-  "description": "Seele \u80a1\u7968\u6570\u636e\u7ba1\u7406\u7cfb\u7edf - \u524d\u540e\u7aef\u7edf\u4e00\u5165\u53e3",
+  "version": "2.4.0",
+  "description": "Seele 股票数据管理系统 - 前后端统一入口",
   "private": true,
   "scripts": {
     "dev": "concurrently \"npm run dev:back\" \"npm run dev:front\"",
