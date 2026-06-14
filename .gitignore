@@ -1,7 +1,9 @@
 node_modules/
 .claude/
 *.log
-*.zip
+/*.zip
 miyoushe_images/
 seele_dump_*.sql
 deploy/changelog/
+UPGRADE.md
+UPGRADE.md
