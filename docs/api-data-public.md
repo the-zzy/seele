@@ -4,7 +4,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 基础地址 | `https://zhuozhenyu.cn/api` |
+| 基础地址 | `https://<YOUR_DOMAIN>/api` |
 | 认证方式 | JWT Bearer Token |
 | 请求头 | `Authorization: Bearer <token>` |
 | Token 有效期 | 7 天 |
@@ -48,12 +48,12 @@
 
 ```bash
 # 1. 登录获取 token
-curl -X POST https://zhuozhenyu.cn/api/auth/login \
+curl -X POST https://<YOUR_DOMAIN>/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"password":"管理员密码"}'
 
 # 2. 调用备选池接口（将 <token> 替换为实际 token）
-curl -X POST https://zhuozhenyu.cn/api/stock/daily/mainwave-picker \
+curl -X POST https://<YOUR_DOMAIN>/api/stock/daily/mainwave-picker \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
   -d '{"page_num":1,"page_size":10}'
@@ -376,7 +376,7 @@ launch_pct_chg = (current_close - launch_close) / launch_close × 100%
 ### 请求示例
 
 ```bash
-curl -X POST https://zhuozhenyu.cn/api/board/constituents/save \
+curl -X POST https://<YOUR_DOMAIN>/api/board/constituents/save \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
   -d '{
@@ -508,7 +508,7 @@ curl -X POST https://zhuozhenyu.cn/api/board/constituents/save \
 #### 请求示例
 
 ```bash
-curl -X POST https://zhuozhenyu.cn/api/stock/basic/000001/sync-survey \
+curl -X POST https://<YOUR_DOMAIN>/api/stock/basic/000001/sync-survey \
   -H "Authorization: Bearer <token>"
 ```
 

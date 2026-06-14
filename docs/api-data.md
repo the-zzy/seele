@@ -4,8 +4,8 @@
 
 | 项 | 内容 |
 |---|---|
-| 正式域名 | `zhuozhenyu.cn` |
-| 基础地址 | `https://zhuozhenyu.cn/api` |
+| 正式域名 | `<YOUR_DOMAIN>` |
+| 基础地址 | `https://<YOUR_DOMAIN>/api` |
 | 认证方式 | JWT Bearer Token |
 | 请求头 | `Authorization: Bearer <token>` |
 | Token 有效期 | 7 天 |
@@ -75,12 +75,12 @@
 
 ```bash
 # 1. 登录获取 token
-curl -X POST https://zhuozhenyu.cn/api/auth/login \
+curl -X POST https://<YOUR_DOMAIN>/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"password":"你的管理员密码"}'
 
 # 2. 调用数据接口（将 <token> 替换为实际 token）
-curl -X POST https://zhuozhenyu.cn/api/stock/daily/mainwave-picker \
+curl -X POST https://<YOUR_DOMAIN>/api/stock/daily/mainwave-picker \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
   -d '{"page_num":1,"page_size":10}'
@@ -91,7 +91,7 @@ curl -X POST https://zhuozhenyu.cn/api/stock/daily/mainwave-picker \
 ```javascript
 const token = localStorage.getItem('seele_token')
 
-axios.post('https://zhuozhenyu.cn/api/stock/daily/mainwave-picker', {
+axios.post('https://<YOUR_DOMAIN>/api/stock/daily/mainwave-picker', {
   page_num: 1,
   page_size: 10
 }, {

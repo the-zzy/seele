@@ -18,6 +18,7 @@
 
 | 文件 | 字段 |
 |------|------|
+| [VERSION](VERSION) | 项目版本号（纯文本） |
 | [package.json](package.json) | `"version"` |
 | [seele-frontend/package.json](seele-frontend/package.json) | `"version"` |
 | [seele-frontend/src/App.vue](seele-frontend/src/App.vue) | 侧边栏 masthead 硬编码版本号 |
@@ -65,6 +66,43 @@ git commit -m "chore: bump version to X.Y.Z"
 ---
 
 ## 版本升级记录
+
+### v2.3.0 (2026-06-14)
+
+**分支**: `feature/mainwave-scorer-v2.3`
+
+**代码变更范围**:
+- 主线波浪评分 v2.3 优化（`mainwave-picker`、组合交易、指标计算性能）
+- 前端移动端适配（Vant 4 + 自定义 SCSS）
+- 修复 `stock_basic`、`financial`、`mainwave-detect` 和 `agent chat` 500 错误
+- 新增版本管理（`VERSION` 文件、`/api/version`、前端版本检查）
+- `sync-job-log` 样式紧凑化、主波浪表格居中
+- Agent chat stream 请求补充 Bearer token
+- 清理临时 `daily_repair` 脚本和备份文件
+
+**数据库迁移**:
+- `2026-05-28-add-visitor-log.sql`
+- `2026-05-29-unify-collation.sql`
+- `2026-05-30-float-to-decimal.sql`
+- `2026-06-08-board-constituent-name.sql`
+- `scripts/add_industry_detail_column.py`
+
+**配置变更**:
+- `deploy/nginx-seele.conf` 增加 SSL 覆盖警告
+- `deploy/seele-backend.service` 路径改为占位符
+
+**依赖变更**: 无新增
+
+**升级步骤**:
+1. 备份数据库
+2. 按顺序执行数据库迁移
+3. 清理前端构建缓存后重新构建 `npm run build`
+4. 上传前后端代码
+5. 检查 `seele-backend.service` 路径指向
+6. 修改 Nginx 配置时**不要覆盖 SSL 段**，reload nginx
+7. 重启后端并验证 `https://<YOUR_DOMAIN>/api/version`
+
+---
 
 ### v2.2.0 (2026-06-10)
 
@@ -146,7 +184,33 @@ git commit -m "chore: bump version to X.Y.Z"
 - [ ] 已确认 Nginx 配置包含 443 SSL 监听（生产环境必须）
 - [ ] 已确认 HTTP 80 端口会 301 重定向到 HTTPS
 - [ ] 更新 Nginx 配置时**不能直接覆盖**，需合并保留 Certbot/SSL 段
-- [ ] 已验证 `https://zhuozhenyu.cn/` 和 `https://zhuozhenyu.cn/api/version` 可正常访问
+- [ ] 已验证 `https://<YOUR_DOMAIN>/` 和 `https://<YOUR_DOMAIN>/api/version` 可正常访问
+```
+
+---
+
+## 远程手动操作备忘（示例）
+
+> 以下命令中的 `<PROD_IP>`、`<PROD_USER>`、`<DEPLOY_DIR>` 需替换为实际值。生产环境具体连接信息不应写入仓库。
+
+```bash
+# 1. 备份数据库
+mysqldump -u root -p seele > <DEPLOY_DIR>/backups/seele-$(date +%Y%m%d_%H%M%S).sql
+
+# 2. 执行数据库迁移（按顺序，根据实际版本选择）
+mysql -u root -p seele < <DEPLOY_DIR>/db-ops/migrations/2026-05-28-add-visitor-log.sql
+mysql -u root -p seele < <DEPLOY_DIR>/db-ops/migrations/2026-05-28-add-portfolio-trade-dividend.sql
+mysql -u root -p seele < <DEPLOY_DIR>/db-ops/migrations/2026-05-29-unify-collation.sql
+mysql -u root -p seele < <DEPLOY_DIR>/db-ops/migrations/2026-05-30-float-to-decimal.sql
+mysql -u root -p seele < <DEPLOY_DIR>/db-ops/migrations/2026-06-08-board-constituent-name.sql
+
+# 3. 添加 industry_detail 字段
+cd <DEPLOY_DIR>/seele-backend
+source .venv/bin/activate
+python <DEPLOY_DIR>/scripts/add_industry_detail_column.py
+
+# 4. 重启后端
+systemctl restart seele-backend
 ```
 
 ---
@@ -157,21 +221,21 @@ git commit -m "chore: bump version to X.Y.Z"
 
 **问题 1：Nginx 配置覆盖导致 HTTPS 失效**
 
-现象：`https://zhuozhenyu.cn/` 无法访问，`http://` 正常。
+现象：`https://<YOUR_DOMAIN>/` 无法访问，`http://` 正常。
 
-原因：部署脚本直接用新配置覆盖了 `/etc/nginx/conf.d/seele.conf`，只保留了 80 端口监听，丢失了 Certbot 自动生成的 443 SSL 段和 HTTP→HTTPS 301 重定向。
+原因：部署脚本直接用新配置覆盖了 `<NGINX_CONF_PATH>`，只保留了 80 端口监听，丢失了 Certbot 自动生成的 443 SSL 段和 HTTP→HTTPS 301 重定向。
 
 正确处理：
-1. 修改 Nginx 配置前先做备份：`cp /etc/nginx/conf.d/seele.conf /etc/nginx/conf.d/seele.conf.bak.$(date +%Y%m%d_%H%M%S)`
+1. 修改 Nginx 配置前先做备份：`cp <NGINX_CONF_PATH> <NGINX_CONF_PATH>.bak.$(date +%Y%m%d_%H%M%S)`
 2. 不要整体替换，只修改需要变更的部分（如 `root` 路径、`location` 段）
 3. 修改后检查 `nginx -t`，并确认 `ss -tlnp | grep :443` 有监听
-4. 必须验证 `https://域名/` 和 `https://域名/api/version`
+4. 必须验证 `https://<YOUR_DOMAIN>/` 和 `https://<YOUR_DOMAIN>/api/version`
 
 **问题 2：Systemd 服务路径与实际部署目录不一致**
 
 现象：`systemctl restart seele-backend` 失败，`Failed to load environment files: No such file or directory`。
 
-原因：旧服务文件指向 `/opt/seele/seele-backend`，而实际代码已部署到 `/www/seele/seele-backend`。
+原因：旧服务文件指向 `<OLD_DEPLOY_DIR>/seele-backend`，而实际代码已部署到 `<DEPLOY_DIR>/seele-backend`。
 
 正确处理：
 1. 部署前检查 `WorkingDirectory` 和 `EnvironmentFile` 是否指向当前部署目录

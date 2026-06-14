@@ -186,14 +186,14 @@ sudo mysql -u root -p seele < db-ops/migrations/2026-04-26-00-init-schema.sql
 
 ```bash
 # 确认项目目录存在
-ls /opt/seele/seele-backend/
+ls <DEPLOY_DIR>/seele-backend/
 # 预期: app/ requirements.txt start.py .env.example ...
 ```
 
 ### 4.2 虚拟环境
 
 ```bash
-cd /opt/seele/seele-backend
+cd <DEPLOY_DIR>/seele-backend
 
 # 创建虚拟环境（如未创建）
 python3 -m venv .venv
@@ -207,7 +207,7 @@ pip install -r requirements.txt
 ### 4.3 环境变量配置
 
 ```bash
-cat /opt/seele/seele-backend/.env
+cat <DEPLOY_DIR>/seele-backend/.env
 ```
 
 **必须包含**：
@@ -243,7 +243,7 @@ ss -tlnp | grep :9000
 ### 5.1 依赖安装
 
 ```bash
-cd /opt/seele/seele-frontend
+cd <DEPLOY_DIR>/seele-frontend
 
 npm install
 # 预期: 无 ERR! 日志
@@ -255,7 +255,7 @@ npm install
 npm run build
 # 预期: Build complete. dist/ 目录生成
 
-ls /opt/seele/seele-frontend/dist/
+ls <DEPLOY_DIR>/seele-frontend/dist/
 # 预期: index.html, js/, css/, favicon.ico 等
 ```
 
@@ -276,7 +276,7 @@ server {
     listen 80;
     server_name your-domain.com;  # 或服务器 IP
 
-    root /opt/seele/seele-frontend/dist;
+    root <DEPLOY_DIR>/seele-frontend/dist;
     index index.html;
 
     # 3Mbps 带宽优化：启用 gzip
@@ -364,10 +364,10 @@ After=network.target
 [Service]
 Type=simple
 User=www-data
-WorkingDirectory=/opt/seele/seele-backend
+WorkingDirectory=<DEPLOY_DIR>/seele-backend
 Environment=DEPLOY_ENV=prod
-EnvironmentFile=/opt/seele/seele-backend/.env
-ExecStart=/opt/seele/seele-backend/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 9000 --workers 1
+EnvironmentFile=<DEPLOY_DIR>/seele-backend/.env
+ExecStart=<DEPLOY_DIR>/seele-backend/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 9000 --workers 1
 Restart=on-failure
 RestartSec=5
 
@@ -498,7 +498,7 @@ sudo systemctl restart systemd-journald
 # 每周清理 7 天前的日志
 sudo tee /etc/cron.weekly/cleanup-seele-logs << 'EOF'
 #!/bin/bash
-find /opt/seele/seele-backend/logs -name "*.log" -mtime +7 -delete
+find <DEPLOY_DIR>/seele-backend/logs -name "*.log" -mtime +7 -delete
 EOF
 sudo chmod +x /etc/cron.weekly/cleanup-seele-logs
 ```
@@ -598,7 +598,7 @@ ps aux | grep mysqld | grep -v grep
 | 502 Bad Gateway | `sudo systemctl status seele-backend` | 后端未启动或崩溃 |
 | 端口被占用 | `sudo lsof -i :9000` | 旧进程未清理 |
 | 数据库连接失败 | `sudo mysql -u root -p` | 密码错误或 MySQL 未启动 |
-| 前端白屏 | `ls /opt/seele/seele-frontend/dist/` | 未执行 npm run build |
+| 前端白屏 | `ls <DEPLOY_DIR>/seele-frontend/dist/` | 未执行 npm run build |
 | 内存不足 OOM | `dmesg \| grep -i kill` | 未配置 swap 或 MySQL 未降配 |
 | 定时任务未执行 | `sudo journalctl -u seele-backend \| grep SCHEDULER` | 时区或 scheduler 异常 |
 
