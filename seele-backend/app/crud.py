@@ -184,6 +184,33 @@ class StockBasicCRUD:
         formatted_date = trade_date.replace("-", "")
         holding_symbols = _get_holding_symbols(db)
 
+        # 取每只股票的最新财务指标，避免与 stock_daily 产生笛卡尔积
+        financial_subq = (
+            db.query(
+                models.StockFinancialIndicator.symbol,
+                func.max(models.StockFinancialIndicator.report_date).label('max_report_date'),
+            )
+            .group_by(models.StockFinancialIndicator.symbol)
+            .subquery()
+        )
+        financial_q = (
+            db.query(
+                models.StockFinancialIndicator.symbol,
+                models.StockFinancialIndicator.net_profit,
+                models.StockFinancialIndicator.net_profit_yoy,
+                models.StockFinancialIndicator.total_revenue,
+                models.StockFinancialIndicator.roe,
+            )
+            .join(
+                financial_subq,
+                and_(
+                    models.StockFinancialIndicator.symbol == financial_subq.c.symbol,
+                    models.StockFinancialIndicator.report_date == financial_subq.c.max_report_date,
+                ),
+            )
+            .subquery()
+        )
+
         def _build_base_query():
             """构建基础查询（含所有 JOIN 和 trade_date 过滤）"""
             return (
@@ -208,9 +235,10 @@ class StockBasicCRUD:
                     models.StockDailyIndicator.chg_5d,
                     models.StockDailyIndicator.chg_10d,
                     models.StockDailyIndicator.adx,
-                    models.StockFinancialIndicator.net_profit,
-                    models.StockFinancialIndicator.net_profit_yoy,
-                    models.StockFinancialIndicator.roe,
+                    financial_q.c.net_profit,
+                    financial_q.c.net_profit_yoy,
+                    financial_q.c.total_revenue,
+                    financial_q.c.roe,
                 )
                 .join(models.StockBasic, models.StockDaily.symbol == models.StockBasic.symbol)
                 .outerjoin(
@@ -221,8 +249,8 @@ class StockBasicCRUD:
                     ),
                 )
                 .outerjoin(
-                    models.StockFinancialIndicator,
-                    models.StockDaily.symbol == models.StockFinancialIndicator.symbol,
+                    financial_q,
+                    models.StockDaily.symbol == financial_q.c.symbol,
                 )
                 .filter(models.StockDaily.trade_date == formatted_date)
                 .options(load_only(
@@ -282,12 +310,12 @@ class StockBasicCRUD:
             # 财务数据过滤：允许缺失（NULL），有数据则要求盈利
             q = q.filter(
                 or_(
-                    models.StockFinancialIndicator.net_profit.is_(None),
-                    models.StockFinancialIndicator.net_profit > 0,
+                    financial_q.c.net_profit.is_(None),
+                    financial_q.c.net_profit > 0,
                 ),
                 or_(
-                    models.StockFinancialIndicator.total_revenue.is_(None),
-                    models.StockFinancialIndicator.total_revenue > 0,
+                    financial_q.c.total_revenue.is_(None),
+                    financial_q.c.total_revenue > 0,
                 ),
             )
             # MA5偏离不再在SQL层硬性过滤，由Python评分层处理
@@ -297,21 +325,6 @@ class StockBasicCRUD:
                 models.StockDailyIndicator.ma5 > 0,
             )
             return q
-
-        # 1. 选股结果（带所有选股条件）
-        picker_q = _apply_picker_filters(_apply_text_filters(_build_base_query()))
-        picker_results = picker_q.all()
-        picker_symbols = {row[0].symbol for row in picker_results}
-
-        # 2. 补充持仓股（不满足选股条件但用户持有）
-        missing_symbols = holding_symbols - picker_symbols
-        holding_results = []
-        if missing_symbols:
-            holding_q = _apply_text_filters(_build_base_query())
-            holding_q = holding_q.filter(models.StockDaily.symbol.in_(list(missing_symbols)))
-            holding_results = holding_q.all()
-
-        all_results = picker_results + holding_results
 
         def _build_item(row):
             """将查询结果行组装为字典"""
@@ -338,6 +351,7 @@ class StockBasicCRUD:
                 adx,
                 net_profit,
                 net_profit_yoy,
+                total_revenue,
                 roe,
             ) = row
             # 用实时数据估算流通市值
@@ -393,56 +407,121 @@ class StockBasicCRUD:
                 "is_holding": daily.symbol in holding_symbols,
             }
 
+        def _apply_sql_sort(q, sort_field: str, sort_order: str):
+            """在 SQL 层应用排序"""
+            field_map = {
+                "symbol": models.StockDaily.symbol,
+                "stock_name": models.StockBasic.name,
+                "name": models.StockBasic.name,
+                "open": models.StockDaily.open,
+                "high": models.StockDaily.high,
+                "low": models.StockDaily.low,
+                "close": models.StockDaily.close,
+                "volume": models.StockDaily.volume,
+                "amount": models.StockDaily.amount,
+                "amplitude": models.StockDaily.amplitude,
+                "pct_chg": models.StockDaily.pct_chg,
+                "pctChg": models.StockDaily.pct_chg,
+                "price_change": models.StockDaily.price_change,
+                "priceChange": models.StockDaily.price_change,
+                "turnover": models.StockDaily.turnover,
+                "ma5": models.StockDailyIndicator.ma5,
+                "ma10": models.StockDailyIndicator.ma10,
+                "ma20": models.StockDailyIndicator.ma20,
+                "ma30": models.StockDailyIndicator.ma30,
+                "ma60": models.StockDailyIndicator.ma60,
+                "vol_ma5": models.StockDailyIndicator.vol_ma5,
+                "volMa5": models.StockDailyIndicator.vol_ma5,
+                "vol_ma10": models.StockDailyIndicator.vol_ma10,
+                "volMa10": models.StockDailyIndicator.vol_ma10,
+                "turnover_ma5": models.StockDailyIndicator.turnover_ma5,
+                "turnoverMa5": models.StockDailyIndicator.turnover_ma5,
+                "turnover_ma10": models.StockDailyIndicator.turnover_ma10,
+                "turnoverMa10": models.StockDailyIndicator.turnover_ma10,
+                "float_market_cap": models.StockBasic.float_market_cap,
+            }
+            order_column = field_map.get(sort_field, models.StockDaily.symbol)
+            if sort_order == "desc":
+                return q.order_by(order_column.desc())
+            return q.order_by(order_column.asc())
+
+        # 按评分排序时必须先算完所有分数；其他字段可在 SQL 层直接分页，只评分当前页
+        sort_field = query.sort_field or "symbol"
+        score_sort_fields = {"score", "trend_score", "strength_score", "momentum_score"}
+
+        if sort_field not in score_sort_fields:
+            # 1. 构建选股查询并 SQL 层排序/分页
+            picker_q = _apply_picker_filters(_apply_text_filters(_build_base_query()))
+            picker_q = _apply_sql_sort(picker_q, sort_field, query.sort_order or "asc")
+            total = picker_q.count()
+
+            page_results = (
+                picker_q
+                .offset((query.page_num - 1) * query.page_size)
+                .limit(query.page_size)
+                .all()
+            )
+
+            # 2. 补充当前持仓股（仅第一页，避免与分页结果冲突）
+            page_symbols = {row[0].symbol for row in page_results}
+            missing_symbols = holding_symbols - page_symbols
+            holding_results = []
+            if missing_symbols and query.page_num == 1:
+                remaining = query.page_size - len(page_results)
+                if remaining > 0:
+                    holding_q = _apply_text_filters(_build_base_query())
+                    holding_q = holding_q.filter(models.StockDaily.symbol.in_(list(missing_symbols)))
+                    holding_results = holding_q.limit(remaining).all()
+
+            all_results = page_results + holding_results
+            all_data = [_build_item(row) for row in all_results]
+
+            # 流通市值过滤（仅对持仓补充项生效，选股条件已在 SQL 层处理）
+            if query.float_market_cap_min is not None:
+                all_data = [
+                    item for item in all_data
+                    if item.get("float_market_cap") is not None
+                    and item["float_market_cap"] >= query.float_market_cap_min
+                ]
+
+            # 3. 只计算当前页评分
+            records_by_symbol = mainwave_scorer.batch_calculate_mainwave_layers(db, all_data, trade_date)
+            mainwave_scorer.batch_calculate_scores(db, all_data, trade_date, records_by_symbol)
+
+            return all_data, total, trade_date
+
+        # 按评分排序：回退到全量计算（仍保留结果正确性）
+        picker_q = _apply_picker_filters(_apply_text_filters(_build_base_query()))
+        picker_results = picker_q.all()
+        picker_symbols = {row[0].symbol for row in picker_results}
+
+        missing_symbols = holding_symbols - picker_symbols
+        holding_results = []
+        if missing_symbols:
+            holding_q = _apply_text_filters(_build_base_query())
+            holding_q = holding_q.filter(models.StockDaily.symbol.in_(list(missing_symbols)))
+            holding_results = holding_q.all()
+
+        all_results = picker_results + holding_results
         all_data = [_build_item(row) for row in all_results]
-        # 流通市值过滤（DB值优先，估计值兜底，SQL无法处理计算字段）
+
         if query.float_market_cap_min is not None:
             all_data = [
                 item for item in all_data
                 if item.get("float_market_cap") is not None
                 and item["float_market_cap"] >= query.float_market_cap_min
             ]
-        # 先计算分层与启动日，评分需要用到 launch_date；
-        # 复用返回的日线记录，避免重复查询
+
         records_by_symbol = mainwave_scorer.batch_calculate_mainwave_layers(db, all_data, trade_date)
         mainwave_scorer.batch_calculate_scores(db, all_data, trade_date, records_by_symbol)
 
-        # 统一内存排序
         sort_key_map = {
-            "symbol": lambda x: x.get("symbol", ""),
-            "stock_name": lambda x: x.get("stock_name", ""),
-            "name": lambda x: x.get("name", ""),
-            "open": lambda x: x.get("open") or 0,
-            "high": lambda x: x.get("high") or 0,
-            "low": lambda x: x.get("low") or 0,
-            "close": lambda x: x.get("close") or 0,
-            "volume": lambda x: x.get("volume") or 0,
-            "amount": lambda x: x.get("amount") or 0,
-            "amplitude": lambda x: x.get("amplitude") or 0,
-            "pct_chg": lambda x: x.get("pct_chg") or 0,
-            "pctChg": lambda x: x.get("pct_chg") or 0,
-            "price_change": lambda x: x.get("price_change") or 0,
-            "priceChange": lambda x: x.get("price_change") or 0,
-            "turnover": lambda x: x.get("turnover") or 0,
-            "ma5": lambda x: x.get("ma5") or 0,
-            "ma10": lambda x: x.get("ma10") or 0,
-            "ma20": lambda x: x.get("ma20") or 0,
-            "ma30": lambda x: x.get("ma30") or 0,
-            "ma60": lambda x: x.get("ma60") or 0,
-            "vol_ma5": lambda x: x.get("vol_ma5") or 0,
-            "volMa5": lambda x: x.get("vol_ma5") or 0,
-            "vol_ma10": lambda x: x.get("vol_ma10") or 0,
-            "volMa10": lambda x: x.get("vol_ma10") or 0,
-            "turnover_ma5": lambda x: x.get("turnover_ma5") or 0,
-            "turnoverMa5": lambda x: x.get("turnover_ma5") or 0,
-            "turnover_ma10": lambda x: x.get("turnover_ma10") or 0,
-            "turnoverMa10": lambda x: x.get("turnover_ma10") or 0,
-            "float_market_cap": lambda x: x.get("float_market_cap") or 0,
             "score": lambda x: x.get("score", {}).get("total", 0),
             "trend_score": lambda x: x.get("score", {}).get("trend_score", 0),
             "strength_score": lambda x: x.get("score", {}).get("strength_score", 0),
             "momentum_score": lambda x: x.get("score", {}).get("momentum_score", 0),
         }
-        sort_key = sort_key_map.get(query.sort_field, sort_key_map["symbol"])
+        sort_key = sort_key_map[sort_field]
         reverse = query.sort_order == "desc"
         all_data.sort(key=sort_key, reverse=reverse)
 
@@ -484,6 +563,44 @@ class StockBasicCRUD:
             return existing
         else:
             return self.create(db, obj_in)
+
+    def update_industry_detail(self, db: Session, symbol: str, industry_detail: str) -> bool:
+        """更新单只股票的细分行业（不自动 commit，由调用方统一提交）"""
+        db_obj = self.get_by_symbol(db, symbol)
+        if db_obj:
+            db_obj.industry_detail = industry_detail
+            return True
+        return False
+
+    def update_industry_detail_batch(self, db: Session, items: list[dict]) -> dict:
+        """批量更新细分行业（不自动 commit，由调用方统一提交）
+
+        items: [{'symbol': '000001', 'industry_detail': '金融业-货币金融服务'}, ...]
+        """
+        if not items:
+            return {"success": 0, "failed": 0}
+
+        symbols = [d["symbol"] for d in items]
+        existing = {
+            r.symbol: r
+            for r in db.query(models.StockBasic)
+            .filter(models.StockBasic.symbol.in_(symbols))
+            .all()
+        }
+
+        success = 0
+        failed = 0
+        for data in items:
+            symbol = data.get("symbol")
+            industry_detail = data.get("industry_detail")
+            db_obj = existing.get(symbol)
+            if db_obj and industry_detail is not None:
+                db_obj.industry_detail = industry_detail
+                success += 1
+            else:
+                failed += 1
+
+        return {"success": success, "failed": failed}
 
     def upsert_batch(self, db: Session, obj_list: list[schemas.StockBasicCreate]) -> dict:
         """批量 upsert（使用 INSERT ... ON DUPLICATE KEY UPDATE，不自动 commit）"""
@@ -1812,31 +1929,39 @@ class BoardConstituentCRUD:
             .all()
         )
 
+    def upsert(self, db: Session, obj_in: schemas.BoardConstituentCreate) -> tuple[models.BoardConstituent, bool]:
+        """单条 upsert（存在则更新，不存在则插入），返回 (对象, 是否新建)"""
+        existing = (
+            db.query(models.BoardConstituent)
+            .filter(
+                and_(
+                    models.BoardConstituent.board_code == obj_in.board_code,
+                    models.BoardConstituent.constituent_symbol == obj_in.constituent_symbol,
+                )
+            )
+            .first()
+        )
+        if existing:
+            if obj_in.update_date is not None:
+                existing.update_date = obj_in.update_date
+            if obj_in.name is not None:
+                existing.name = obj_in.name
+            return existing, False
+        else:
+            db_obj = models.BoardConstituent(**obj_in.model_dump())
+            db.add(db_obj)
+            return db_obj, True
+
     def upsert_batch(self, db: Session, obj_list: List[schemas.BoardConstituentCreate]) -> dict:
         """批量 upsert（不自动 commit，由调用方统一提交）"""
         created = 0
         updated = 0
         for obj in obj_list:
-            existing = (
-                db.query(models.BoardConstituent)
-                .filter(
-                    and_(
-                        models.BoardConstituent.board_code == obj.board_code,
-                        models.BoardConstituent.constituent_symbol == obj.constituent_symbol,
-                    )
-                )
-                .first()
-            )
-            if existing:
-                if obj.update_date is not None:
-                    existing.update_date = obj.update_date
-                if obj.name is not None:
-                    existing.name = obj.name
-                updated += 1
-            else:
-                db_obj = models.BoardConstituent(**obj.model_dump())
-                db.add(db_obj)
+            _, is_created = self.upsert(db, obj)
+            if is_created:
                 created += 1
+            else:
+                updated += 1
         return {'created': created, 'updated': updated}
 
     def delete_by_board(self, db: Session, board_code: str) -> int:
@@ -1950,6 +2075,34 @@ class BoardDailyCRUD:
 
 
 board_daily_crud = BoardDailyCRUD()
+
+
+# ==================== 公司概况 ====================
+
+
+class StockCompanyProfileCRUD:
+    """公司概况 CRUD"""
+
+    def get_by_symbol(self, db: Session, symbol: str) -> Optional[models.StockCompanyProfile]:
+        """根据股票代码查询"""
+        return db.query(models.StockCompanyProfile).filter(models.StockCompanyProfile.symbol == symbol).first()
+
+    def create_or_update(self, db: Session, obj_in: schemas.StockCompanyProfileCreate) -> models.StockCompanyProfile:
+        """存在则更新，不存在则插入（不自动 commit，由调用方统一提交）"""
+        existing = self.get_by_symbol(db, obj_in.symbol)
+        if existing:
+            update_data = obj_in.model_dump(exclude={'symbol'})
+            for key, value in update_data.items():
+                if value is not None:
+                    setattr(existing, key, value)
+            return existing
+        else:
+            db_obj = models.StockCompanyProfile(**obj_in.model_dump())
+            db.add(db_obj)
+            return db_obj
+
+
+stock_company_profile_crud = StockCompanyProfileCRUD()
 
 
 # ==================== 交易日历 ====================

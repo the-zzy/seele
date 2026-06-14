@@ -3,16 +3,19 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { toast } from '@/composables/useToast'
 import { syncApi, tradeCalendarApi } from '@/api/stock'
 import { useSyncTask } from '@/composables/useSyncTask'
+import { useViewport } from '@/composables/useViewport'
 import PageHero from '@/components/common/PageHero.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
+import MobileCardList from '@/components/common/MobileCardList.vue'
 
 const detailedStatus = ref(null)
 const dailyTotal = ref(0)
 const dailyPageNum = ref(1)
-const dailyPageSize = ref(10)
+const dailyPageSize = ref(5)
 const incrementalMap = ref({})
 
-const { syncing, progress: taskProgress, startSync, restoreTasks, clearPoll } = useSyncTask()
+const { syncing, progress: taskProgress, startSync, restoreTasks, clearPoll, cancelTask } = useSyncTask()
+const { isMobile } = useViewport()
 
 const pipeline = ref(null)
 const pipelinePollTimer = ref(null)
@@ -189,9 +192,35 @@ async function handleIndicatorSync (date) {
   })
 }
 
+async function handleCancelDaily (date) {
+  if (!confirm('确定要停止该日期的日线同步吗？')) return
+  const taskKey = `daily_${date.replace(/-/g, '')}`
+  const ok = await cancelTask(taskKey)
+  if (ok) await loadDetailedStatus()
+}
+
+async function handleCancelIndicator (date) {
+  if (!confirm('确定要停止该日期的指标计算吗？')) return
+  const taskKey = `indicator_${date.replace(/-/g, '')}`
+  const ok = await cancelTask(taskKey)
+  if (ok) await loadDetailedStatus()
+}
+
 function formatTime (ts) {
   if (!ts) return '-'
   return ts
+}
+
+function formatDate (ts) {
+  if (!ts) return '-'
+  const s = String(ts)
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10)
+  const d = new Date(s)
+  if (Number.isNaN(d.getTime())) return s
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 function formatNumber (n) {
@@ -353,8 +382,19 @@ onUnmounted(() => {
                 <span class="market-count">{{ formatNumber(count) }}</span>
               </div>
             </div>
-            <div class="last-sync">
-              最近同步: {{ formatTime(detailedStatus.stock_basic.last_sync) }}
+            <div class="sync-summary">
+              <div class="sync-summary-row">
+                <span class="summary-label">最新数据日期</span>
+                <span class="summary-value">{{ formatDate(detailedStatus.stock_basic.last_sync) }}</span>
+              </div>
+              <div class="sync-summary-row">
+                <span class="summary-label">共</span>
+                <span class="summary-value">{{ formatNumber(detailedStatus.stock_basic.total_count) }} 条</span>
+              </div>
+              <div class="sync-summary-row">
+                <span class="summary-label">成功</span>
+                <span class="summary-value">{{ formatNumber(detailedStatus.stock_basic.success_count) }} 条</span>
+              </div>
             </div>
           </div>
 
@@ -412,11 +452,19 @@ onUnmounted(() => {
                 <span class="market-count">{{ formatNumber(detailedStatus.board.etf_count) }}</span>
               </div>
             </div>
-            <div class="last-sync">
-              最近同步: {{ formatTime(detailedStatus.board.last_sync) }}
-              <span v-if="detailedStatus.board.latest_daily_date" class="last-sync-extra">
-                · 日线至 {{ detailedStatus.board.latest_daily_date }}
-              </span>
+            <div class="sync-summary">
+              <div class="sync-summary-row">
+                <span class="summary-label">最新数据日期</span>
+                <span class="summary-value">{{ formatDate(detailedStatus.board.latest_daily_date || detailedStatus.board.last_list_sync) }}</span>
+              </div>
+              <div class="sync-summary-row">
+                <span class="summary-label">共</span>
+                <span class="summary-value">{{ formatNumber(detailedStatus.board.total_count) }} 条</span>
+              </div>
+              <div class="sync-summary-row">
+                <span class="summary-label">成功</span>
+                <span class="summary-value">{{ formatNumber(detailedStatus.board.success_count) }} 条</span>
+              </div>
             </div>
             <div class="last-sync-extra-row">
               成分股 {{ formatNumber(detailedStatus.board.constituent_count) }} 条
@@ -426,10 +474,88 @@ onUnmounted(() => {
 
         <div class="daily-section" v-if="detailedStatus">
           <div class="daily-section-header">
-            <h3 class="section-title">最近十个交易日</h3>
-            <span class="section-note">统计范围不含北交所 · 每页 10 条</span>
+            <h3 class="section-title">最近五个交易日</h3>
+            <span class="section-note">统计范围不含北交所 · 每页 5 条</span>
           </div>
-          <div class="daily-table-wrap">
+          <MobileCardList
+            v-if="isMobile"
+            :list="detailedStatus.daily"
+            key-field="date"
+          >
+            <template #default="{ item }">
+              <div class="daily-card">
+                <div class="daily-card-header">
+                  <span class="daily-date">{{ item.date }}</span>
+                  <span class="daily-count">{{ item.total_stock_count }} 只</span>
+                </div>
+                <div class="daily-fields">
+                  <div class="daily-field">
+                    <span class="field-label">日线数据</span>
+                    <span class="field-value" :class="item.daily_count > 0 ? 'num-ok' : 'num-zero'">
+                      {{ item.daily_count }}
+                      <small v-if="item.missing_daily > 0" class="missing-tag">缺{{ item.missing_daily }}</small>
+                    </span>
+                  </div>
+                  <div class="daily-field">
+                    <span class="field-label">指标数据</span>
+                    <span class="field-value" :class="item.indicator_count > 0 ? 'num-ok' : 'num-zero'">
+                      {{ item.indicator_count }}
+                      <small v-if="item.missing_indicator > 0" class="missing-tag">缺{{ item.missing_indicator }}</small>
+                    </span>
+                  </div>
+                  <div class="daily-field">
+                    <span class="field-label">更新模式</span>
+                    <label class="toggle-label">
+                      <input
+                        type="checkbox"
+                        v-model="incrementalMap[item.date]"
+                      >
+                      <span class="toggle-text">{{ incrementalMap[item.date] ? '增量' : '全量' }}</span>
+                    </label>
+                  </div>
+                </div>
+                <div class="daily-actions">
+                  <button
+                    class="btn-sync-small"
+                    :disabled="syncing['daily_' + item.date.replace(/-/g, '')]"
+                    @click="handleDailySync(item.date)"
+                  >
+                    {{ syncing['daily_' + item.date.replace(/-/g, '')]
+                      ? (taskProgress['daily_' + item.date.replace(/-/g, '')]?.total > 0
+                        ? `同步中 ${taskProgress['daily_' + item.date.replace(/-/g, '')].current}/${taskProgress['daily_' + item.date.replace(/-/g, '')].total}`
+                        : '同步中...')
+                      : '日线同步' }}
+                  </button>
+                  <button
+                    v-if="item.daily_log?.status === 'running'"
+                    class="btn-sync-small btn-cancel"
+                    @click="handleCancelDaily(item.date)"
+                  >
+                    停止
+                  </button>
+                  <button
+                    class="btn-sync-small"
+                    :disabled="syncing['indicator_' + item.date.replace(/-/g, '')]"
+                    @click="handleIndicatorSync(item.date)"
+                  >
+                    {{ syncing['indicator_' + item.date.replace(/-/g, '')]
+                      ? (taskProgress['indicator_' + item.date.replace(/-/g, '')]?.total > 0
+                        ? `计算中 ${taskProgress['indicator_' + item.date.replace(/-/g, '')].current}/${taskProgress['indicator_' + item.date.replace(/-/g, '')].total}`
+                        : '计算中...')
+                      : '指标计算' }}
+                  </button>
+                  <button
+                    v-if="item.indicator_log?.status === 'running'"
+                    class="btn-sync-small btn-cancel"
+                    @click="handleCancelIndicator(item.date)"
+                  >
+                    停止
+                  </button>
+                </div>
+              </div>
+            </template>
+          </MobileCardList>
+          <div v-else class="daily-table-wrap">
             <table class="daily-table">
               <thead>
                 <tr>
@@ -484,6 +610,13 @@ onUnmounted(() => {
                           : '日线同步' }}
                       </button>
                       <button
+                        v-if="row.daily_log?.status === 'running'"
+                        class="btn-sync-small btn-cancel"
+                        @click="handleCancelDaily(row.date)"
+                      >
+                        停止
+                      </button>
+                      <button
                         class="btn-sync-small"
                         :disabled="syncing['indicator_' + row.date.replace(/-/g, '')]"
                         @click="handleIndicatorSync(row.date)"
@@ -493,6 +626,13 @@ onUnmounted(() => {
                             ? `计算中 ${taskProgress['indicator_' + row.date.replace(/-/g, '')].current}/${taskProgress['indicator_' + row.date.replace(/-/g, '')].total}`
                             : '计算中...')
                           : '指标计算' }}
+                      </button>
+                      <button
+                        v-if="row.indicator_log?.status === 'running'"
+                        class="btn-sync-small btn-cancel"
+                        @click="handleCancelIndicator(row.date)"
+                      >
+                        停止
                       </button>
                     </div>
                   </td>
@@ -534,20 +674,20 @@ onUnmounted(() => {
   margin-top: 8px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 12px;
 }
 
 .top-section {
   display: grid;
   grid-template-columns: minmax(280px, 30%) 1fr;
-  gap: 20px;
+  gap: 12px;
   min-height: 0;
 }
 
 .left-cards {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   min-width: 0;
 }
 
@@ -555,16 +695,16 @@ onUnmounted(() => {
   background: var(--bg-secondary);
   border: 1px solid var(--rule);
   border-radius: 6px;
-  padding: 16px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 
   .stock-basic-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding-bottom: 10px;
+    padding-bottom: 8px;
     border-bottom: 1px solid var(--rule);
   }
 
@@ -677,7 +817,10 @@ onUnmounted(() => {
     font-weight: 600;
   }
 
-  .last-sync {
+  .sync-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
     font-size: 11px;
     color: var(--text-muted);
     font-family: var(--font-mono);
@@ -685,9 +828,19 @@ onUnmounted(() => {
     border-top: 1px solid var(--rule);
   }
 
-  .last-sync-extra {
-    font-size: 11px;
-    color: var(--text-muted);
+  .sync-summary-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .summary-label {
+    color: var(--text-secondary);
+  }
+
+  .summary-value {
+    color: var(--text-primary);
+    font-weight: 600;
   }
 
   .last-sync-extra-row {
@@ -718,6 +871,10 @@ onUnmounted(() => {
   &:hover:not(:disabled) {
     opacity: 0.9;
   }
+}
+
+.btn-sync-small.btn-cancel {
+  background: var(--up);
 }
 
 .btn-missing {
@@ -752,16 +909,18 @@ onUnmounted(() => {
   background: var(--bg-secondary);
   border: 1px solid var(--rule);
   border-radius: 6px;
-  padding: 16px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .daily-section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
 
   .section-title {
     margin-bottom: 0;
@@ -854,10 +1013,70 @@ onUnmounted(() => {
   font-weight: 600;
 }
 
+.daily-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 14px;
+
+  .daily-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .daily-date {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .daily-count {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .daily-fields {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px 16px;
+    margin-bottom: 14px;
+  }
+
+  .daily-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .field-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .field-value {
+    font-size: 13px;
+    color: var(--text-primary);
+  }
+
+  .daily-actions {
+    display: flex;
+    gap: 10px;
+  }
+}
+
 .daily-table-wrap {
   overflow: auto;
   border: 1px solid var(--rule);
   border-radius: 4px;
+  flex: 1;
+  min-height: 0;
 }
 
 .daily-table {
@@ -866,7 +1085,7 @@ onUnmounted(() => {
   font-size: 12px;
 
   th, td {
-    padding: 8px 10px;
+    padding: 6px 10px;
     text-align: left;
     border-bottom: 1px solid var(--rule);
     white-space: nowrap;
@@ -1006,24 +1225,24 @@ onUnmounted(() => {
 .pipeline-cards {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
+  gap: 12px;
 }
 
 .pipeline-card {
   background: var(--bg-secondary);
   border: 1px solid var(--rule);
   border-radius: 6px;
-  padding: 16px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .pipeline-card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 10px;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--rule);
 }
 
@@ -1250,6 +1469,88 @@ onUnmounted(() => {
 @media (max-width: 900px) {
   .pipeline-cards {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .top-section {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .pipeline-cards {
+    gap: 12px;
+  }
+
+  .pipeline-card {
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .pipeline-card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .pipeline-date-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+
+    .pipeline-date-input {
+      width: 100%;
+      box-sizing: border-box;
+      min-height: var(--touch-target);
+    }
+
+    .btn-pipeline-start {
+      width: 100%;
+      min-height: var(--touch-target);
+    }
+  }
+
+  .daily-section {
+    padding: 12px;
+  }
+
+  .daily-section-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .daily-card {
+    padding: 12px;
+
+    .daily-fields {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+
+    .daily-actions {
+      .btn-sync-small {
+        flex: 1;
+        min-height: var(--touch-target);
+        font-size: 12px;
+        padding: 8px 10px;
+      }
+    }
+  }
+
+  .stock-basic-card {
+    padding: 12px;
+
+    .stock-basic-total {
+      .total-value {
+        font-size: 24px;
+      }
+    }
+
+    .stock-basic-meta {
+      flex-wrap: wrap;
+      gap: 8px 12px;
+    }
   }
 }
 

@@ -284,4 +284,49 @@ watch(loading, () => {
   display: flex;
   justify-content: flex-end;
 }
+
+@media (max-width: 768px) {
+  .chat-header {
+    padding: 10px 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+
+    .chat-title {
+      font-size: 13px;
+    }
+
+    .chat-actions {
+      flex-wrap: wrap;
+      gap: 6px;
+      width: 100%;
+      justify-content: flex-end;
+    }
+
+    .action-btn {
+      padding: 6px 10px;
+      min-height: var(--touch-target);
+    }
+  }
+
+  .chat-messages {
+    padding: 0 12px;
+  }
+
+  .chat-welcome {
+    padding: 32px 16px;
+
+    .welcome-title {
+      font-size: 16px;
+    }
+
+    .welcome-desc {
+      font-size: 12px;
+    }
+
+    .hint-chip {
+      padding: 8px 12px;
+      font-size: 11px;
+    }
+  }
+}
 </style>

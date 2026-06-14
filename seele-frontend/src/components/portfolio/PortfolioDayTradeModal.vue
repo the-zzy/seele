@@ -458,4 +458,34 @@ function onSubmit () {
     }
   }
 }
+
+@media (max-width: 768px) {
+  .modal-panel {
+    width: 100%;
+    border-radius: 12px 12px 0 0;
+    max-height: calc(92vh - var(--safe-bottom));
+    padding-bottom: var(--safe-bottom);
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-footer {
+    flex-direction: column;
+
+    button {
+      width: 100%;
+      min-height: var(--touch-target);
+    }
+  }
+
+  .select-dropdown {
+    max-height: 240px;
+  }
+}
 </style>

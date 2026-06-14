@@ -96,25 +96,28 @@ function onReset () {
 
 <style scoped lang="scss">
 .filter-section {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 10px 12px;
-  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 8px 10px;
   background: var(--bg-secondary);
   border: 1px solid var(--rule);
   border-radius: 6px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .field {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
+  flex: 1 1 140px;
 
   &.checkbox-field {
     gap: 6px;
     cursor: pointer;
+    flex: 0 0 auto;
 
     input[type='checkbox'] {
       width: 14px;
@@ -129,7 +132,7 @@ function onReset () {
   }
 
   .field-label {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 500;
     color: var(--text-secondary);
     white-space: nowrap;
@@ -141,12 +144,12 @@ function onReset () {
   input {
     flex: 1;
     width: 0;
-    padding: 7px 12px;
+    padding: 5px 10px;
     background: var(--bg-input);
     border: 1px solid var(--rule);
-    border-radius: 6px;
+    border-radius: 5px;
     font-family: var(--font-mono);
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-primary);
     transition: border-color 0.2s;
     min-width: 0;
@@ -166,19 +169,20 @@ function onReset () {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
-  grid-column: span 2;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .btn-primary {
-  padding: 7px 16px;
+  padding: 5px 14px;
   background: var(--accent);
   color: white;
   border: none;
-  border-radius: 6px;
+  border-radius: 5px;
   cursor: pointer;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.08em;
   transition: background 0.2s;
@@ -191,15 +195,51 @@ function onReset () {
   border: none;
   cursor: pointer;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-muted);
-  padding: 7px 12px;
-  border-radius: 6px;
+  padding: 5px 10px;
+  border-radius: 5px;
   transition: all 0.2s;
 
   &:hover {
     color: var(--text-primary);
     background: var(--bg-tertiary);
+  }
+}
+
+@media (max-width: 768px) {
+  .filter-section {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .field {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 5px;
+    flex: 1 1 auto;
+
+    .field-label {
+      width: auto;
+      text-align: left;
+    }
+
+    input {
+      width: 100%;
+      box-sizing: border-box;
+    }
+  }
+
+  .filter-actions {
+    justify-content: stretch;
+    width: 100%;
+    margin-left: 0;
+
+    button {
+      flex: 1;
+      min-height: var(--touch-target);
+    }
   }
 }
 </style>

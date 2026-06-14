@@ -1,5 +1,16 @@
 const { defineConfig } = require('@vue/cli-service')
+const fs = require('fs')
+const path = require('path')
+
+const versionPath = path.resolve(__dirname, '..', 'VERSION')
+const appVersion = fs.existsSync(versionPath)
+  ? fs.readFileSync(versionPath, 'utf-8').trim()
+  : require('./package.json').version
+
+process.env.VUE_APP_VERSION = appVersion
+
 module.exports = defineConfig({
+  filenameHashing: true,
   transpileDependencies: true,
   configureWebpack: {
     cache: {
@@ -7,6 +18,10 @@ module.exports = defineConfig({
       buildDependencies: {
         config: [__filename]
       }
+    },
+    output: {
+      filename: 'js/[name].[contenthash:8].js',
+      chunkFilename: 'js/[name].[contenthash:8].js'
     }
   },
   css: {

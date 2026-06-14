@@ -504,11 +504,7 @@ def create_trade(
             ).delete()
             portfolio_closed_crud.create(db, closed_data)
 
-    # 重建每日持仓和资产数据（内部统一 commit）
-    missing = _rebuild_daily_data(db)
-    if missing:
-        detail = f'持仓数据缺失日线收盘价: {", ".join(missing[:5])}' + (' 等' if len(missing) > 5 else '')
-        return {'code': 400, 'message': detail, 'data': missing}
+    db.commit()
     return success(schemas.PortfolioTradeResponse.model_validate(trade).model_dump(), message='录入成功')
 
 
@@ -575,11 +571,7 @@ def create_day_trade(
         ).delete()
         portfolio_closed_crud.create(db, closed_data)
 
-    missing = _rebuild_daily_data(db)
-    if missing:
-        detail = f'持仓数据缺失日线收盘价: {", ".join(missing[:5])}' + (' 等' if len(missing) > 5 else '')
-        return {'code': 400, 'message': detail, 'data': missing}
-
+    db.commit()
     return success(message='做T录入成功')
 
 

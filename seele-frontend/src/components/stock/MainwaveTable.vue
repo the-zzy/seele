@@ -1,10 +1,11 @@
 <script setup>
+import { useViewport } from '@/composables/useViewport'
+import { useFixedRows } from '@/composables/useFixedRows'
+import MobileCardList from '@/components/common/MobileCardList.vue'
 import {
-  formatDate,
   formatNumber,
   formatPctChg,
   formatVolume,
-  formatAmount,
   formatTurnover
 } from '@/utils/formatters'
 
@@ -16,6 +17,10 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['sort', 'row-dblclick'])
+
+const { isMobile } = useViewport()
+
+const paddedList = useFixedRows(() => props.list)
 
 const columns = [
   { key: 'symbol', label: '代码', align: 'left' },
@@ -59,6 +64,10 @@ function onDblClick (item) {
   emit('row-dblclick', item)
 }
 
+function onClick (item) {
+  emit('row-dblclick', item)
+}
+
 function getScoreClass (score) {
   if (!score || score.total === undefined) return ''
   const total = score.total
@@ -97,9 +106,25 @@ function getChgBgClass (val) {
   return ''
 }
 
+function getPctCellClass (val) {
+  if (val === null || val === undefined) return ''
+  const value = parseFloat(val)
+  if (value > 0) return 'cell-up'
+  if (value < 0) return 'cell-down'
+  return ''
+}
+
 function getPriceClass (pctChg) {
   if (pctChg === null || pctChg === undefined) return ''
   const value = parseFloat(pctChg)
+  if (value > 0) return 'up'
+  if (value < 0) return 'down'
+  return ''
+}
+
+function getChgClass (val) {
+  if (val == null) return ''
+  const value = parseFloat(val)
   if (value > 0) return 'up'
   if (value < 0) return 'down'
   return ''
@@ -110,6 +135,60 @@ function getPriceClass (pctChg) {
   <div class="table-section">
     <div v-if="loading" class="state loading">加载中…</div>
     <div v-else-if="list.length === 0" class="state empty">暂无数据</div>
+    <MobileCardList
+      v-else-if="isMobile"
+      :list="list"
+      key-field="id"
+      @click-item="onClick"
+    >
+      <template #default="{ item }">
+        <div class="stock-card">
+          <div class="card-header">
+            <span class="card-code">{{ extractCodeNum(item.symbol) }}</span>
+            <span class="card-name">{{ item.name }}</span>
+            <span
+              class="score-tag"
+              :class="getScoreClass(item.score)"
+              :title="getScoreTooltip(item)"
+            >{{ getScoreLabel(item.score) }}</span>
+          </div>
+          <div class="card-fields">
+            <div class="card-field">
+              <span class="field-label">收盘</span>
+              <span class="field-value" :class="getPriceClass(item.pctChg)">{{ formatNumber(item.close) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">涨跌幅</span>
+              <span class="field-value" :class="getChgClass(item.pctChg)">{{ formatPctChg(item.pctChg) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">成交量</span>
+              <span class="field-value">{{ formatVolume(item.volume) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">换手</span>
+              <span class="field-value">{{ formatTurnover(item.turnover) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">5日涨幅</span>
+              <span class="field-value" :class="getChgClass(item.chg5d)">{{ item.chg5d > 0 ? '+' : '' }}{{ formatNumber(item.chg5d) }}%</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">10日涨幅</span>
+              <span class="field-value" :class="getChgClass(item.chg10d)">{{ item.chg10d > 0 ? '+' : '' }}{{ formatNumber(item.chg10d) }}%</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">净利润同比</span>
+              <span class="field-value" :class="getChgClass(item.netProfitYoy)">{{ item.netProfitYoy != null ? (item.netProfitYoy > 0 ? '+' : '') + formatNumber(item.netProfitYoy) + '%' : '-' }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">ROE</span>
+              <span class="field-value">{{ item.roe != null ? formatNumber(item.roe) + '%' : '-' }}</span>
+            </div>
+          </div>
+        </div>
+      </template>
+    </MobileCardList>
     <table v-else class="stock-table">
       <thead>
         <tr>
@@ -127,28 +206,34 @@ function getPriceClass (pctChg) {
       </thead>
       <tbody>
         <tr
-          v-for="item in list"
-          :key="item.id"
+          v-for="(item, index) in paddedList"
+          :key="item === null ? `empty-${index}` : (item.id || item.symbol || index)"
           class="data-row"
-          @dblclick="onDblClick(item)"
+          :class="{ 'empty-row': item === null }"
+          @dblclick="item && onDblClick(item)"
         >
-          <td class="code">{{ extractCodeNum(item.symbol) }}</td>
-          <td class="name">{{ item.name }}</td>
-          <td :title="getScoreTooltip(item)">
-            <span class="score-tag" :class="getScoreClass(item.score)">
-              {{ getScoreLabel(item.score) }}
-            </span>
-          </td>
-          <td :class="getPriceClass(item.pctChg)">{{ formatNumber(item.close) }}</td>
-          <td :class="getChgBgClass(item.pctChg)">{{ formatPctChg(item.pctChg) }}</td>
-          <td>{{ formatVolume(item.volume) }}</td>
-          <td>{{ formatTurnover(item.turnover) }}</td>
-          <td>{{ formatNumber(item.ma5) }}</td>
-          <td :class="getChgBgClass(getDeviateMa5(item))">{{ getDeviateMa5(item) > 0 ? '+' : '' }}{{ getDeviateMa5(item) }}%</td>
-          <td :class="getChgBgClass(item.chg5d)">{{ item.chg5d > 0 ? '+' : '' }}{{ formatNumber(item.chg5d) }}%</td>
-          <td :class="getChgBgClass(item.chg10d)">{{ item.chg10d > 0 ? '+' : '' }}{{ formatNumber(item.chg10d) }}%</td>
-          <td :class="getChgBgClass(item.netProfitYoy)">{{ item.netProfitYoy != null ? (item.netProfitYoy > 0 ? '+' : '') + formatNumber(item.netProfitYoy) + '%' : '-' }}</td>
-          <td>{{ item.roe != null ? formatNumber(item.roe) + '%' : '-' }}</td>
+          <template v-if="item">
+            <td class="code">{{ extractCodeNum(item.symbol) }}</td>
+            <td class="name">{{ item.name }}</td>
+            <td :title="getScoreTooltip(item)">
+              <span class="score-tag" :class="getScoreClass(item.score)">
+                {{ getScoreLabel(item.score) }}
+              </span>
+            </td>
+            <td :class="getPriceClass(item.pctChg)">{{ formatNumber(item.close) }}</td>
+            <td class="pct-cell" :class="getPctCellClass(item.pctChg)">{{ formatPctChg(item.pctChg) }}</td>
+            <td>{{ formatVolume(item.volume) }}</td>
+            <td>{{ formatTurnover(item.turnover) }}</td>
+            <td>{{ formatNumber(item.ma5) }}</td>
+            <td :class="getChgBgClass(getDeviateMa5(item))">{{ getDeviateMa5(item) > 0 ? '+' : '' }}{{ getDeviateMa5(item) }}%</td>
+            <td :class="getChgBgClass(item.chg5d)">{{ item.chg5d > 0 ? '+' : '' }}{{ formatNumber(item.chg5d) }}%</td>
+            <td :class="getChgBgClass(item.chg10d)">{{ item.chg10d > 0 ? '+' : '' }}{{ formatNumber(item.chg10d) }}%</td>
+            <td :class="getChgBgClass(item.netProfitYoy)">{{ item.netProfitYoy != null ? (item.netProfitYoy > 0 ? '+' : '') + formatNumber(item.netProfitYoy) + '%' : '-' }}</td>
+            <td>{{ item.roe != null ? formatNumber(item.roe) + '%' : '-' }}</td>
+          </template>
+          <template v-else>
+            <td v-for="col in columns" :key="col.key">&nbsp;</td>
+          </template>
         </tr>
       </tbody>
     </table>
@@ -157,11 +242,75 @@ function getPriceClass (pctChg) {
 
 <style scoped lang="scss">
 .table-section {
-  overflow-x: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .stock-table {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   min-width: 1400px;
+
+  thead,
+  tbody {
+    display: flex;
+    flex-direction: column;
+  }
+
+  thead {
+    flex-shrink: 0;
+  }
+
+  tbody {
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  tr {
+    display: flex;
+    flex: 0 0 10%;
+    min-height: 0;
+  }
+
+  th,
+  td {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 8px 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  th:first-child,
+  td:first-child,
+  th:nth-child(2),
+  td:nth-child(2) {
+    justify-content: flex-start;
+  }
+
+  th:nth-child(3),
+  td:nth-child(3) {
+    justify-content: center;
+  }
+}
+
+.pct-cell {
+  justify-content: center;
+
+  &.cell-up { background: var(--up-bg); }
+  &.cell-down { background: var(--down-bg); }
+}
+
+.stock-table tbody tr:hover {
+  .pct-cell.cell-up { background: var(--up-bg-hover); }
+  .pct-cell.cell-down { background: var(--down-bg-hover); }
 }
 
 .score-tag {
@@ -195,6 +344,58 @@ function getPriceClass (pctChg) {
     background: rgba(239, 68, 68, 0.15);
     color: #ef4444;
     border: 1px solid rgba(239, 68, 68, 0.3);
+  }
+}
+
+.stock-card {
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .card-code {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .card-name {
+    flex: 1;
+    font-family: var(--font-body);
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-fields {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px 16px;
+  }
+
+  .card-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .field-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .field-value {
+    font-size: 13px;
+    color: var(--text-primary);
   }
 }
 </style>

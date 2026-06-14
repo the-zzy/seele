@@ -56,6 +56,7 @@ class StockBasicResponse(BaseModel):
     name: str
     area: Optional[str]
     industry: Optional[str]
+    industry_detail: Optional[str] = None
     market: Optional[str]
     float_market_cap: Optional[float]
     list_date: Optional[str]
@@ -1123,6 +1124,72 @@ class GalleryImageResponse(BaseModel):
     created_at: str
 
     @field_validator('created_at', mode='before')
+    @classmethod
+    def validate_timestamp(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d %H:%M:%S')
+        return str(v)
+
+    class Config:
+        from_attributes = True
+
+
+# ==================== 公司概况 ====================
+
+
+class StockCompanyProfileCreate(BaseModel):
+    """公司概况-创建/更新"""
+    symbol: str = Field(..., description='股票代码')
+    company_full_name: Optional[str] = Field(None, description='公司全称')
+    english_name: Optional[str] = Field(None, description='英文名称')
+    chairman: Optional[str] = Field(None, description='董事长')
+    general_manager: Optional[str] = Field(None, description='总经理')
+    secretary: Optional[str] = Field(None, description='董事会秘书')
+    legal_representative: Optional[str] = Field(None, description='法人代表')
+    phone: Optional[str] = Field(None, description='联系电话')
+    email: Optional[str] = Field(None, description='电子邮箱')
+    fax: Optional[str] = Field(None, description='传真')
+    website: Optional[str] = Field(None, description='公司网址')
+    office_address: Optional[str] = Field(None, description='办公地址')
+    reg_address: Optional[str] = Field(None, description='注册地址')
+    postcode: Optional[str] = Field(None, description='邮政编码')
+    reg_capital: Optional[str] = Field(None, description='注册资本')
+    employees: Optional[int] = Field(None, description='员工人数')
+    founded_date: Optional[str] = Field(None, description='成立日期')
+    company_profile: Optional[str] = Field(None, description='公司简介')
+    business_scope: Optional[str] = Field(None, description='经营范围')
+    industry_detail: Optional[str] = Field(None, description='所属证监会行业')
+    exchange: Optional[str] = Field(None, description='所属交易所')
+
+
+class StockCompanyProfileResponse(BaseModel):
+    """公司概况-响应"""
+    symbol: str
+    company_full_name: Optional[str] = None
+    english_name: Optional[str] = None
+    chairman: Optional[str] = None
+    general_manager: Optional[str] = None
+    secretary: Optional[str] = None
+    legal_representative: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    fax: Optional[str] = None
+    website: Optional[str] = None
+    office_address: Optional[str] = None
+    reg_address: Optional[str] = None
+    postcode: Optional[str] = None
+    reg_capital: Optional[str] = None
+    employees: Optional[int] = None
+    founded_date: Optional[str] = None
+    company_profile: Optional[str] = None
+    business_scope: Optional[str] = None
+    industry_detail: Optional[str] = None
+    exchange: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    @field_validator('updated_at', mode='before')
     @classmethod
     def validate_timestamp(cls, v):
         if v is None:

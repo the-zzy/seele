@@ -204,6 +204,10 @@ onMounted(() => {
     border-radius: 4px;
     box-shadow: var(--shadow-soft);
   }
+
+  @media (max-width: 768px) {
+    height: 320px;
+  }
 }
 
 .chart-loading {
@@ -212,6 +216,33 @@ onMounted(() => {
   font-family: var(--font-body);
   color: var(--text-faint);
   font-size: 13px;
+}
+
+@media (max-width: 768px) {
+  .chart-filters {
+    flex-wrap: wrap;
+
+    .filter-item {
+      flex: 1 1 45%;
+      min-width: 140px;
+
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        min-height: var(--touch-target);
+      }
+    }
+
+    .filter-actions {
+      margin-left: 0;
+      width: 100%;
+
+      button {
+        width: 100%;
+        min-height: var(--touch-target);
+      }
+    }
+  }
 }
 
 </style>

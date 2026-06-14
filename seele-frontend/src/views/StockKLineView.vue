@@ -3,11 +3,13 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useEChart } from '@/composables/useEChart'
+import { useViewport } from '@/composables/useViewport'
 import { stockDailyApi } from '@/api/stock'
 import { financialApi } from '@/api/financial'
 
 const route = useRoute()
 const router = useRouter()
+const { isMobile } = useViewport()
 
 const symbol = ref(route.params.symbol || '')
 const stockName = ref(route.query.name || '')
@@ -211,13 +213,13 @@ function initChart (dates, data, volumes, list, indicatorMap) {
         left: '8%',
         right: '4%',
         top: '6%',
-        height: '60%'
+        height: isMobile.value ? '58%' : '60%'
       },
       {
         left: '8%',
         right: '4%',
-        top: '74%',
-        height: '14%'
+        top: isMobile.value ? '72%' : '74%',
+        height: isMobile.value ? '16%' : '14%'
       }
     ],
     xAxis: [
@@ -276,10 +278,10 @@ function initChart (dates, data, volumes, list, indicatorMap) {
         show: true,
         xAxisIndex: [0, 1],
         type: 'slider',
-        top: '92%',
+        top: isMobile.value ? '90%' : '92%',
         start: startPercent,
         end: 100,
-        height: 18,
+        height: isMobile.value ? 28 : 18,
         borderColor: 'transparent',
         fillerColor: 'rgba(59, 130, 246, 0.12)',
         handleStyle: { color: '#3b82f6' },
@@ -554,7 +556,7 @@ onMounted(() => {
 
 .chart-frame {
   flex: 1;
-  min-height: 0;
+  min-height: 360px;
   position: relative;
   border: 1px solid var(--rule);
   border-radius: 4px;
@@ -569,6 +571,10 @@ onMounted(() => {
     border-radius: 4px;
     box-shadow: var(--shadow-soft);
     z-index: 1;
+  }
+
+  @media (max-width: 768px) {
+    min-height: 420px;
   }
 }
 
@@ -625,6 +631,10 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 12px;
+
+  @media (max-width: 768px) {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .fin-item {

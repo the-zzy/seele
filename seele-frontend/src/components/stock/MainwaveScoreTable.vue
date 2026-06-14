@@ -1,4 +1,7 @@
 <script setup>
+import { useViewport } from '@/composables/useViewport'
+import { useFixedRows } from '@/composables/useFixedRows'
+import MobileCardList from '@/components/common/MobileCardList.vue'
 import { formatNumber } from '@/utils/formatters'
 
 const props = defineProps({
@@ -9,6 +12,10 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['sort', 'row-dblclick'])
+
+const { isMobile } = useViewport()
+
+const paddedList = useFixedRows(() => props.list)
 
 const columns = [
   { key: 'symbol', label: '代码', align: 'left' },
@@ -36,6 +43,10 @@ function extractCodeNum (symbol) {
 }
 
 function onDblClick (item) {
+  emit('row-dblclick', item)
+}
+
+function onClick (item) {
   emit('row-dblclick', item)
 }
 
@@ -84,6 +95,47 @@ function getScoreTooltip (item) {
   <div class="table-section">
     <div v-if="loading" class="state loading">加载中…</div>
     <div v-else-if="list.length === 0" class="state empty">暂无数据</div>
+    <MobileCardList
+      v-else-if="isMobile"
+      :list="list"
+      key-field="id"
+      @click-item="onClick"
+    >
+      <template #default="{ item }">
+        <div
+          class="stock-card"
+          :class="{ 'hard-fail': item.score && !item.score.hard_pass, holding: item.isHolding }"
+        >
+          <div class="card-header">
+            <span class="card-code">{{ extractCodeNum(item.symbol) }}</span>
+            <span class="card-name">{{ item.name }}</span>
+            <span
+              class="score-tag"
+              :class="getScoreClass(item.score)"
+              :title="getScoreTooltip(item)"
+            >{{ getScoreLabel(item.score) }}</span>
+          </div>
+          <div class="card-fields">
+            <div class="card-field">
+              <span class="field-label">趋势分</span>
+              <span class="field-value">{{ item.score?.trend_score ?? '—' }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">强势分</span>
+              <span class="field-value">{{ item.score?.strength_score ?? '—' }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">动量分</span>
+              <span class="field-value">{{ item.score?.momentum_score ?? '—' }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">硬性门槛</span>
+              <span class="field-value" :class="getHardPassClass(item.score)">{{ getHardPassLabel(item.score) }}</span>
+            </div>
+          </div>
+        </div>
+      </template>
+    </MobileCardList>
     <table v-else class="stock-table">
       <thead>
         <tr>
@@ -101,21 +153,26 @@ function getScoreTooltip (item) {
       </thead>
       <tbody>
         <tr
-          v-for="item in list"
-          :key="item.id"
+          v-for="(item, index) in paddedList"
+          :key="item === null ? `empty-${index}` : (item.id || item.symbol || index)"
           class="data-row"
-          :class="{ 'hard-fail': item.score && !item.score.hard_pass, 'holding': item.isHolding }"
-          @dblclick="onDblClick(item)"
+          :class="{ 'hard-fail': item && item.score && !item.score.hard_pass, holding: item && item.isHolding, 'empty-row': item === null }"
+          @dblclick="item && onDblClick(item)"
         >
-          <td class="code">{{ extractCodeNum(item.symbol) }}</td>
-          <td class="name">{{ item.name }}</td>
-          <td :class="getScoreClass(item.score)" :title="getScoreTooltip(item)">
-            {{ getScoreLabel(item.score) }}
-          </td>
-          <td>{{ item.score?.trend_score ?? '—' }}</td>
-          <td>{{ item.score?.strength_score ?? '—' }}</td>
-          <td>{{ item.score?.momentum_score ?? '—' }}</td>
-          <td :class="getHardPassClass(item.score)">{{ getHardPassLabel(item.score) }}</td>
+          <template v-if="item">
+            <td class="code">{{ extractCodeNum(item.symbol) }}</td>
+            <td class="name">{{ item.name }}</td>
+            <td :class="getScoreClass(item.score)" :title="getScoreTooltip(item)">
+              {{ getScoreLabel(item.score) }}
+            </td>
+            <td>{{ item.score?.trend_score ?? '—' }}</td>
+            <td>{{ item.score?.strength_score ?? '—' }}</td>
+            <td>{{ item.score?.momentum_score ?? '—' }}</td>
+            <td :class="getHardPassClass(item.score)">{{ getHardPassLabel(item.score) }}</td>
+          </template>
+          <template v-else>
+            <td v-for="col in columns" :key="col.key">&nbsp;</td>
+          </template>
         </tr>
       </tbody>
     </table>
@@ -124,25 +181,57 @@ function getScoreTooltip (item) {
 
 <style scoped lang="scss">
 .table-section {
-  overflow-x: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .stock-table {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   min-width: 800px;
 
+  thead,
+  tbody {
+    display: flex;
+    flex-direction: column;
+  }
+
+  thead {
+    flex-shrink: 0;
+  }
+
+  tbody {
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  tr {
+    display: flex;
+    flex: 0 0 10%;
+    min-height: 0;
+  }
+
+  th,
   td {
-    text-align: center;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
 
-  .code {
-    font-family: var(--font-mono);
-    color: var(--text-secondary);
-    text-align: left;
-  }
-
-  .name {
-    font-weight: 500;
-    text-align: left;
+  th:first-child,
+  td:first-child,
+  th:nth-child(2),
+  td:nth-child(2) {
+    justify-content: flex-start;
   }
 
   .data-row {
@@ -181,5 +270,66 @@ function getScoreTooltip (item) {
 .fail {
   color: #ef4444;
   font-weight: 600;
+}
+
+.stock-card {
+  &.hard-fail {
+    opacity: 0.65;
+  }
+
+  &.holding {
+    background: rgba(245, 158, 11, 0.08);
+    border-color: rgba(245, 158, 11, 0.2);
+  }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .card-code {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .card-name {
+    flex: 1;
+    font-family: var(--font-body);
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-fields {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px 16px;
+  }
+
+  .card-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .field-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .field-value {
+    font-size: 13px;
+    color: var(--text-primary);
+  }
 }
 </style>

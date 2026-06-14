@@ -2,7 +2,7 @@
 数据库模型模块
 """
 
-from sqlalchemy import Column, Integer, String, Float, Numeric, Date, UniqueConstraint, BigInteger, TIMESTAMP, Index
+from sqlalchemy import Column, Integer, String, Float, Numeric, Date, Text, UniqueConstraint, BigInteger, TIMESTAMP, Index
 from sqlalchemy.sql import func
 
 from app.database import Base
@@ -17,9 +17,14 @@ class StockBasic(Base):
     name = Column(String(100), nullable=False, comment="股票名称")
     area = Column(String(50), comment="所在地区")
     industry = Column(String(50), comment="所属行业")
+    industry_detail = Column(String(100), comment="细分行业（证监会行业）")
     market = Column(String(20), comment="市场板块")
     float_market_cap = Column(Numeric(18, 4), comment="流通市值(亿元)")
     list_date = Column(Date, comment="上市日期")
+
+    __table_args__ = {
+        'mysql_collate': 'utf8mb4_unicode_ci',
+    }
 
 
 class StockDaily(Base):
@@ -44,6 +49,7 @@ class StockDaily(Base):
     __table_args__ = (
         UniqueConstraint('trade_date', 'symbol', name='uq_trade_date_symbol'),
         Index('idx_stock_daily_symbol_trade_date', 'symbol', 'trade_date'),
+        {'mysql_collate': 'utf8mb4_unicode_ci'},
     )
 
 
@@ -85,6 +91,7 @@ class StockDailyIndicator(Base):
 
     __table_args__ = (
         UniqueConstraint('symbol', 'trade_date', name='uq_indicator_symbol_date'),
+        {'mysql_collate': 'utf8mb4_unicode_ci'},
     )
 
 
@@ -105,6 +112,10 @@ class PortfolioTrade(Base):
     remark = Column(String(255), comment='备注')
     created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
+
+    __table_args__ = {
+        'mysql_collate': 'utf8mb4_unicode_ci',
+    }
 
 
 class PortfolioPosition(Base):
@@ -130,6 +141,7 @@ class PortfolioPosition(Base):
 
     __table_args__ = (
         UniqueConstraint('group', 'symbol', name='uq_portfolio_position_group_symbol'),
+        {'mysql_collate': 'utf8mb4_unicode_ci'},
     )
 
 
@@ -154,6 +166,10 @@ class PortfolioClosed(Base):
     created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
 
+    __table_args__ = {
+        'mysql_collate': 'utf8mb4_unicode_ci',
+    }
+
 
 class PortfolioDailyPosition(Base):
     """每日持仓明细表：记录每天每只股票的持仓状态"""
@@ -176,6 +192,7 @@ class PortfolioDailyPosition(Base):
     __table_args__ = (
         UniqueConstraint('trade_date', 'symbol', name='uq_daily_position_date_symbol'),
         Index('idx_daily_position_symbol_trade_date', 'symbol', 'trade_date'),
+        {'mysql_collate': 'utf8mb4_unicode_ci'},
     )
 
 
@@ -194,6 +211,10 @@ class PortfolioDailySummary(Base):
     created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
 
+    __table_args__ = {
+        'mysql_collate': 'utf8mb4_unicode_ci',
+    }
+
 
 class PortfolioConfig(Base):
     """持仓配置表"""
@@ -203,6 +224,10 @@ class PortfolioConfig(Base):
     initial_capital = Column(Numeric(18, 4), nullable=False, default=35000.0, comment='初始资金')
     created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
+
+    __table_args__ = {
+        'mysql_collate': 'utf8mb4_unicode_ci',
+    }
 
 
 class MarketSentimentDaily(Base):
@@ -222,6 +247,10 @@ class MarketSentimentDaily(Base):
     created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
 
+    __table_args__ = {
+        'mysql_collate': 'utf8mb4_unicode_ci',
+    }
+
 
 
 class StockFinancialIndicator(Base):
@@ -229,7 +258,7 @@ class StockFinancialIndicator(Base):
     __tablename__ = "stock_financial_indicator"
 
     __table_args__ = {
-        'mysql_collate': 'utf8mb4_0900_ai_ci',
+        'mysql_collate': 'utf8mb4_unicode_ci',
     }
 
     symbol = Column(String(20), primary_key=True, comment='股票代码')
@@ -271,6 +300,7 @@ class StockSuspension(Base):
 
     __table_args__ = (
         UniqueConstraint('symbol', 'suspend_date', name='uq_suspension_symbol_date'),
+        {'mysql_collate': 'utf8mb4_unicode_ci'},
     )
 
 
@@ -293,6 +323,7 @@ class IndexDaily(Base):
 
     __table_args__ = (
         UniqueConstraint('trade_date', 'symbol', name='uq_index_daily_date_symbol'),
+        {'mysql_collate': 'utf8mb4_unicode_ci'},
     )
 
 
@@ -307,6 +338,7 @@ class IndexConstituent(Base):
 
     __table_args__ = (
         UniqueConstraint('index_symbol', 'constituent_symbol', name='uq_index_constituent'),
+        {'mysql_collate': 'utf8mb4_unicode_ci'},
     )
 
 
@@ -319,6 +351,10 @@ class BoardInfo(Base):
     category = Column(String(20), nullable=False, comment='类型: industry/concept/etf')
     exchange = Column(String(10), comment='交易所')
     source = Column(String(20), comment='数据来源')
+
+    __table_args__ = {
+        'mysql_collate': 'utf8mb4_unicode_ci',
+    }
 
 
 class BoardConstituent(Base):
@@ -333,6 +369,7 @@ class BoardConstituent(Base):
 
     __table_args__ = (
         UniqueConstraint('board_code', 'constituent_symbol', name='uq_board_constituent'),
+        {'mysql_collate': 'utf8mb4_unicode_ci'},
     )
 
 
@@ -353,6 +390,7 @@ class BoardDaily(Base):
 
     __table_args__ = (
         UniqueConstraint('trade_date', 'code', name='uq_board_daily_date_code'),
+        {'mysql_collate': 'utf8mb4_unicode_ci'},
     )
 
 
@@ -375,6 +413,10 @@ class SyncJobLog(Base):
     error_message = Column(String(2000), nullable=True, comment='错误信息')
     extra_info = Column(String(1000), nullable=True, comment='额外信息')
 
+    __table_args__ = {
+        'mysql_collate': 'utf8mb4_unicode_ci',
+    }
+
 
 class TradeCalendar(Base):
     """交易日历表"""
@@ -390,6 +432,10 @@ class TradeCalendar(Base):
     is_weekend = Column(Integer, nullable=False, default=0, comment='是否周末: 1是 0否')
     created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
 
+    __table_args__ = {
+        'mysql_collate': 'utf8mb4_unicode_ci',
+    }
+
 
 class SystemErrorLog(Base):
     """系统错误日志表"""
@@ -404,7 +450,7 @@ class SystemErrorLog(Base):
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False, index=True, comment='创建时间')
 
     __table_args__ = (
-        {'mysql_engine': 'InnoDB', 'comment': '系统错误日志表'},
+        {'mysql_engine': 'InnoDB', 'mysql_collate': 'utf8mb4_unicode_ci', 'comment': '系统错误日志表'},
     )
 
 
@@ -422,7 +468,7 @@ class SystemOperationLog(Base):
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False, index=True, comment='创建时间')
 
     __table_args__ = (
-        {'mysql_engine': 'InnoDB', 'comment': '系统操作日志表'},
+        {'mysql_engine': 'InnoDB', 'mysql_collate': 'utf8mb4_unicode_ci', 'comment': '系统操作日志表'},
     )
 
 
@@ -437,6 +483,42 @@ class GalleryImage(Base):
     mime_type = Column(String(50), nullable=False, comment='MIME类型')
     url_path = Column(String(500), nullable=False, comment='访问路径')
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False, comment='创建时间')
+
+    __table_args__ = {
+        'mysql_collate': 'utf8mb4_unicode_ci',
+    }
+
+
+class StockCompanyProfile(Base):
+    """股票公司概况表（来源：东方财富 F10）"""
+    __tablename__ = 'stock_company_profile'
+
+    symbol = Column(String(20), primary_key=True, comment='股票代码')
+    company_full_name = Column(String(200), comment='公司全称')
+    english_name = Column(String(200), comment='英文名称')
+    chairman = Column(String(100), comment='董事长')
+    general_manager = Column(String(100), comment='总经理')
+    secretary = Column(String(100), comment='董事会秘书')
+    legal_representative = Column(String(100), comment='法人代表')
+    phone = Column(String(50), comment='联系电话')
+    email = Column(String(100), comment='电子邮箱')
+    fax = Column(String(50), comment='传真')
+    website = Column(String(200), comment='公司网址')
+    office_address = Column(String(500), comment='办公地址')
+    reg_address = Column(String(500), comment='注册地址')
+    postcode = Column(String(20), comment='邮政编码')
+    reg_capital = Column(String(50), comment='注册资本')
+    employees = Column(Integer, comment='员工人数')
+    founded_date = Column(String(20), comment='成立日期')
+    company_profile = Column(Text, comment='公司简介')
+    business_scope = Column(Text, comment='经营范围')
+    industry_detail = Column(String(100), comment='所属证监会行业')
+    exchange = Column(String(50), comment='所属交易所')
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
+
+    __table_args__ = {
+        'mysql_collate': 'utf8mb4_unicode_ci',
+    }
 
 
 class VisitorLog(Base):
@@ -456,3 +538,7 @@ class VisitorLog(Base):
     country = Column(String(50), comment='国家/地区')
     city = Column(String(50), comment='城市')
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False, index=True, comment='访问时间')
+
+    __table_args__ = {
+        'mysql_collate': 'utf8mb4_unicode_ci',
+    }

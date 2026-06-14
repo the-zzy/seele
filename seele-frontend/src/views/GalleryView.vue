@@ -202,6 +202,10 @@ onMounted(() => {
   overflow-y: auto;
   padding: 24px 28px;
   box-sizing: border-box;
+
+  @media (max-width: 768px) {
+    padding: 16px;
+  }
 }
 
 .gallery-header {
@@ -291,6 +295,11 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 16px;
+
+  @media (max-width: 768px) {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+  }
 }
 
 .image-card {
@@ -438,6 +447,39 @@ onMounted(() => {
     font-size: 14px;
     color: var(--text-primary);
     text-align: center;
+  }
+}
+
+@media (max-width: 768px) {
+  .preview-close {
+    top: calc(12px + var(--safe-top));
+    right: 16px;
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.4);
+    border-radius: 50%;
+  }
+
+  .preview-name {
+    bottom: calc(12px + var(--safe-bottom));
+  }
+
+  .confirm-dialog {
+    width: calc(100% - 32px);
+    min-width: 0;
+    padding: 20px 24px;
+  }
+
+  .confirm-actions {
+    flex-direction: column;
+
+    button {
+      width: 100%;
+      min-height: var(--touch-target);
+    }
   }
 }
 

@@ -4,11 +4,11 @@ After=network.target
 
 [Service]
 Type=simple
-User=www-data
-WorkingDirectory=/opt/seele/seele-backend
+User=<SERVICE_USER>
+WorkingDirectory=<DEPLOY_DIR>/seele-backend
 Environment=DEPLOY_ENV=prod
-EnvironmentFile=/opt/seele/seele-backend/.env
-ExecStart=/opt/seele/seele-backend/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 9000 --workers 1
+EnvironmentFile=<DEPLOY_DIR>/seele-backend/.env
+ExecStart=<DEPLOY_DIR>/seele-backend/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 9000 --workers 1
 Restart=on-failure
 RestartSec=5
 

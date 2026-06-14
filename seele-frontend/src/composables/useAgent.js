@@ -1,5 +1,8 @@
 import { ref, markRaw } from 'vue'
+import { getItem, removeItem, setItem } from '@/utils/storage'
 import { agentApi } from '@/api/agent'
+
+const SESSION_KEY = 'agent-session-id'
 
 function clone (val) {
   if (val === null || val === undefined) return val
@@ -12,7 +15,7 @@ function clone (val) {
 }
 
 export function useAgent () {
-  const sessionId = ref(localStorage.getItem('agent-session-id') || '')
+  const sessionId = ref(getItem(SESSION_KEY) || '')
   const messages = ref([])
   const loading = ref(false)
 
@@ -57,7 +60,7 @@ export function useAgent () {
         } else if (event === 'done') {
           if (data.session_id) {
             sessionId.value = data.session_id
-            localStorage.setItem('agent-session-id', data.session_id)
+            setItem(SESSION_KEY, data.session_id)
           }
           assistantMsg.content = data.reply
           assistantMsg.toolCalls = (data.tool_calls || []).map(tc => ({
@@ -85,7 +88,7 @@ export function useAgent () {
     }
     sessionId.value = ''
     messages.value = []
-    localStorage.removeItem('agent-session-id')
+    removeItem(SESSION_KEY)
   }
 
   return {

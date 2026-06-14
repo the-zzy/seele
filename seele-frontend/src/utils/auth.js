@@ -1,17 +1,19 @@
-const TOKEN_KEY = 'seele_token'
+import { getItem, removeItem, setItem } from './storage'
+
+const TOKEN_KEY = 'token'
 
 let authRequiredCallback = null
 
 export function getToken () {
-  return localStorage.getItem(TOKEN_KEY)
+  return getItem(TOKEN_KEY)
 }
 
 export function setToken (token) {
-  localStorage.setItem(TOKEN_KEY, token)
+  setItem(TOKEN_KEY, token)
 }
 
 export function removeToken () {
-  localStorage.removeItem(TOKEN_KEY)
+  removeItem(TOKEN_KEY)
 }
 
 export function isLoggedIn () {

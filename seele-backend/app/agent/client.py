@@ -31,7 +31,7 @@ class MoonshotClient:
         self,
         messages: list[dict],
         tools: list[dict] | None = None,
-        temperature: float = 0.3,
+        temperature: float = 1.0,
         stream: bool = False,
     ):
         """调用聊天补全接口"""

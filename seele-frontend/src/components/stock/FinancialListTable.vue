@@ -1,4 +1,9 @@
 <script setup>
+import { toRef } from 'vue'
+import { useViewport } from '@/composables/useViewport'
+import { useFixedRows } from '@/composables/useFixedRows'
+import MobileCardList from '@/components/common/MobileCardList.vue'
+
 const props = defineProps({
   list: { type: Array, default: () => [] },
   sortField: { type: String, default: 'roe' },
@@ -7,6 +12,18 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['sort', 'row-dblclick'])
+
+const { isMobile } = useViewport()
+
+const sortableColumns = [
+  { key: 'roe', label: 'ROE' },
+  { key: 'gross_profit_ratio', label: '毛利率' },
+  { key: 'net_profit_ratio', label: '净利率' },
+  { key: 'net_profit_yoy', label: '净利润同比' },
+  { key: 'revenue_yoy', label: '营收同比' },
+  { key: 'eps', label: 'EPS' },
+  { key: 'debt_ratio', label: '资产负债率' }
+]
 
 const columns = [
   { key: 'symbol', label: '股票代码', align: 'left' },
@@ -52,12 +69,82 @@ function getYoyClass (val) {
 function onRowDblClick (item) {
   emit('row-dblclick', item)
 }
+
+function onRowClick (item) {
+  emit('row-dblclick', item)
+}
+
+const paddedList = useFixedRows(toRef(props, 'list'))
 </script>
 
 <template>
   <div class="table-section">
     <div v-if="loading" class="state loading">加载中…</div>
     <div v-else-if="list.length === 0" class="state empty">暂无数据</div>
+    <div v-else-if="isMobile" class="mobile-table">
+      <div class="mobile-sort-bar">
+        <span class="sort-label">排序</span>
+        <button
+          v-for="col in sortableColumns"
+          :key="col.key"
+          class="sort-btn"
+          :class="{ active: sortField === col.key }"
+          @click="onSort(col.key)"
+        >
+          {{ col.label }}
+          <span v-if="sortField === col.key" class="sort-dir">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
+        </button>
+      </div>
+      <MobileCardList
+        :list="list"
+        key-field="symbol"
+        @click-item="onRowClick"
+      >
+        <template #default="{ item }">
+          <div class="stock-card">
+            <div class="card-header">
+              <span class="card-code">{{ extractCodeNum(item.symbol) }}</span>
+              <span class="card-name">{{ item.name }}</span>
+              <span class="card-market">{{ item.market || '—' }}</span>
+            </div>
+            <div class="card-fields">
+              <div class="card-field wide">
+                <span class="field-label">所属行业</span>
+                <span class="field-value">{{ item.industry || '—' }}</span>
+              </div>
+              <div class="card-field">
+                <span class="field-label">ROE</span>
+                <span class="field-value">{{ item.roe != null ? `${item.roe.toFixed(2)}%` : '—' }}</span>
+              </div>
+              <div class="card-field">
+                <span class="field-label">毛利率</span>
+                <span class="field-value">{{ item.gross_profit_ratio != null ? `${item.gross_profit_ratio.toFixed(2)}%` : '—' }}</span>
+              </div>
+              <div class="card-field">
+                <span class="field-label">净利率</span>
+                <span class="field-value">{{ item.net_profit_ratio != null ? `${item.net_profit_ratio.toFixed(2)}%` : '—' }}</span>
+              </div>
+              <div class="card-field">
+                <span class="field-label">净利润同比</span>
+                <span class="field-value" :class="getYoyClass(item.net_profit_yoy)">{{ formatPercent(item.net_profit_yoy) }}</span>
+              </div>
+              <div class="card-field">
+                <span class="field-label">营收同比</span>
+                <span class="field-value" :class="getYoyClass(item.revenue_yoy)">{{ formatPercent(item.revenue_yoy) }}</span>
+              </div>
+              <div class="card-field">
+                <span class="field-label">EPS</span>
+                <span class="field-value">{{ item.eps != null ? item.eps.toFixed(2) : '—' }}</span>
+              </div>
+              <div class="card-field">
+                <span class="field-label">资产负债率</span>
+                <span class="field-value">{{ item.debt_ratio != null ? `${item.debt_ratio.toFixed(2)}%` : '—' }}</span>
+              </div>
+            </div>
+          </div>
+        </template>
+      </MobileCardList>
+    </div>
     <table v-else class="stock-table">
       <colgroup>
         <col style="width: 8%">
@@ -88,22 +175,28 @@ function onRowDblClick (item) {
       </thead>
       <tbody>
         <tr
-          v-for="item in list"
-          :key="item.symbol"
+          v-for="(item, index) in paddedList"
+          :key="item === null ? `empty-${index}` : (item.id || item.symbol || index)"
           class="data-row"
-          @dblclick="onRowDblClick(item)"
+          :class="{ 'empty-row': item === null }"
+          @dblclick="item && onRowDblClick(item)"
         >
-          <td class="code">{{ extractCodeNum(item.symbol) }}</td>
-          <td class="name">{{ item.name }}</td>
-          <td class="td-left">{{ item.industry || '—' }}</td>
-          <td class="td-center">{{ item.market || '—' }}</td>
-          <td>{{ item.roe != null ? `${item.roe.toFixed(2)}%` : '—' }}</td>
-          <td>{{ item.gross_profit_ratio != null ? `${item.gross_profit_ratio.toFixed(2)}%` : '—' }}</td>
-          <td>{{ item.net_profit_ratio != null ? `${item.net_profit_ratio.toFixed(2)}%` : '—' }}</td>
-          <td :class="getYoyClass(item.net_profit_yoy)">{{ formatPercent(item.net_profit_yoy) }}</td>
-          <td :class="getYoyClass(item.revenue_yoy)">{{ formatPercent(item.revenue_yoy) }}</td>
-          <td>{{ item.eps != null ? item.eps.toFixed(2) : '—' }}</td>
-          <td>{{ item.debt_ratio != null ? `${item.debt_ratio.toFixed(2)}%` : '—' }}</td>
+          <template v-if="item">
+            <td class="code">{{ extractCodeNum(item.symbol) }}</td>
+            <td class="name">{{ item.name }}</td>
+            <td class="td-left">{{ item.industry || '—' }}</td>
+            <td class="td-center">{{ item.market || '—' }}</td>
+            <td>{{ item.roe != null ? `${item.roe.toFixed(2)}%` : '—' }}</td>
+            <td>{{ item.gross_profit_ratio != null ? `${item.gross_profit_ratio.toFixed(2)}%` : '—' }}</td>
+            <td>{{ item.net_profit_ratio != null ? `${item.net_profit_ratio.toFixed(2)}%` : '—' }}</td>
+            <td :class="getYoyClass(item.net_profit_yoy)">{{ formatPercent(item.net_profit_yoy) }}</td>
+            <td :class="getYoyClass(item.revenue_yoy)">{{ formatPercent(item.revenue_yoy) }}</td>
+            <td>{{ item.eps != null ? item.eps.toFixed(2) : '—' }}</td>
+            <td>{{ item.debt_ratio != null ? `${item.debt_ratio.toFixed(2)}%` : '—' }}</td>
+          </template>
+          <template v-else>
+            <td v-for="col in columns" :key="col.key">&nbsp;</td>
+          </template>
         </tr>
       </tbody>
     </table>
@@ -116,6 +209,116 @@ function onRowDblClick (item) {
 }
 
 .stock-table {
-  min-width: 960px;
+  width: 100%;
+}
+
+.mobile-sort-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+
+  .sort-label {
+    font-size: 11px;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    flex-shrink: 0;
+  }
+
+  .sort-btn {
+    flex-shrink: 0;
+    padding: 6px 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-family: var(--font-body);
+
+    &.active {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+  }
+
+  .sort-dir {
+    margin-left: 4px;
+    font-size: 10px;
+  }
+}
+
+.stock-card {
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .card-code {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .card-name {
+    flex: 1;
+    font-family: var(--font-body);
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-market {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 2px 8px;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+  }
+
+  .card-fields {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px 16px;
+  }
+
+  .card-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+
+    &.wide {
+      grid-column: 1 / -1;
+    }
+  }
+
+  .field-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .field-value {
+    font-size: 13px;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 </style>

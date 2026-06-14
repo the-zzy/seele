@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { getItem } from '@/utils/storage'
 import StockListView from '../views/StockListView.vue'
 import StockIndicatorView from '../views/StockIndicatorView.vue'
 import StockBasicView from '../views/StockBasicView.vue'
@@ -28,13 +29,13 @@ const routes = [
     path: '/stock-basic',
     name: 'stock-basic',
     component: StockBasicView,
-    meta: { title: '股票基本信息', nav: true, navOrder: 10, section: '基本面' }
+    meta: { title: '股票基本信息', nav: true, navOrder: 10, group: '股票基本信息' }
   },
   {
     path: '/financial',
     name: 'financial-list',
     component: FinancialListView,
-    meta: { title: '财务指标', nav: true, navOrder: 11, section: '基本面' }
+    meta: { title: '财务指标', nav: true, navOrder: 11, group: '股票基本信息' }
   },
   {
     path: '/daily/basic',
@@ -140,7 +141,7 @@ const router = createRouter({
 })
 
 router.beforeEach((to, from, next) => {
-  const inWorkspace = localStorage.getItem('seele_workspace') === '1'
+  const inWorkspace = getItem('workspace') === '1'
   if (!inWorkspace && to.path !== '/') {
     next('/')
     return

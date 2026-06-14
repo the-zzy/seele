@@ -455,6 +455,21 @@ onMounted(() => {
   z-index: 0;
 }
 
+@media (max-width: 768px) {
+  .detail-bar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .bar-name {
+    font-size: 16px;
+  }
+
+  .chart-box {
+    min-height: 240px;
+  }
+}
+
 @media (max-width: 960px) {
   .fin-cards { grid-template-columns: repeat(2, 1fr); }
   .charts-row { grid-template-columns: 1fr; }

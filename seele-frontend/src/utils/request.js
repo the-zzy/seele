@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { getToken, removeToken, requireAuth } from '@/utils/auth'
+import { clearStaleState, forceReload, getClientVersion } from '@/utils/version'
 
 export const baseURL = process.env.VUE_APP_BASE_API || '/api'
 
@@ -17,6 +18,7 @@ request.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
+    config.headers['X-Client-Version'] = getClientVersion()
     return config
   },
   error => Promise.reject(error)
@@ -42,6 +44,14 @@ request.interceptors.response.use(
     if (error.response?.status === 401) {
       removeToken()
       requireAuth()
+    }
+    if (error.response?.status === 409) {
+      const detail = error.response.data?.detail
+      if (detail?.code === 'VERSION_MISMATCH') {
+        clearStaleState()
+        forceReload()
+        return new Promise(() => {})
+      }
     }
     console.error('请求错误:', error.message)
     return Promise.reject(error)

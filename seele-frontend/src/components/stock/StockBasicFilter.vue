@@ -53,30 +53,30 @@ function onReset () {
 .filter-section {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 12px 14px;
+  gap: 12px;
+  padding: 8px 10px;
   background: var(--bg-secondary);
   border: 1px solid var(--rule);
   border-radius: 6px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .filter-fields {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 8px 10px;
   flex: 1;
 }
 
 .field {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-width: 160px;
+  gap: 6px;
+  min-width: 140px;
   flex: 1;
 
   .field-label {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 500;
     color: var(--text-secondary);
     white-space: nowrap;
@@ -87,12 +87,12 @@ function onReset () {
 
   input {
     flex: 1;
-    padding: 7px 12px;
+    padding: 5px 10px;
     background: var(--bg-input);
     border: 1px solid var(--rule);
-    border-radius: 6px;
+    border-radius: 5px;
     font-family: var(--font-mono);
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-primary);
     transition: border-color 0.2s;
     min-width: 0;
@@ -111,16 +111,16 @@ function onReset () {
 .filter-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-shrink: 0;
 }
 
 .btn-primary {
-  padding: 7px 16px;
+  padding: 5px 14px;
   background: var(--accent);
   color: white;
   border: none;
-  border-radius: 6px;
+  border-radius: 5px;
   cursor: pointer;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -136,15 +136,48 @@ function onReset () {
   border: none;
   cursor: pointer;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-muted);
-  padding: 7px 12px;
-  border-radius: 6px;
+  padding: 5px 10px;
+  border-radius: 5px;
   transition: all 0.2s;
 
   &:hover {
     color: var(--text-primary);
     background: var(--bg-tertiary);
+  }
+}
+
+@media (max-width: 768px) {
+  .filter-section {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .field {
+    flex-direction: column;
+    align-items: stretch;
+    min-width: auto;
+
+    .field-label {
+      width: auto;
+      text-align: left;
+    }
+
+    input {
+      width: 100%;
+      box-sizing: border-box;
+    }
+  }
+
+  .filter-actions {
+    justify-content: stretch;
+
+    button {
+      flex: 1;
+      min-height: var(--touch-target);
+    }
   }
 }
 </style>

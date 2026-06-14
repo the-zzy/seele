@@ -1,17 +1,20 @@
 {
   "name": "seele-frontend",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "private": true,
   "scripts": {
     "preserve": "node scripts/kill-port.js 8000",
+    "prebuild": "node scripts/sync-version.js",
     "serve": "vue-cli-service serve --port 8000",
     "build": "vue-cli-service build",
     "lint": "vue-cli-service lint"
   },
   "dependencies": {
     "axios": "^1.15.0",
+    "babel-plugin-import": "^1.13.8",
     "core-js": "^3.8.3",
     "echarts": "^6.0.0",
+    "vant": "^4.9.24",
     "vue": "^3.2.13",
     "vue-router": "^4.0.3"
   },

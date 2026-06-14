@@ -1,4 +1,7 @@
 <script setup>
+import { useViewport } from '@/composables/useViewport'
+import { useFixedRows } from '@/composables/useFixedRows'
+import MobileCardList from '@/components/common/MobileCardList.vue'
 import {
   formatDate,
   formatNumber,
@@ -17,6 +20,10 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['sort', 'row-dblclick'])
+
+const { isMobile } = useViewport()
+
+const paddedList = useFixedRows(() => props.list)
 
 const columns = [
   { key: 'symbol', label: '代码', align: 'left' },
@@ -56,19 +63,74 @@ function onDblClick (item) {
   emit('row-dblclick', item)
 }
 
-function getChgBgClass (val) {
-  if (!val) return ''
+function onClick (item) {
+  emit('row-dblclick', item)
+}
+
+function getChgClass (val) {
+  if (val == null) return ''
   const value = parseFloat(val)
-  if (value > 0) return 'up-bg'
-  if (value < 0) return 'down-bg'
+  if (value > 0) return 'up'
+  if (value < 0) return 'down'
   return ''
 }
+
+function getPctCellClass (val) {
+  if (val == null) return ''
+  const value = parseFloat(val)
+  if (value > 0) return 'cell-up'
+  if (value < 0) return 'cell-down'
+  return ''
+}
+
 </script>
 
 <template>
   <div class="table-section">
     <div v-if="loading" class="state loading">加载中…</div>
     <div v-else-if="list.length === 0" class="state empty">暂无数据 — 请先在「计算指标」按钮触发计算</div>
+    <MobileCardList
+      v-else-if="isMobile"
+      :list="list"
+      key-field="id"
+      @click-item="onClick"
+    >
+      <template #default="{ item }">
+        <div class="stock-card">
+          <div class="card-header">
+            <span class="card-code">{{ extractCodeNum(item.symbol) }}</span>
+            <span class="card-name">{{ item.name }}</span>
+            <span class="card-date">{{ formatDate(item.tradeDate) }}</span>
+          </div>
+          <div class="card-fields">
+            <div class="card-field">
+              <span class="field-label">收盘</span>
+              <span class="field-value" :class="getPriceClass(item.close, item.pctChg)">{{ formatNumber(item.close) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">涨跌幅</span>
+              <span class="field-value" :class="getChgClass(item.pctChg)">{{ formatPctChg(item.pctChg) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">成交额</span>
+              <span class="field-value">{{ formatAmount(item.amount) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">换手</span>
+              <span class="field-value">{{ formatTurnover(item.turnover) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">MA5 / MA20</span>
+              <span class="field-value">{{ formatNumber(item.ma5) }} / {{ formatNumber(item.ma20) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">量5 / 换5</span>
+              <span class="field-value">{{ formatVolume(item.volMa5) }} / {{ formatTurnover(item.turnoverMa5) }}</span>
+            </div>
+          </div>
+        </div>
+      </template>
+    </MobileCardList>
     <table v-else class="stock-table">
       <thead>
         <tr>
@@ -87,27 +149,33 @@ function getChgBgClass (val) {
       </thead>
       <tbody>
         <tr
-          v-for="item in list"
-          :key="item.id"
+          v-for="(item, index) in paddedList"
+          :key="item === null ? `empty-${index}` : (item.id || item.symbol || index)"
           class="data-row"
-          @dblclick="onDblClick(item)"
+          :class="{ 'empty-row': item === null }"
+          @dblclick="item && onDblClick(item)"
         >
-          <td class="code">{{ extractCodeNum(item.symbol) }}</td>
-          <td class="name">{{ item.name }}</td>
-          <td class="td-center">{{ formatDate(item.tradeDate) }}</td>
-          <td :class="getPriceClass(item.close, item.pctChg)">{{ formatNumber(item.close) }}</td>
-          <td :class="getChgBgClass(item.pctChg)">{{ formatPctChg(item.pctChg) }}</td>
-          <td>{{ formatAmount(item.amount) }}</td>
-          <td>{{ formatTurnover(item.turnover) }}</td>
-          <td class="g-ma">{{ formatNumber(item.ma5) }}</td>
-          <td class="g-ma">{{ formatNumber(item.ma10) }}</td>
-          <td class="g-ma">{{ formatNumber(item.ma20) }}</td>
-          <td class="g-ma">{{ formatNumber(item.ma30) }}</td>
-          <td class="g-ma">{{ formatNumber(item.ma60) }}</td>
-          <td class="g-vol">{{ formatVolume(item.volMa5) }}</td>
-          <td class="g-vol">{{ formatVolume(item.volMa10) }}</td>
-          <td class="g-turn">{{ formatTurnover(item.turnoverMa5) }}</td>
-          <td class="g-turn">{{ formatTurnover(item.turnoverMa10) }}</td>
+          <template v-if="item">
+            <td class="code">{{ extractCodeNum(item.symbol) }}</td>
+            <td class="name">{{ item.name }}</td>
+            <td class="td-center">{{ formatDate(item.tradeDate) }}</td>
+            <td :class="getPriceClass(item.close, item.pctChg)">{{ formatNumber(item.close) }}</td>
+            <td class="pct-cell" :class="getPctCellClass(item.pctChg)">{{ formatPctChg(item.pctChg) }}</td>
+            <td>{{ formatAmount(item.amount) }}</td>
+            <td>{{ formatTurnover(item.turnover) }}</td>
+            <td class="g-ma">{{ formatNumber(item.ma5) }}</td>
+            <td class="g-ma">{{ formatNumber(item.ma10) }}</td>
+            <td class="g-ma">{{ formatNumber(item.ma20) }}</td>
+            <td class="g-ma">{{ formatNumber(item.ma30) }}</td>
+            <td class="g-ma">{{ formatNumber(item.ma60) }}</td>
+            <td class="g-vol">{{ formatVolume(item.volMa5) }}</td>
+            <td class="g-vol">{{ formatVolume(item.volMa10) }}</td>
+            <td class="g-turn">{{ formatTurnover(item.turnoverMa5) }}</td>
+            <td class="g-turn">{{ formatTurnover(item.turnoverMa10) }}</td>
+          </template>
+          <template v-else>
+            <td v-for="col in columns" :key="col.key">&nbsp;</td>
+          </template>
         </tr>
       </tbody>
     </table>
@@ -116,11 +184,63 @@ function getChgBgClass (val) {
 
 <style scoped lang="scss">
 .table-section {
-  overflow-x: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .stock-table {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   min-width: 1200px;
+
+  thead,
+  tbody {
+    display: flex;
+    flex-direction: column;
+  }
+
+  thead {
+    flex-shrink: 0;
+  }
+
+  tbody {
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  tr {
+    display: flex;
+    flex: 0 0 10%;
+    min-height: 0;
+  }
+
+  th,
+  td {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 8px 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  th:first-child,
+  td:first-child,
+  th:nth-child(2),
+  td:nth-child(2) {
+    justify-content: flex-start;
+  }
+
+  th:nth-child(3),
+  td:nth-child(3) {
+    justify-content: center;
+  }
 
   th {
     &.g-ma { color: var(--accent); }
@@ -132,6 +252,76 @@ function getChgBgClass (val) {
     &.g-ma { background: rgba(59, 130, 246, 0.025); }
     &.g-vol { background: rgba(217, 119, 87, 0.025); }
     &.g-turn { background: rgba(180, 108, 216, 0.025); }
+  }
+}
+
+.pct-cell {
+  justify-content: center;
+
+  &.cell-up { background: var(--up-bg); }
+  &.cell-down { background: var(--down-bg); }
+}
+
+.stock-table tbody tr:hover {
+  .pct-cell.cell-up { background: var(--up-bg-hover); }
+  .pct-cell.cell-down { background: var(--down-bg-hover); }
+}
+
+.stock-card {
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .card-code {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .card-name {
+    flex: 1;
+    font-family: var(--font-body);
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-date {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .card-fields {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px 16px;
+  }
+
+  .card-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .field-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .field-value {
+    font-size: 13px;
+    color: var(--text-primary);
   }
 }
 </style>

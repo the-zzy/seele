@@ -1,7 +1,9 @@
 <script setup>
-import { ref, onMounted, computed, nextTick, watch } from 'vue'
+import { ref, onMounted, computed, nextTick, watch, toRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { useEChart } from '@/composables/useEChart'
+import { useViewport } from '@/composables/useViewport'
+import { useFixedRows } from '@/composables/useFixedRows'
 import { toast } from '@/composables/useToast'
 import { portfolioApi } from '@/api/portfolio'
 import PageHero from '@/components/common/PageHero.vue'
@@ -11,6 +13,7 @@ import PortfolioDayTradeModal from '@/components/portfolio/PortfolioDayTradeModa
 import PortfolioPositionTable from '@/components/portfolio/PortfolioPositionTable.vue'
 import PortfolioTradeTable from '@/components/portfolio/PortfolioTradeTable.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
+import MobileCardList from '@/components/common/MobileCardList.vue'
 
 // 统计数据
 const summary = ref({
@@ -25,11 +28,16 @@ const summary = ref({
   total_return_pct: 0
 })
 
+const router = useRouter()
+const { isMobile } = useViewport()
+
 // 列表数据
 const positions = ref([])
 const trades = ref([])
 const closedList = ref([])
 const loading = ref(false)
+
+const closedPaddedList = useFixedRows(closedList)
 
 // 交易记录分页
 const tradePageNum = ref(1)
@@ -62,44 +70,10 @@ const alertsVisible = ref(true)
 const missingDailyModalVisible = ref(false)
 const missingDailyList = ref([])
 
-const router = useRouter()
-
 // 图表
 const trendRef = useEChart()
 const dailyPnlRef = useEChart()
 const pieRef = useEChart()
-const barRef = useEChart()
-const barCollapsed = ref(true)
-
-// 计算持仓 + 清仓的收益对比数据（按 symbol 合并）
-const pnlComparisonData = computed(() => {
-  const map = new Map()
-  positions.value.forEach(p => {
-    const existing = map.get(p.symbol)
-    if (existing) {
-      existing.value += p.unrealized_pnl || 0
-    } else {
-      map.set(p.symbol, {
-        name: p.name,
-        symbol: p.symbol,
-        value: p.unrealized_pnl || 0
-      })
-    }
-  })
-  closedList.value.slice(0, 20).forEach(c => {
-    const existing = map.get(c.symbol)
-    if (existing) {
-      existing.value += c.realized_pnl || 0
-    } else {
-      map.set(c.symbol, {
-        name: c.name,
-        symbol: c.symbol,
-        value: c.realized_pnl || 0
-      })
-    }
-  })
-  return Array.from(map.values()).sort((a, b) => b.value - a.value)
-})
 
 async function loadSummary () {
   try {
@@ -321,57 +295,6 @@ function renderPieChart (list) {
   })
 }
 
-function renderBarChart () {
-  const data = pnlComparisonData.value.slice(0, 10)
-  if (!data.length) {
-    barRef.init({
-      xAxis: { type: 'value', show: false },
-      yAxis: { type: 'category', show: false, data: [] },
-      series: [{ type: 'bar', data: [] }]
-    })
-    if (barRef.chartRef.value) {
-      barRef.chartRef.value.style.height = '160px'
-    }
-    return
-  }
-
-  const container = barRef.chartRef.value
-  if (container) {
-    const h = Math.max(160, data.length * 26 + 40)
-    container.style.height = h + 'px'
-  }
-
-  const upColor = getThemeColor('--up')
-  const downColor = getThemeColor('--down')
-  barRef.init({
-    tooltip: { trigger: 'axis', formatter: p => `${p[0].name}: ${Number(p[0].value).toFixed(2)}` },
-    grid: { left: 60, right: 20, top: 10, bottom: 20 },
-    xAxis: {
-      type: 'value',
-      axisLine: { show: false },
-      splitLine: { lineStyle: { color: 'var(--rule)' } },
-      axisLabel: { color: 'var(--text-muted)', fontSize: 10 }
-    },
-    yAxis: {
-      type: 'category',
-      data: data.map(i => i.name).reverse(),
-      axisLine: { lineStyle: { color: 'var(--rule)' } },
-      axisLabel: { color: 'var(--text-secondary)', fontSize: 11 }
-    },
-    series: [{
-      type: 'bar',
-      data: data.map(i => ({
-        value: i.value,
-        itemStyle: {
-          color: i.value >= 0 ? upColor : downColor,
-          borderRadius: [0, 3, 3, 0]
-        }
-      })).reverse(),
-      barWidth: 16
-    }]
-  })
-}
-
 async function refreshAll () {
   loading.value = true
   await Promise.all([
@@ -387,21 +310,8 @@ async function refreshAll () {
   if (activeTab.value === 'closed') {
     await loadClosed()
   }
-  nextTick(() => {
-    if (!barCollapsed.value) {
-      renderBarChart()
-    }
-  })
   loading.value = false
 }
-
-watch(barCollapsed, (val) => {
-  if (!val) {
-    nextTick(() => renderBarChart())
-  } else {
-    barRef.dispose()
-  }
-})
 
 async function onSyncPositions () {
   try {
@@ -594,15 +504,6 @@ onMounted(() => {
         <div :ref="pieRef.chartRef" class="chart-body" />
       </div>
     </div>
-    <div class="chart-card bar-chart-row" :class="{ collapsed: barCollapsed }">
-      <div class="collapsible-header" @click="barCollapsed = !barCollapsed">
-        <span class="chart-title">个股收益对比</span>
-        <span class="collapse-arrow">{{ barCollapsed ? '▼' : '▲' }}</span>
-      </div>
-      <div v-show="!barCollapsed" class="collapsible-body">
-        <div :ref="barRef.chartRef" class="chart-body" />
-      </div>
-    </div>
 
     <div class="tabs">
       <button
@@ -658,7 +559,52 @@ onMounted(() => {
           已清仓记录
           <span v-if="closedTotal" class="section-count">{{ closedTotal }} 笔</span>
         </div>
-        <div class="table-wrap">
+        <div v-if="loading" class="state loading">加载中…</div>
+        <div v-else-if="!closedList.length" class="state empty">暂无记录</div>
+        <MobileCardList
+          v-else-if="isMobile"
+          :list="closedList"
+          key-field="id"
+        >
+          <template #default="{ item }">
+            <div class="closed-card">
+              <div class="card-header">
+                <span class="card-symbol">{{ item.symbol }}</span>
+                <span class="card-name">{{ item.name }}</span>
+                <span class="card-days">{{ Math.ceil((new Date(item.close_date) - new Date(item.open_date)) / (1000 * 60 * 60 * 24)) }} 天</span>
+              </div>
+              <div class="card-fields">
+                <div class="card-field">
+                  <span class="field-label">总买入</span>
+                  <span class="field-value">{{ Number(item.total_buy_amount).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">总卖出</span>
+                  <span class="field-value">{{ Number(item.total_sell_amount).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">手续费</span>
+                  <span class="field-value">{{ Number(item.total_fee || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">实现盈亏</span>
+                  <span
+                    class="field-value"
+                    :class="Number(item.realized_pnl) > 0 ? 'up' : Number(item.realized_pnl) < 0 ? 'down' : ''"
+                  >{{ Number(item.realized_pnl).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">盈亏比例</span>
+                  <span
+                    class="field-value"
+                    :class="Number(item.pnl_pct) > 0 ? 'up' : Number(item.pnl_pct) < 0 ? 'down' : ''"
+                  >{{ Number(item.pnl_pct).toFixed(2) }}%</span>
+                </div>
+              </div>
+            </div>
+          </template>
+        </MobileCardList>
+        <div v-else class="table-wrap">
           <table class="stock-table">
             <thead>
               <tr>
@@ -673,27 +619,31 @@ onMounted(() => {
               </tr>
             </thead>
             <tbody>
-              <tr v-if="loading">
-                <td colspan="8" class="empty">加载中...</td>
-              </tr>
-              <tr v-else-if="!closedList.length">
-                <td colspan="8" class="empty">暂无记录</td>
-              </tr>
-              <tr v-for="item in closedList" :key="item.id">
-                <td class="mono">{{ item.symbol }}</td>
-                <td>{{ item.name }}</td>
-                <td class="num">{{ Number(item.total_buy_amount).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }}</td>
-                <td class="num">{{ Number(item.total_sell_amount).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }}</td>
-                <td class="num">{{ Number(item.total_fee || 0).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }}</td>
-                <td class="num" :class="Number(item.realized_pnl) > 0 ? 'up' : Number(item.realized_pnl) < 0 ? 'down' : ''">
-                  {{ Number(item.realized_pnl).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }}
-                </td>
-                <td class="num" :class="Number(item.pnl_pct) > 0 ? 'up' : Number(item.pnl_pct) < 0 ? 'down' : ''">
-                  {{ Number(item.pnl_pct).toFixed(2) }}%
-                </td>
-                <td class="num">
-                  {{ Math.ceil((new Date(item.close_date) - new Date(item.open_date)) / (1000 * 60 * 60 * 24)) }}
-                </td>
+              <tr
+                v-for="(item, index) in closedPaddedList"
+                :key="item === null ? `empty-${index}` : (item.id || item.symbol || index)"
+                class="data-row"
+                :class="{ 'empty-row': item === null }"
+              >
+                <template v-if="item">
+                  <td class="mono">{{ item.symbol }}</td>
+                  <td>{{ item.name }}</td>
+                  <td class="num">{{ Number(item.total_buy_amount).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }}</td>
+                  <td class="num">{{ Number(item.total_sell_amount).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }}</td>
+                  <td class="num">{{ Number(item.total_fee || 0).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }}</td>
+                  <td class="num" :class="Number(item.realized_pnl) > 0 ? 'up' : Number(item.realized_pnl) < 0 ? 'down' : ''">
+                    {{ Number(item.realized_pnl).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }}
+                  </td>
+                  <td class="num" :class="Number(item.pnl_pct) > 0 ? 'up' : Number(item.pnl_pct) < 0 ? 'down' : ''">
+                    {{ Number(item.pnl_pct).toFixed(2) }}%
+                  </td>
+                  <td class="num">
+                    {{ Math.ceil((new Date(item.close_date) - new Date(item.open_date)) / (1000 * 60 * 60 * 24)) }}
+                  </td>
+                </template>
+                <template v-else>
+                  <td v-for="col in ['symbol','name','total_buy','total_sell','fee','realized_pnl','pnl_pct','days']" :key="col">&nbsp;</td>
+                </template>
               </tr>
             </tbody>
           </table>
@@ -1005,40 +955,9 @@ onMounted(() => {
 .chart-body {
   flex: 1;
   min-height: 160px;
-}
 
-.bar-chart-row {
-  margin-bottom: 12px;
-
-  &.collapsed {
-    min-height: auto;
-  }
-
-  .collapsible-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    cursor: pointer;
-    padding: 2px 0;
-
-    &:hover .collapse-arrow {
-      color: var(--text-primary);
-    }
-  }
-
-  .collapse-arrow {
-    font-size: 10px;
-    color: var(--text-muted);
-    transition: color 0.2s;
-  }
-
-  .collapsible-body {
-    padding-top: 6px;
-  }
-
-  .chart-body {
-    min-height: 160px;
-    height: auto;
+  @media (max-width: 768px) {
+    min-height: 200px;
   }
 }
 
@@ -1068,6 +987,64 @@ onMounted(() => {
     color: var(--accent);
     border-bottom-color: var(--accent);
     font-weight: 500;
+  }
+}
+
+.closed-card {
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .card-symbol {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .card-name {
+    flex: 1;
+    font-family: var(--font-body);
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-days {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .card-fields {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px 16px;
+  }
+
+  .card-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .field-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .field-value {
+    font-size: 13px;
+    color: var(--text-primary);
   }
 }
 
@@ -1125,6 +1102,17 @@ onMounted(() => {
 
 .capital-panel {
   width: 360px;
+}
+
+@media (max-width: 768px) {
+  .modal-panel {
+    width: calc(100% - 32px);
+    max-width: none;
+  }
+
+  .capital-panel {
+    width: calc(100% - 32px);
+  }
 }
 
 .modal-header {

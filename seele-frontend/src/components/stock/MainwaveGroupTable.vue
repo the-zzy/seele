@@ -1,5 +1,9 @@
 <script setup>
-import { computed, ref, watch, nextTick, onMounted } from 'vue'
+import { computed, ref, watch, nextTick, onMounted, toRef } from 'vue'
+import { useViewport } from '@/composables/useViewport'
+import { useFixedRows } from '@/composables/useFixedRows'
+import MobileCardList from '@/components/common/MobileCardList.vue'
+import BasePagination from '@/components/common/BasePagination.vue'
 import { formatNumber } from '@/utils/formatters'
 
 const props = defineProps({
@@ -8,6 +12,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['row-dblclick'])
+
+const { isMobile } = useViewport()
 
 const layers = [20, 10, 5, 'OFF']
 
@@ -32,9 +38,21 @@ const groups = computed(() => {
 })
 
 const activeLayer = ref(20)
+const pageSize = ref(10)
+const pageState = ref({
+  20: { pageNum: 1 },
+  10: { pageNum: 1 },
+  5: { pageNum: 1 },
+  OFF: { pageNum: 1 }
+})
 
-// 数据变化时，如果当前激活层无数据，自动切到第一个有数据的层
 watch(() => props.list, (list) => {
+  pageState.value = {
+    20: { pageNum: 1 },
+    10: { pageNum: 1 },
+    5: { pageNum: 1 },
+    OFF: { pageNum: 1 }
+  }
   if (!list.length) return
   nextTick(() => {
     if (!groups.value[activeLayer.value]?.length) {
@@ -58,10 +76,35 @@ function updateIndicator () {
   }
 }
 
-watch(activeLayer, () => nextTick(updateIndicator))
+watch(activeLayer, () => {
+  if (!pageState.value[activeLayer.value]) {
+    pageState.value[activeLayer.value] = { pageNum: 1 }
+  }
+  nextTick(updateIndicator)
+})
 onMounted(() => nextTick(updateIndicator))
 
 const currentGroup = computed(() => groups.value[activeLayer.value] || [])
+
+const pageNum = computed(() => pageState.value[activeLayer.value]?.pageNum || 1)
+
+const paginatedGroup = computed(() => {
+  const start = (pageNum.value - 1) * pageSize.value
+  return currentGroup.value.slice(start, start + pageSize.value)
+})
+
+const groupTotal = computed(() => currentGroup.value.length)
+
+const paddedList = useFixedRows(paginatedGroup)
+
+function handlePageChange (newPage) {
+  pageState.value[activeLayer.value] = { pageNum: newPage }
+}
+
+function handlePageSizeChange (newSize) {
+  pageSize.value = newSize
+  pageState.value[activeLayer.value] = { pageNum: 1 }
+}
 
 function extractCodeNum (symbol) {
   if (!symbol) return ''
@@ -70,6 +113,10 @@ function extractCodeNum (symbol) {
 }
 
 function onDblClick (item) {
+  emit('row-dblclick', item)
+}
+
+function onClick (item) {
   emit('row-dblclick', item)
 }
 
@@ -96,6 +143,22 @@ function formatDate (dateStr) {
   const d = new Date(dateStr)
   if (isNaN(d.getTime())) return dateStr
   return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function getChgClass (val) {
+  if (val == null) return ''
+  const value = parseFloat(val)
+  if (value > 0) return 'up'
+  if (value < 0) return 'down'
+  return ''
+}
+
+function getPctCellClass (val) {
+  if (val == null) return ''
+  const value = parseFloat(val)
+  if (value > 0) return 'cell-up'
+  if (value < 0) return 'cell-down'
+  return ''
 }
 
 function setTabRef (el, idx) {
@@ -129,14 +192,58 @@ function setTabRef (el, idx) {
         </div>
       </div>
 
-      <!-- 当前分组表格 -->
+      <!-- 当前分组内容 -->
       <div class="table-section">
         <div v-if="!currentGroup.length" class="state empty">该分组暂无数据</div>
+        <MobileCardList
+          v-else-if="isMobile"
+          :list="paginatedGroup"
+          key-field="symbol"
+          @click-item="onClick"
+        >
+          <template #default="{ item }">
+            <div class="stock-card" :class="{ holding: item.isHolding }">
+              <div class="card-header">
+                <span class="card-code">{{ extractCodeNum(item.symbol) }}</span>
+                <span class="card-name">{{ item.name }}</span>
+                <span v-if="item.industry" class="card-industry">{{ item.industry }}</span>
+                <span class="score-tag" :class="getScoreClass(item.score)">{{ getScoreLabel(item.score) }}</span>
+              </div>
+              <div class="card-fields">
+                <div class="card-field">
+                  <span class="field-label">股价</span>
+                  <span class="field-value">{{ item.close != null ? formatNumber(item.close) : '-' }}</span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">涨幅</span>
+                  <span class="field-value" :class="getChgClass(item.pctChg)">{{ item.pctChg != null ? (item.pctChg > 0 ? '+' : '') + item.pctChg.toFixed(2) + '%' : '-' }}</span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">MA5 / MA10 / MA20</span>
+                  <span class="field-value">
+                    {{ item.ma5 != null ? formatNumber(item.ma5) : '-' }} /
+                    {{ item.ma10 != null ? formatNumber(item.ma10) : '-' }} /
+                    {{ item.ma20 != null ? formatNumber(item.ma20) : '-' }}
+                  </span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">启动日</span>
+                  <span class="field-value">{{ formatDate(item.launchDate) }}</span>
+                </div>
+                <div class="card-field">
+                  <span class="field-label">启动至今</span>
+                  <span class="field-value" :class="getChgClass(item.launchPctChg)">{{ item.launchPctChg != null ? (item.launchPctChg > 0 ? '+' : '') + item.launchPctChg.toFixed(2) + '%' : '-' }}</span>
+                </div>
+              </div>
+            </div>
+          </template>
+        </MobileCardList>
         <table v-else class="stock-table">
           <thead>
             <tr>
               <th>代码</th>
               <th>名称</th>
+              <th>板块</th>
               <th>评分</th>
               <th>股价</th>
               <th>涨幅</th>
@@ -149,31 +256,45 @@ function setTabRef (el, idx) {
           </thead>
           <tbody>
             <tr
-              v-for="item in currentGroup"
-              :key="item.symbol"
+              v-for="(item, index) in paddedList"
+              :key="item === null ? `empty-${index}` : (item.id || item.symbol || index)"
               class="data-row"
-              :class="{ holding: item.isHolding }"
-              @dblclick="onDblClick(item)"
+              :class="{ holding: item?.isHolding, 'empty-row': item === null }"
+              @dblclick="item && onDblClick(item)"
             >
-              <td class="code">{{ extractCodeNum(item.symbol) }}</td>
-              <td class="name">{{ item.name }}</td>
-              <td :class="getScoreClass(item.score)">
-                {{ getScoreLabel(item.score) }}
-              </td>
-              <td>{{ item.close != null ? formatNumber(item.close) : '-' }}</td>
-              <td :class="item.pctChg > 0 ? 'up' : item.pctChg < 0 ? 'down' : ''">
-                {{ item.pctChg != null ? (item.pctChg > 0 ? '+' : '') + item.pctChg.toFixed(2) + '%' : '-' }}
-              </td>
-              <td>{{ item.ma5 != null ? formatNumber(item.ma5) : '-' }}</td>
-              <td>{{ item.ma10 != null ? formatNumber(item.ma10) : '-' }}</td>
-              <td>{{ item.ma20 != null ? formatNumber(item.ma20) : '-' }}</td>
-              <td>{{ formatDate(item.launchDate) }}</td>
-              <td :class="item.launchPctChg > 0 ? 'up' : item.launchPctChg < 0 ? 'down' : ''">
-                {{ item.launchPctChg != null ? (item.launchPctChg > 0 ? '+' : '') + item.launchPctChg.toFixed(2) + '%' : '-' }}
-              </td>
+              <template v-if="item">
+                <td class="code">{{ extractCodeNum(item.symbol) }}</td>
+                <td class="name">{{ item.name }}</td>
+                <td class="industry">{{ item.industry || '-' }}</td>
+                <td :class="getScoreClass(item.score)">
+                  {{ getScoreLabel(item.score) }}
+                </td>
+                <td>{{ item.close != null ? formatNumber(item.close) : '-' }}</td>
+                <td class="pct-cell" :class="getPctCellClass(item.pctChg)">
+                  {{ item.pctChg != null ? (item.pctChg > 0 ? '+' : '') + item.pctChg.toFixed(2) + '%' : '-' }}
+                </td>
+                <td>{{ item.ma5 != null ? formatNumber(item.ma5) : '-' }}</td>
+                <td>{{ item.ma10 != null ? formatNumber(item.ma10) : '-' }}</td>
+                <td>{{ item.ma20 != null ? formatNumber(item.ma20) : '-' }}</td>
+                <td>{{ formatDate(item.launchDate) }}</td>
+                <td class="pct-cell" :class="getPctCellClass(item.launchPctChg)">
+                  {{ item.launchPctChg != null ? (item.launchPctChg > 0 ? '+' : '') + item.launchPctChg.toFixed(2) + '%' : '-' }}
+                </td>
+              </template>
+              <template v-else>
+                <td v-for="col in ['symbol','name','industry','score','close','pctChg','ma5','ma10','ma20','launchDate','launchPctChg']" :key="col">&nbsp;</td>
+              </template>
             </tr>
           </tbody>
         </table>
+        <BasePagination
+          v-if="groupTotal > 0"
+          :page-num="pageNum"
+          :page-size="pageSize"
+          :total="groupTotal"
+          @update:page-num="handlePageChange"
+          @update:page-size="handlePageSizeChange"
+        />
       </div>
     </template>
   </div>
@@ -182,15 +303,14 @@ function setTabRef (el, idx) {
 <style scoped lang="scss">
 .group-section {
   flex: 1;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 /* 横线滑块 Tab */
 .tab-slider {
-  position: sticky;
-  top: 0;
+  flex-shrink: 0;
   z-index: 10;
   background: var(--bg-primary);
   border-bottom: 1px solid var(--rule);
@@ -275,6 +395,82 @@ function setTabRef (el, idx) {
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+.table-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.stock-table {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 1100px;
+
+  thead,
+  tbody {
+    display: flex;
+    flex-direction: column;
+  }
+
+  thead {
+    flex-shrink: 0;
+  }
+
+  tbody {
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  tr {
+    display: flex;
+    flex: 0 0 10%;
+    min-height: 0;
+  }
+
+  th,
+  td {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 8px 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  th:first-child,
+  td:first-child,
+  th:nth-child(2),
+  td:nth-child(2) {
+    justify-content: flex-start;
+  }
+
+  th:nth-child(3),
+  td:nth-child(3) {
+    justify-content: center;
+  }
+}
+
+.pct-cell {
+  justify-content: center;
+
+  &.cell-up { background: var(--up-bg); }
+  &.cell-down { background: var(--down-bg); }
+}
+
+.stock-table tbody tr:hover {
+  .pct-cell.cell-up { background: var(--up-bg-hover); }
+  .pct-cell.cell-down { background: var(--down-bg-hover); }
+}
+
+.stock-table tbody td.industry {
+  justify-content: flex-start;
+}
+
 .stock-table .data-row.holding {
   background: rgba(245, 158, 11, 0.08);
 }
@@ -283,4 +479,98 @@ function setTabRef (el, idx) {
 .stock-table .score-ok { color: #f59e0b; font-weight: 600; }
 .stock-table .score-weak { color: #9ca3af; }
 .stock-table .score-poor { color: var(--down); }
+
+@media (max-width: 768px) {
+  .tab-list {
+    scrollbar-width: auto;
+
+    &::-webkit-scrollbar {
+      display: block;
+      height: 3px;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background: var(--text-faint);
+      border-radius: 2px;
+    }
+  }
+
+  .tab-item {
+    padding: 10px 14px 12px;
+  }
+
+  .tab-desc {
+    font-size: 10px;
+  }
+}
+
+.stock-card {
+  &.holding {
+    background: rgba(245, 158, 11, 0.08);
+    border-color: rgba(245, 158, 11, 0.2);
+  }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .card-code {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .card-name {
+    flex: 1;
+    font-family: var(--font-body);
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-industry {
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--bg-tertiary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+
+  .card-fields {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px 16px;
+  }
+
+  .card-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+
+    &:nth-child(3) {
+      grid-column: 1 / -1;
+    }
+  }
+
+  .field-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .field-value {
+    font-size: 13px;
+    color: var(--text-primary);
+  }
+}
 </style>

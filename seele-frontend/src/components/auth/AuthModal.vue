@@ -220,4 +220,18 @@ async function handleLogin () {
 .fade-leave-to {
   opacity: 0;
 }
+
+@media (max-width: 768px) {
+  .auth-overlay {
+    padding: var(--safe-top) 0 var(--safe-bottom);
+    align-items: flex-start;
+    padding-top: calc(15vh + var(--safe-top));
+  }
+
+  .auth-modal {
+    width: calc(100% - 32px);
+    max-width: 360px;
+    padding: 32px 24px 28px;
+  }
+}
 </style>
