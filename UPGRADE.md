@@ -141,4 +141,50 @@ git commit -m "chore: bump version to X.Y.Z"
 - [ ] 前端已构建并监听 8000 端口
 - [ ] /health 端点返回正常
 - [ ] 核心业务链路验证通过
+
+### Nginx / HTTPS
+- [ ] 已确认 Nginx 配置包含 443 SSL 监听（生产环境必须）
+- [ ] 已确认 HTTP 80 端口会 301 重定向到 HTTPS
+- [ ] 更新 Nginx 配置时**不能直接覆盖**，需合并保留 Certbot/SSL 段
+- [ ] 已验证 `https://zhuozhenyu.cn/` 和 `https://zhuozhenyu.cn/api/version` 可正常访问
 ```
+
+---
+
+## 部署教训
+
+### 2026-06-14 v2.3.0 部署
+
+**问题 1：Nginx 配置覆盖导致 HTTPS 失效**
+
+现象：`https://zhuozhenyu.cn/` 无法访问，`http://` 正常。
+
+原因：部署脚本直接用新配置覆盖了 `/etc/nginx/conf.d/seele.conf`，只保留了 80 端口监听，丢失了 Certbot 自动生成的 443 SSL 段和 HTTP→HTTPS 301 重定向。
+
+正确处理：
+1. 修改 Nginx 配置前先做备份：`cp /etc/nginx/conf.d/seele.conf /etc/nginx/conf.d/seele.conf.bak.$(date +%Y%m%d_%H%M%S)`
+2. 不要整体替换，只修改需要变更的部分（如 `root` 路径、`location` 段）
+3. 修改后检查 `nginx -t`，并确认 `ss -tlnp | grep :443` 有监听
+4. 必须验证 `https://域名/` 和 `https://域名/api/version`
+
+**问题 2：Systemd 服务路径与实际部署目录不一致**
+
+现象：`systemctl restart seele-backend` 失败，`Failed to load environment files: No such file or directory`。
+
+原因：旧服务文件指向 `/opt/seele/seele-backend`，而实际代码已部署到 `/www/seele/seele-backend`。
+
+正确处理：
+1. 部署前检查 `WorkingDirectory` 和 `EnvironmentFile` 是否指向当前部署目录
+2. 服务文件应与代码一起上传/更新，不能假设远程路径永远不变
+3. 修改服务文件后执行 `systemctl daemon-reload`
+
+**问题 3：前端构建缓存错误**
+
+现象：`npm run build` 报 `ModuleHotAcceptDependency`。
+
+正确处理：构建前清理缓存：
+```bash
+rm -rf dist node_modules/.cache ../node_modules/.cache
+npx vue-cli-service build --mode production
+```
+
