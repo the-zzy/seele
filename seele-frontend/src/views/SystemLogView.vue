@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { systemLogApi } from '@/api/systemLog'
+import { syncApi } from '@/api/stock'
 import PageHero from '@/components/common/PageHero.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
 
@@ -32,6 +33,19 @@ const jobTypeMap = {
   index_daily: '指数日线',
   index_constituents: '指数成分股'
 }
+
+const jobTypeList = [
+  { value: '', label: '全部类型' },
+  { value: 'stock_basic', label: '股票基础信息' },
+  { value: 'daily', label: '日线数据' },
+  { value: 'financial', label: '财务指标' },
+  { value: 'indicator', label: '指标计算' },
+  { value: 'board_list', label: '板块/ETF列表' },
+  { value: 'board_daily', label: '板块/ETF日线' },
+  { value: 'board_constituent', label: '板块成分股' },
+  { value: 'index_daily', label: '指数日线' },
+  { value: 'index_constituents', label: '指数成分股' }
+]
 
 const statusMap = {
   running: '运行中',
@@ -96,11 +110,12 @@ async function loadOperationLogs () {
 async function loadSyncLogs () {
   loading.value = true
   try {
-    const res = await systemLogApi.getOverview()
-    const list = res?.latest_sync_logs || []
-    syncLogs.value = { list, total: list.length }
+    const params = syncQuery.value
+    const res = await syncApi.getJobLogs(params.days, params.job_type || null, params.page_num, params.page_size)
+    syncLogs.value = { list: res?.list || [], total: res?.total || 0 }
   } catch (error) {
-    console.error('加载同步概览失败:', error)
+    console.error('加载同步日志失败:', error)
+    syncLogs.value = { list: [], total: 0 }
   } finally {
     loading.value = false
   }
@@ -330,6 +345,9 @@ onMounted(() => {
       <!-- 同步任务概览 -->
       <div v-show="activeTab === 'syncOverview'" class="tab-panel">
         <div class="filter-bar">
+          <select v-model="syncQuery.job_type" class="filter-select" @change="syncQuery.page_num = 1; loadSyncLogs()">
+            <option v-for="opt in jobTypeList" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+          </select>
           <select v-model="syncQuery.days" class="filter-select" @change="syncQuery.page_num = 1; loadSyncLogs()">
             <option :value="1">今天</option>
             <option :value="3">最近3天</option>
@@ -378,6 +396,14 @@ onMounted(() => {
             </tbody>
           </table>
         </div>
+        <BasePagination
+          v-if="syncLogs.total > 0"
+          :page-num="syncQuery.page_num"
+          :page-size="syncQuery.page_size"
+          :total="syncLogs.total"
+          @update:page-num="syncQuery.page_num = $event; loadSyncLogs()"
+          @update:page-size="syncQuery.page_size = $event; syncQuery.page_num = 1; loadSyncLogs()"
+        />
       </div>
     </div>
   </div>

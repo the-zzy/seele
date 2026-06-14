@@ -1,10 +1,16 @@
 import request, { baseURL } from '@/utils/request'
+import { getToken } from '@/utils/auth'
 
 export const agentApi = {
   chatStream (data, onEvent) {
+    const headers = { 'Content-Type': 'application/json' }
+    const token = getToken()
+    if (token) {
+      headers.Authorization = `Bearer ${token}`
+    }
     return fetch(`${baseURL}/agent/chat/stream`, {
       method: 'post',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(data)
     }).then(async (response) => {
       if (!response.ok) {

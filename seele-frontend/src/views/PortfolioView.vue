@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, computed, nextTick, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useEChart } from '@/composables/useEChart'
 import { toast } from '@/composables/useToast'
 import { portfolioApi } from '@/api/portfolio'
@@ -56,6 +57,12 @@ const capitalInput = ref('')
 // 预警
 const alerts = ref([])
 const alertsVisible = ref(true)
+
+// 缺失日线提示弹窗
+const missingDailyModalVisible = ref(false)
+const missingDailyList = ref([])
+
+const router = useRouter()
 
 // 图表
 const trendRef = useEChart()
@@ -400,8 +407,19 @@ async function onSyncPositions () {
   try {
     await portfolioApi.syncPositions()
     await refreshAll()
+    toast.success('持仓同步成功')
   } catch (e) {
     toast.error('同步失败: ' + (e.message || '未知错误'))
+  }
+}
+
+async function onRebuildDaily () {
+  try {
+    await portfolioApi.rebuildDailyData()
+    await refreshAll()
+    toast.success('资产数据重建成功')
+  } catch (e) {
+    handlePortfolioError(e, '重建失败: ')
   }
 }
 
@@ -452,7 +470,17 @@ async function onSubmitTrade (data) {
     editingTrade.value = null
     await refreshAll()
   } catch (e) {
-    toast.error(data.id != null ? '更新失败: ' : '录入失败: ' + (e.message || '未知错误'))
+    handlePortfolioError(e, data.id != null ? '更新失败: ' : '录入失败: ')
+  }
+}
+
+function handlePortfolioError (e, defaultMsg) {
+  const msg = e.message || ''
+  if (msg.includes('缺失日线收盘价') && e.payload?.data) {
+    missingDailyList.value = e.payload.data
+    missingDailyModalVisible.value = true
+  } else {
+    toast.error(defaultMsg + msg)
   }
 }
 
@@ -462,7 +490,7 @@ async function onSubmitDayTrade (data) {
     dayTradeModalVisible.value = false
     await refreshAll()
   } catch (e) {
-    toast.error('做T录入失败: ' + (e.message || '未知错误'))
+    handlePortfolioError(e, '做T录入失败: ')
   }
 }
 
@@ -471,7 +499,7 @@ async function onDeleteTrade (id) {
     await portfolioApi.deleteTrade(id)
     await refreshAll()
   } catch (e) {
-    toast.error('删除失败: ' + (e.message || '未知错误'))
+    handlePortfolioError(e, '删除失败: ')
   }
 }
 
@@ -519,6 +547,7 @@ onMounted(() => {
       <template #actions>
         <span class="capital-hint">初始资金 {{ (summary.initial_capital || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
         <button class="btn-config" @click="onSyncPositions">同步持仓</button>
+        <button class="btn-config" @click="onRebuildDaily">重建资产</button>
         <button class="btn-config" @click="openCapitalModal">设置资金</button>
         <button class="btn-primary" @click="openModal('BUY')">+ 买入</button>
         <button class="btn-sell" @click="openModal('SELL')">- 卖出</button>
@@ -693,6 +722,26 @@ onMounted(() => {
       :positions="positions"
       @submit="onSubmitDayTrade"
     />
+
+    <!-- 缺失日线提示弹窗 -->
+    <div v-if="missingDailyModalVisible" class="modal-overlay" @click.self="missingDailyModalVisible = false">
+      <div class="modal-panel missing-daily-panel">
+        <div class="modal-header">
+          <h3 class="modal-title">持仓数据缺失日线收盘价</h3>
+          <button class="modal-close" @click="missingDailyModalVisible = false">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-desc">以下股票在对应交易日缺少日线数据，无法计算持仓市值。请先同步日线数据后再录入交易。</p>
+          <div class="missing-daily-list">
+            <div v-for="item in missingDailyList" :key="item" class="missing-daily-item">{{ item }}</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-link" @click="missingDailyModalVisible = false">关闭</button>
+          <button class="btn-primary" @click="router.push('/sync-job-log'); missingDailyModalVisible = false">去同步任务</button>
+        </div>
+      </div>
+    </div>
 
     <!-- 初始资金设置弹窗 -->
     <div v-if="capitalModalVisible" class="modal-overlay" @click.self="capitalModalVisible = false">
@@ -1171,6 +1220,41 @@ onMounted(() => {
   &:hover {
     color: var(--text-primary);
     background: var(--bg-tertiary);
+  }
+}
+
+.missing-daily-panel {
+  width: 460px;
+}
+
+.modal-desc {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.missing-daily-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow: auto;
+  padding: 10px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+
+.missing-daily-item {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 4px 0;
+  border-bottom: 1px solid var(--rule);
+
+  &:last-child {
+    border-bottom: none;
   }
 }
 

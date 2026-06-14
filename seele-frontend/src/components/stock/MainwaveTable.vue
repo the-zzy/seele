@@ -81,16 +81,11 @@ function getScoreTooltip (item) {
   const s = item.score
   if (!s) return ''
   return [
-    `总分: ${s.total}/100`,
-    `趋势形态: ${s.trend_shape}/35`,
-    `  均线偏离: ${s.ma_deviation}`,
-    `  K线质量: ${s.kline_quality}`,
-    `  距高点回落: ${s.pullback}`,
-    `板块强度: ${s.sector}/20`,
-    `业绩质量: ${s.earnings}/15`,
-    `方向分散: ${s.direction}/15`,
-    `市值流动性: ${s.liquidity}/8`,
-    `大盘环境: ${s.market_env}/7`
+    `总分: ${s.total}`,
+    `趋势分: ${s.trend_score}`,
+    `强势分: ${s.strength_score}`,
+    `动量分: ${s.momentum_score}`,
+    s.hard_pass ? '硬性门槛: 通过' : '硬性门槛: 未通过'
   ].join('\n')
 }
 

@@ -636,8 +636,8 @@ onMounted(() => {
   &.plain { color: var(--text-primary); }
 }
 
-.up { color: #22c55e; }
-.down { color: #ef4444; }
+.up { color: var(--up); }
+.down { color: var(--down); }
 
 .section-block {
   margin-bottom: 16px;

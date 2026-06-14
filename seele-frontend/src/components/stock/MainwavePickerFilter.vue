@@ -1,6 +1,7 @@
 <script setup>
 const props = defineProps({
-  modelValue: { type: Object, default: () => ({}) }
+  modelValue: { type: Object, default: () => ({}) },
+  showSymbol: { type: Boolean, default: true }
 })
 
 const emit = defineEmits(['update:modelValue', 'search', 'reset'])
@@ -20,16 +21,6 @@ function onReset () {
 
 <template>
   <div class="filter-section">
-    <label class="field">
-      <span class="field-label">代码</span>
-      <input
-        :value="modelValue.symbol"
-        @input="updateField('symbol', $event.target.value)"
-        type="text"
-        placeholder="600519"
-        @keyup.enter="onSearch"
-      />
-    </label>
     <label class="field">
       <span class="field-label">名称</span>
       <input

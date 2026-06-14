@@ -9,7 +9,7 @@ import BasePagination from '@/components/common/BasePagination.vue'
 const detailedStatus = ref(null)
 const dailyTotal = ref(0)
 const dailyPageNum = ref(1)
-const dailyPageSize = ref(5)
+const dailyPageSize = ref(10)
 const incrementalMap = ref({})
 
 const { syncing, progress: taskProgress, startSync, restoreTasks, clearPoll } = useSyncTask()
@@ -169,6 +169,24 @@ async function handleDailyPageSizeChange (newSize) {
   dailyPageSize.value = newSize
   dailyPageNum.value = 1
   await loadDetailedStatus()
+}
+
+async function handleDailySync (date) {
+  const taskKey = `daily_${date.replace(/-/g, '')}`
+  const incremental = incrementalMap.value[date]
+  await startSync(taskKey, () => syncApi.syncByDate(date, incremental), {
+    checkExisting: true,
+    onDone: onSyncDone
+  })
+}
+
+async function handleIndicatorSync (date) {
+  const taskKey = `indicator_${date.replace(/-/g, '')}`
+  const incremental = incrementalMap.value[date]
+  await startSync(taskKey, () => syncApi.syncIndicator(date, incremental), {
+    checkExisting: true,
+    onDone: onSyncDone
+  })
 }
 
 function formatTime (ts) {
@@ -408,8 +426,8 @@ onUnmounted(() => {
 
         <div class="daily-section" v-if="detailedStatus">
           <div class="daily-section-header">
-            <h3 class="section-title">最近五个交易日</h3>
-            <span class="section-note">统计范围不含北交所 · 每页 5 条</span>
+            <h3 class="section-title">最近十个交易日</h3>
+            <span class="section-note">统计范围不含北交所 · 每页 10 条</span>
           </div>
           <div class="daily-table-wrap">
             <table class="daily-table">
