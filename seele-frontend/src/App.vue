@@ -7,7 +7,7 @@
     @logout="handleLogout"
   />
 
-  <div v-else class="app-layout">
+  <div v-else class="app-layout" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
     <aside v-if="!isMobile" class="sidebar">
       <div class="masthead">
         <div class="wordmark">Seele</div>
@@ -16,8 +16,11 @@
           <span class="dot">·</span>
           <span>{{ year }}</span>
           <span class="dot">·</span>
-          <span class="version">v2.3</span>
+          <span class="version">v{{ displayVersion }}</span>
         </div>
+        <button class="sidebar-toggle" @click="toggleSidebar">
+          <span>{{ sidebarCollapsed ? '›' : '‹' }}</span>
+        </button>
       </div>
 
       <div class="rule" />
@@ -34,29 +37,35 @@
             <span class="num">{{ pad(idx + 1) }}</span>
             <span class="single-body">
               <span class="single-title">{{ item.name }}</span>
-              <span v-if="item.section" class="single-section">{{ item.section }}</span>
             </span>
             <span class="indicator" />
           </router-link>
 
           <!-- 分组 -->
-          <div v-else class="nav-group" :class="{ active: item.isActive }">
-            <div class="group-head">
+          <div
+            v-else
+            class="nav-group"
+            :class="{ active: item.isActive, expanded: expandedGroups.has(item.key) }"
+          >
+            <div class="group-head" @click.stop="toggleGroup(item.key)">
               <span class="num">{{ pad(idx + 1) }}</span>
               <span class="group-title">{{ item.name }}</span>
+              <span class="group-chevron">{{ expandedGroups.has(item.key) ? '▾' : '▸' }}</span>
             </div>
-            <div class="group-children">
-              <router-link
-                v-for="(child, cidx) in item.children"
-                :key="child.path"
-                :to="child.path"
-                class="group-child"
-                active-class="active"
-              >
-                <span class="child-num">{{ pad(idx + 1) }}.{{ cidx + 1 }}</span>
-                <span class="child-title">{{ child.name }}</span>
-              </router-link>
-            </div>
+            <transition name="nav-fold">
+              <div v-show="expandedGroups.has(item.key)" class="group-children">
+                <router-link
+                  v-for="(child, cidx) in item.children"
+                  :key="child.path"
+                  :to="child.path"
+                  class="group-child"
+                  active-class="active"
+                >
+                  <span class="child-num">{{ pad(idx + 1) }}.{{ cidx + 1 }}</span>
+                  <span class="child-title">{{ child.name }}</span>
+                </router-link>
+              </div>
+            </transition>
           </div>
         </template>
       </nav>
@@ -114,6 +123,8 @@ import { useRouter, useRoute } from 'vue-router'
 import { useTheme } from '@/composables/useTheme'
 import { useViewport } from '@/composables/useViewport'
 import { isLoggedIn, removeToken, onAuthRequired } from '@/utils/auth'
+import { getItem, removeItem, setItem } from '@/utils/storage'
+import { checkVersion } from '@/utils/version'
 import { visitorApi } from '@/api/visitor'
 import AgentFloatingWidget from '@/components/agent/AgentFloatingWidget.vue'
 import ToastContainer from '@/components/common/ToastContainer.vue'
@@ -126,14 +137,35 @@ const route = useRoute()
 const { theme, toggle: toggleTheme } = useTheme()
 const { isMobile } = useViewport()
 
-const WORKSPACE_KEY = 'seele_workspace'
+const WORKSPACE_KEY = 'workspace'
+const SIDEBAR_COLLAPSED_KEY = 'sidebar_collapsed'
+const EXPANDED_GROUPS_KEY = 'expanded_groups'
 
-const workspaceMode = ref(localStorage.getItem(WORKSPACE_KEY) === '1')
+const workspaceMode = ref(getItem(WORKSPACE_KEY) === '1')
+const sidebarCollapsed = ref(getItem(SIDEBAR_COLLAPSED_KEY) === '1')
+const expandedGroups = ref(new Set(JSON.parse(getItem(EXPANDED_GROUPS_KEY) || '[]')))
 const showAuthModal = ref(false)
 const loggedIn = ref(isLoggedIn())
 const drawerVisible = ref(false)
 
 const year = new Date().getFullYear()
+const displayVersion = process.env.VUE_APP_VERSION?.split('-')[0] || '2.3.0'
+
+function toggleSidebar () {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed.value ? '1' : '0')
+}
+
+function toggleGroup (groupKey) {
+  const next = new Set(expandedGroups.value)
+  if (next.has(groupKey)) {
+    next.delete(groupKey)
+  } else {
+    next.add(groupKey)
+  }
+  expandedGroups.value = next
+  setItem(EXPANDED_GROUPS_KEY, JSON.stringify([...next]))
+}
 
 router.afterEach(() => {
   drawerVisible.value = false
@@ -150,13 +182,13 @@ function onLoginSuccess () {
 
 function enterWorkspace () {
   workspaceMode.value = true
-  localStorage.setItem(WORKSPACE_KEY, '1')
+  setItem(WORKSPACE_KEY, '1')
   router.push('/stock-basic')
 }
 
 function exitWorkspace () {
   workspaceMode.value = false
-  localStorage.removeItem(WORKSPACE_KEY)
+  removeItem(WORKSPACE_KEY)
   router.push('/')
 }
 
@@ -166,9 +198,16 @@ function handleLogout () {
 }
 
 onMounted(() => {
+  checkVersion().catch(() => {})
+
   onAuthRequired(() => {
     showAuthModal.value = true
   })
+
+  // 默认收起所有分组
+  if (getItem(EXPANDED_GROUPS_KEY) === null) {
+    expandedGroups.value = new Set()
+  }
 
   // 上报访客信息
   const screenW = window.screen?.width || 0
@@ -317,6 +356,32 @@ html, body {
         font-weight: 600;
       }
     }
+
+    .sidebar-toggle {
+      position: absolute;
+      top: 50%;
+      right: 12px;
+      transform: translateY(-50%);
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      border: 1px solid var(--rule);
+      border-radius: 4px;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      padding: 0;
+      transition: all 0.2s;
+
+      &:hover {
+        border-color: var(--text-faint);
+        color: var(--text-secondary);
+      }
+    }
   }
 
   .rule {
@@ -373,14 +438,6 @@ html, body {
       line-height: 1.3;
     }
 
-    .single-section {
-      font-family: var(--font-mono);
-      font-size: 9px;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--text-faint);
-    }
-
     .indicator {
       width: 6px;
       height: 6px;
@@ -423,6 +480,14 @@ html, body {
       align-items: baseline;
       gap: 12px;
       padding: 8px 8px 6px;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.18s ease;
+      border-radius: 4px;
+
+      &:hover {
+        background: var(--bg-tertiary);
+      }
 
       .num {
         font-family: var(--font-mono);
@@ -434,11 +499,18 @@ html, body {
       }
 
       .group-title {
+        flex: 1;
         font-family: var(--font-display);
         font-weight: 600;
         font-size: 14px;
         letter-spacing: 0.02em;
         color: var(--text-secondary);
+      }
+
+      .group-chevron {
+        font-size: 10px;
+        color: var(--text-faint);
+        transition: transform 0.2s ease;
       }
     }
 
@@ -525,6 +597,24 @@ html, body {
         }
       }
     }
+  }
+
+  .nav-fold-enter-active,
+  .nav-fold-leave-active {
+    transition: max-height 0.25s ease, opacity 0.25s ease;
+    overflow: hidden;
+  }
+
+  .nav-fold-enter-from,
+  .nav-fold-leave-to {
+    max-height: 0;
+    opacity: 0;
+  }
+
+  .nav-fold-enter-to,
+  .nav-fold-leave-from {
+    max-height: 500px;
+    opacity: 1;
   }
 
   .main-footer {
@@ -702,6 +792,67 @@ html, body {
       padding: 14px 12px 20px;
     }
 
+  }
+}
+
+.app-layout.sidebar-collapsed {
+  .sidebar {
+    width: 64px;
+
+    .masthead {
+      padding: 16px 8px;
+
+      .wordmark {
+        font-size: 18px;
+        text-align: center;
+      }
+
+      .masthead-meta {
+        display: none;
+      }
+
+      .sidebar-toggle {
+        right: 50%;
+        transform: translate(50%, -50%);
+      }
+    }
+
+    .rule {
+      margin: 0 12px;
+    }
+
+    .nav-menu {
+      padding: 12px 8px;
+    }
+
+    .nav-single {
+      justify-content: center;
+      padding: 10px 4px;
+      gap: 0;
+
+      .num {
+        display: none;
+      }
+
+      .single-body {
+        display: none;
+      }
+
+      .indicator {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+      }
+    }
+
+    .nav-group {
+      display: none;
+    }
+  }
+
+  .top-bar {
+    padding: 0 18px;
   }
 }
 

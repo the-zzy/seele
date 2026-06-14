@@ -1,5 +1,7 @@
 <script setup>
+import { toRef } from 'vue'
 import { useViewport } from '@/composables/useViewport'
+import { useFixedRows } from '@/composables/useFixedRows'
 import MobileCardList from '@/components/common/MobileCardList.vue'
 
 const props = defineProps({
@@ -71,6 +73,8 @@ function onRowDblClick (item) {
 function onRowClick (item) {
   emit('row-dblclick', item)
 }
+
+const paddedList = useFixedRows(toRef(props, 'list'))
 </script>
 
 <template>
@@ -171,22 +175,28 @@ function onRowClick (item) {
       </thead>
       <tbody>
         <tr
-          v-for="item in list"
-          :key="item.symbol"
+          v-for="(item, index) in paddedList"
+          :key="item === null ? `empty-${index}` : (item.id || item.symbol || index)"
           class="data-row"
-          @dblclick="onRowDblClick(item)"
+          :class="{ 'empty-row': item === null }"
+          @dblclick="item && onRowDblClick(item)"
         >
-          <td class="code">{{ extractCodeNum(item.symbol) }}</td>
-          <td class="name">{{ item.name }}</td>
-          <td class="td-left">{{ item.industry || '—' }}</td>
-          <td class="td-center">{{ item.market || '—' }}</td>
-          <td>{{ item.roe != null ? `${item.roe.toFixed(2)}%` : '—' }}</td>
-          <td>{{ item.gross_profit_ratio != null ? `${item.gross_profit_ratio.toFixed(2)}%` : '—' }}</td>
-          <td>{{ item.net_profit_ratio != null ? `${item.net_profit_ratio.toFixed(2)}%` : '—' }}</td>
-          <td :class="getYoyClass(item.net_profit_yoy)">{{ formatPercent(item.net_profit_yoy) }}</td>
-          <td :class="getYoyClass(item.revenue_yoy)">{{ formatPercent(item.revenue_yoy) }}</td>
-          <td>{{ item.eps != null ? item.eps.toFixed(2) : '—' }}</td>
-          <td>{{ item.debt_ratio != null ? `${item.debt_ratio.toFixed(2)}%` : '—' }}</td>
+          <template v-if="item">
+            <td class="code">{{ extractCodeNum(item.symbol) }}</td>
+            <td class="name">{{ item.name }}</td>
+            <td class="td-left">{{ item.industry || '—' }}</td>
+            <td class="td-center">{{ item.market || '—' }}</td>
+            <td>{{ item.roe != null ? `${item.roe.toFixed(2)}%` : '—' }}</td>
+            <td>{{ item.gross_profit_ratio != null ? `${item.gross_profit_ratio.toFixed(2)}%` : '—' }}</td>
+            <td>{{ item.net_profit_ratio != null ? `${item.net_profit_ratio.toFixed(2)}%` : '—' }}</td>
+            <td :class="getYoyClass(item.net_profit_yoy)">{{ formatPercent(item.net_profit_yoy) }}</td>
+            <td :class="getYoyClass(item.revenue_yoy)">{{ formatPercent(item.revenue_yoy) }}</td>
+            <td>{{ item.eps != null ? item.eps.toFixed(2) : '—' }}</td>
+            <td>{{ item.debt_ratio != null ? `${item.debt_ratio.toFixed(2)}%` : '—' }}</td>
+          </template>
+          <template v-else>
+            <td v-for="col in columns" :key="col.key">&nbsp;</td>
+          </template>
         </tr>
       </tbody>
     </table>

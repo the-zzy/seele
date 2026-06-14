@@ -26,7 +26,6 @@
           @click="close"
         >
           <span class="link-title">{{ item.name }}</span>
-          <span v-if="item.section" class="link-meta">{{ item.section }}</span>
         </router-link>
 
         <!-- 分组 -->
@@ -192,12 +191,4 @@ function close () {
   white-space: nowrap;
 }
 
-.link-meta {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-faint);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
 </style>

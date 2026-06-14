@@ -1,10 +1,11 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import PageHero from '@/components/common/PageHero.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
 import MobileCardList from '@/components/common/MobileCardList.vue'
 import { useViewport } from '@/composables/useViewport'
+import { useFixedRows } from '@/composables/useFixedRows'
 import { boardApi, tradeCalendarApi } from '@/api/stock'
 
 const router = useRouter()
@@ -29,6 +30,9 @@ const tabData = ref({
   etf: { list: [], total: 0, pageNum: 1, pageSize: 10 }
 })
 const keyword = ref('')
+
+const currentList = computed(() => currentTab()?.list || [])
+const paddedList = useFixedRows(currentList)
 
 function categoryLabel (category) {
   const map = { industry: '行业', concept: '概念', etf: 'ETF' }
@@ -178,16 +182,31 @@ onMounted(async () => {
       meta="板块索引"
     />
 
-    <!-- 全局日期查询 -->
+    <!-- 全局日期查询 + 关键词筛选 -->
     <div class="date-filter">
-      <label class="date-label">交易日</label>
-      <input
-        v-model="queryDate"
-        type="date"
-        class="date-input"
-        @change="handleDateQuery"
-      />
-      <span class="date-hint">切换日期查看历史行情</span>
+      <div class="filter-group date-group">
+        <label class="date-label">交易日</label>
+        <input
+          v-model="queryDate"
+          type="date"
+          class="date-input"
+          @change="handleDateQuery"
+        />
+        <span class="date-hint">切换日期查看历史行情</span>
+      </div>
+      <div class="filter-group keyword-group">
+        <label>关键词</label>
+        <input
+          v-model="keyword"
+          type="text"
+          placeholder="名称模糊搜索"
+          @keyup.enter="handleSearch"
+        />
+      </div>
+      <div class="filter-actions">
+        <button class="btn-primary" @click="handleSearch">查询</button>
+        <button class="btn-secondary" @click="handleReset">重置</button>
+      </div>
     </div>
 
     <!-- 标签页 -->
@@ -202,23 +221,6 @@ onMounted(async () => {
         {{ t.label }}
         <span v-if="currentTab()?.total > 0" class="tab-count">{{ currentTab().total }}</span>
       </button>
-    </div>
-
-    <!-- 筛选栏 -->
-    <div class="filter-section">
-      <div class="filter-item">
-        <label>关键词</label>
-        <input
-          v-model="keyword"
-          type="text"
-          placeholder="名称模糊搜索"
-          @keyup.enter="handleSearch"
-        />
-      </div>
-      <div class="filter-item filter-actions">
-        <button class="btn-primary" @click="handleSearch">查询</button>
-        <button class="btn-secondary" @click="handleReset">重置</button>
-      </div>
     </div>
 
     <!-- 数据表格 -->
@@ -291,30 +293,36 @@ onMounted(async () => {
         </thead>
         <tbody>
           <tr
-            v-for="item in currentTab()?.list"
-            :key="item.code"
+            v-for="(item, index) in paddedList"
+            :key="item === null ? `empty-${index}` : (item.code || index)"
             class="data-row"
-            @click="handleRowClick(item)"
+            :class="{ 'empty-row': item === null }"
+            @click="item && handleRowClick(item)"
           >
-            <td class="code">{{ item.code }}</td>
-            <td class="name">{{ item.name }}</td>
-            <td>
-              <span class="category-tag" :class="categoryClass(item.category)">
-                {{ categoryLabel(item.category) }}
-              </span>
-            </td>
-            <td :class="getPriceClass(item.latest_pct_chg)">
-              {{ formatChg(item.latest_pct_chg) }}
-            </td>
-            <td :class="getPriceClass(item.chg_5d)">
-              {{ formatChg(item.chg_5d) }}
-            </td>
-            <td :class="getPriceClass(item.chg_10d)">
-              {{ formatChg(item.chg_10d) }}
-            </td>
-            <td>{{ formatAmount(item.amount) }}</td>
-            <td class="constituent">{{ item.constituent_count || 0 }}</td>
-            <td>{{ item.source || '—' }}</td>
+            <template v-if="item">
+              <td class="code">{{ item.code }}</td>
+              <td class="name">{{ item.name }}</td>
+              <td>
+                <span class="category-tag" :class="categoryClass(item.category)">
+                  {{ categoryLabel(item.category) }}
+                </span>
+              </td>
+              <td :class="getPriceClass(item.latest_pct_chg)">
+                {{ formatChg(item.latest_pct_chg) }}
+              </td>
+              <td :class="getPriceClass(item.chg_5d)">
+                {{ formatChg(item.chg_5d) }}
+              </td>
+              <td :class="getPriceClass(item.chg_10d)">
+                {{ formatChg(item.chg_10d) }}
+              </td>
+              <td>{{ formatAmount(item.amount) }}</td>
+              <td class="constituent">{{ item.constituent_count || 0 }}</td>
+              <td>{{ item.source || '—' }}</td>
+            </template>
+            <template v-else>
+              <td v-for="col in 9" :key="`empty-${index}-${col}`">&nbsp;</td>
+            </template>
           </tr>
         </tbody>
       </table>
@@ -337,12 +345,76 @@ onMounted(async () => {
 .date-filter {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-bottom: 10px;
   padding: 8px 10px;
   background: var(--bg-secondary);
   border: 1px solid var(--rule);
   border-radius: 6px;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-family: var(--font-display);
+    white-space: nowrap;
+  }
+
+  input {
+    padding: 4px 6px;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 12px;
+    font-family: var(--font-mono);
+  }
+}
+
+.date-group {
+  flex: 1 1 auto;
+}
+
+.keyword-group {
+  input {
+    width: 160px;
+  }
+}
+
+.filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.btn-primary,
+.btn-secondary {
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--rule);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.btn-secondary {
+  background: var(--bg-primary);
+  color: var(--text-secondary);
 }
 
 .date-label {
@@ -532,29 +604,35 @@ onMounted(async () => {
     }
   }
 
-  .filter-section {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
+  .date-filter {
+    gap: 10px;
 
-    .filter-item {
-      width: 100%;
+    .filter-group {
+      flex: 1 1 100%;
 
       input {
-        width: 100%;
-        box-sizing: border-box;
+        flex: 1;
         min-height: var(--touch-target);
       }
     }
 
+    .keyword-group input {
+      width: auto;
+    }
+
     .filter-actions {
       width: 100%;
-      justify-content: stretch;
+      justify-content: flex-end;
 
       button {
-        flex: 1;
         min-height: var(--touch-target);
+        flex: 1;
       }
+    }
+
+    .date-hint {
+      width: 100%;
+      font-size: 10px;
     }
   }
 }

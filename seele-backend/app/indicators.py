@@ -90,11 +90,11 @@ def build_ma_cte(periods: Iterable[int] = (5, 10, 20, 60)) -> str:
     )
     return f"""ma_calc AS (
         SELECT
-            symbol COLLATE utf8mb4_0900_ai_ci AS symbol,
+            symbol COLLATE utf8mb4_unicode_ci AS symbol,
             {col_lines}
         FROM stock_daily_indicator
         WHERE trade_date = :trade_date
-            AND symbol COLLATE utf8mb4_0900_ai_ci IN (SELECT symbol FROM pre_filter)
+            AND symbol COLLATE utf8mb4_unicode_ci IN (SELECT symbol FROM pre_filter)
     )"""
 
 

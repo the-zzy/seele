@@ -1,5 +1,6 @@
 <script setup>
 import { useViewport } from '@/composables/useViewport'
+import { useFixedRows } from '@/composables/useFixedRows'
 import MobileCardList from '@/components/common/MobileCardList.vue'
 
 const props = defineProps({
@@ -12,6 +13,8 @@ const props = defineProps({
 const emit = defineEmits(['sort', 'row-dblclick'])
 
 const { isMobile } = useViewport()
+
+const paddedList = useFixedRows(() => props.list)
 
 const columns = [
   { key: 'symbol', label: '股票代码', align: 'left' },
@@ -164,37 +167,43 @@ function onRowClick (item) {
       </thead>
       <tbody>
         <tr
-          v-for="item in list"
-          :key="item.id"
+          v-for="(item, index) in paddedList"
+          :key="item === null ? `empty-${index}` : (item.id || item.symbol || index)"
           class="data-row"
-          @dblclick="onRowDblClick(item)"
+          :class="{ 'empty-row': item === null }"
+          @dblclick="item && onRowDblClick(item)"
         >
-          <td class="code">{{ extractCodeNum(item.symbol) }}</td>
-          <td class="name">{{ item.name }}</td>
-          <td class="td-left">{{ item.industry || '—' }}</td>
-          <td class="td-left">
-            <div v-if="item.boards" class="board-tags">
-              <span
-                v-for="b in item.boards.boards || []"
-                :key="b.code"
-                class="board-tag"
-              >{{ b.name }}</span>
-              <span
-                v-if="item.boards.industry_board"
-                class="board-tag industry"
-              >{{ item.boards.industry_board.name }}</span>
-              <span v-if="!(item.boards.boards?.length) && !item.boards.industry_board">—</span>
-            </div>
-            <span v-else>—</span>
-          </td>
-          <td class="td-left">{{ item.area || '—' }}</td>
-          <td class="td-center">{{ item.market || '—' }}</td>
-          <td class="td-center">{{ formatDate(item.listDate) }}</td>
-          <td>{{ item.roe != null ? `${item.roe.toFixed(2)}%` : '—' }}</td>
-          <td>{{ item.grossProfitRatio != null ? `${item.grossProfitRatio.toFixed(2)}%` : '—' }}</td>
-          <td>{{ item.netProfitRatio != null ? `${item.netProfitRatio.toFixed(2)}%` : '—' }}</td>
-          <td :class="getYoyClass(item.netProfitYoy)">{{ formatPercent(item.netProfitYoy) }}</td>
-          <td :class="getYoyClass(item.revenueYoy)">{{ formatPercent(item.revenueYoy) }}</td>
+          <template v-if="item">
+            <td class="code">{{ extractCodeNum(item.symbol) }}</td>
+            <td class="name">{{ item.name }}</td>
+            <td class="td-left">{{ item.industry || '—' }}</td>
+            <td class="td-left">
+              <div v-if="item.boards" class="board-tags">
+                <span
+                  v-for="b in item.boards.boards || []"
+                  :key="b.code"
+                  class="board-tag"
+                >{{ b.name }}</span>
+                <span
+                  v-if="item.boards.industry_board"
+                  class="board-tag industry"
+                >{{ item.boards.industry_board.name }}</span>
+                <span v-if="!(item.boards.boards?.length) && !item.boards.industry_board">—</span>
+              </div>
+              <span v-else>—</span>
+            </td>
+            <td class="td-left">{{ item.area || '—' }}</td>
+            <td class="td-center">{{ item.market || '—' }}</td>
+            <td class="td-center">{{ formatDate(item.listDate) }}</td>
+            <td>{{ item.roe != null ? `${item.roe.toFixed(2)}%` : '—' }}</td>
+            <td>{{ item.grossProfitRatio != null ? `${item.grossProfitRatio.toFixed(2)}%` : '—' }}</td>
+            <td>{{ item.netProfitRatio != null ? `${item.netProfitRatio.toFixed(2)}%` : '—' }}</td>
+            <td :class="getYoyClass(item.netProfitYoy)">{{ formatPercent(item.netProfitYoy) }}</td>
+            <td :class="getYoyClass(item.revenueYoy)">{{ formatPercent(item.revenueYoy) }}</td>
+          </template>
+          <template v-else>
+            <td v-for="col in columns" :key="col.key">&nbsp;</td>
+          </template>
         </tr>
       </tbody>
     </table>

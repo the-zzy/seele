@@ -1,5 +1,6 @@
 <script setup>
 import { useViewport } from '@/composables/useViewport'
+import { useFixedRows } from '@/composables/useFixedRows'
 import MobileCardList from '@/components/common/MobileCardList.vue'
 import { formatNumber } from '@/utils/formatters'
 
@@ -13,6 +14,8 @@ const props = defineProps({
 const emit = defineEmits(['sort', 'row-dblclick'])
 
 const { isMobile } = useViewport()
+
+const paddedList = useFixedRows(() => props.list)
 
 const columns = [
   { key: 'symbol', label: '代码', align: 'left' },
@@ -150,21 +153,26 @@ function getScoreTooltip (item) {
       </thead>
       <tbody>
         <tr
-          v-for="item in list"
-          :key="item.id"
+          v-for="(item, index) in paddedList"
+          :key="item === null ? `empty-${index}` : (item.id || item.symbol || index)"
           class="data-row"
-          :class="{ 'hard-fail': item.score && !item.score.hard_pass, holding: item.isHolding }"
-          @dblclick="onDblClick(item)"
+          :class="{ 'hard-fail': item && item.score && !item.score.hard_pass, holding: item && item.isHolding, 'empty-row': item === null }"
+          @dblclick="item && onDblClick(item)"
         >
-          <td class="code">{{ extractCodeNum(item.symbol) }}</td>
-          <td class="name">{{ item.name }}</td>
-          <td :class="getScoreClass(item.score)" :title="getScoreTooltip(item)">
-            {{ getScoreLabel(item.score) }}
-          </td>
-          <td>{{ item.score?.trend_score ?? '—' }}</td>
-          <td>{{ item.score?.strength_score ?? '—' }}</td>
-          <td>{{ item.score?.momentum_score ?? '—' }}</td>
-          <td :class="getHardPassClass(item.score)">{{ getHardPassLabel(item.score) }}</td>
+          <template v-if="item">
+            <td class="code">{{ extractCodeNum(item.symbol) }}</td>
+            <td class="name">{{ item.name }}</td>
+            <td :class="getScoreClass(item.score)" :title="getScoreTooltip(item)">
+              {{ getScoreLabel(item.score) }}
+            </td>
+            <td>{{ item.score?.trend_score ?? '—' }}</td>
+            <td>{{ item.score?.strength_score ?? '—' }}</td>
+            <td>{{ item.score?.momentum_score ?? '—' }}</td>
+            <td :class="getHardPassClass(item.score)">{{ getHardPassLabel(item.score) }}</td>
+          </template>
+          <template v-else>
+            <td v-for="col in columns" :key="col.key">&nbsp;</td>
+          </template>
         </tr>
       </tbody>
     </table>
@@ -173,25 +181,57 @@ function getScoreTooltip (item) {
 
 <style scoped lang="scss">
 .table-section {
-  overflow-x: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .stock-table {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   min-width: 800px;
 
+  thead,
+  tbody {
+    display: flex;
+    flex-direction: column;
+  }
+
+  thead {
+    flex-shrink: 0;
+  }
+
+  tbody {
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  tr {
+    display: flex;
+    flex: 0 0 10%;
+    min-height: 0;
+  }
+
+  th,
   td {
-    text-align: center;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
 
-  .code {
-    font-family: var(--font-mono);
-    color: var(--text-secondary);
-    text-align: left;
-  }
-
-  .name {
-    font-weight: 500;
-    text-align: left;
+  th:first-child,
+  td:first-child,
+  th:nth-child(2),
+  td:nth-child(2) {
+    justify-content: flex-start;
   }
 
   .data-row {

@@ -15,10 +15,10 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.auth import get_current_user
-from app.config import get_settings
+from app.config import APP_VERSION, get_settings
 from app.database import engine, Base
 from app.response import success
-from app.routes import auth, board, financial, gallery, index, market_sentiment, pickers, portfolio, stock_basic, stock_daily, stock_indicator, sync, system_log, trade_calendar, visitor_log
+from app.routes import auth, board, financial, gallery, index, market_sentiment, pickers, portfolio, stock_basic, stock_daily, stock_indicator, sync, system_log, trade_calendar, visitor_log, version
 from app.agent.router import router as agent_router
 from app.scheduler import get_scheduler
 from app.scheduler_jobs import (
@@ -117,7 +117,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Seele 股票数据管理API",
     description="基于FastAPI的股票数据管理后端服务",
-    version="2.3.0",
+    version=APP_VERSION,
     lifespan=lifespan,
     json_encoders={
         decimal.Decimal: float,
@@ -154,6 +154,7 @@ app.add_middleware(
 auth_dep = [Depends(get_current_user)]
 
 app.include_router(auth.router, prefix="/api")
+app.include_router(version.router, prefix="/api")
 app.include_router(stock_basic.router, prefix="/api", dependencies=auth_dep)
 app.include_router(stock_daily.router, prefix="/api", dependencies=auth_dep)
 app.include_router(stock_indicator.router, prefix="/api", dependencies=auth_dep)

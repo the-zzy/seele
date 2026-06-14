@@ -1,12 +1,13 @@
 import { ref, watch } from 'vue'
+import { getItem, setItem } from '@/utils/storage'
 
 const STORAGE_KEY = 'seele-theme'
 
-const theme = ref(localStorage.getItem(STORAGE_KEY) || 'dark')
+const theme = ref(getItem(STORAGE_KEY, { versioned: false }) || 'dark')
 
 function applyTheme (val) {
   document.documentElement.setAttribute('data-theme', val)
-  localStorage.setItem(STORAGE_KEY, val)
+  setItem(STORAGE_KEY, val, { versioned: false })
 }
 
 applyTheme(theme.value)

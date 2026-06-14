@@ -3,6 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useEChart } from '@/composables/useEChart'
 import { useViewport } from '@/composables/useViewport'
+import { useFixedRows } from '@/composables/useFixedRows'
 import { boardApi } from '@/api/stock'
 import BasePagination from '@/components/common/BasePagination.vue'
 import MobileCardList from '@/components/common/MobileCardList.vue'
@@ -22,6 +23,8 @@ const constLoading = ref(false)
 const constPageNum = ref(1)
 const constPageSize = ref(5)
 const constTableRows = ref([])
+
+const paddedList = useFixedRows(constTableRows)
 
 const latestQuote = computed(() => {
   if (!board.value || board.value.latest_close == null) return null
@@ -482,21 +485,27 @@ onMounted(() => {
           </thead>
           <tbody>
             <tr
-              v-for="c in constTableRows"
-              :key="c.symbol"
+              v-for="(item, index) in paddedList"
+              :key="item === null ? `empty-${index}` : (item.symbol || index)"
               class="const-row"
-              @dblclick="goStock(c.symbol)"
+              :class="{ 'empty-row': item === null }"
+              @dblclick="item && goStock(item.symbol)"
             >
-              <td class="code">{{ c.symbol }}</td>
-              <td class="name">{{ c.name || '—' }}</td>
-              <td>{{ c.trade_date || '—' }}</td>
-              <td>{{ c.open != null ? c.open.toFixed(2) : '—' }}</td>
-              <td>{{ c.high != null ? c.high.toFixed(2) : '—' }}</td>
-              <td>{{ c.low != null ? c.low.toFixed(2) : '—' }}</td>
-              <td :class="getPriceClass(c.pct_chg)">{{ c.close != null ? c.close.toFixed(2) : '—' }}</td>
-              <td :class="getPriceClass(c.pct_chg)">{{ formatChg(c.pct_chg) }}</td>
-              <td>{{ c.volume != null ? (c.volume / 10000).toFixed(0) + '万' : '—' }}</td>
-              <td>{{ formatAmount(c.amount) }}</td>
+              <template v-if="item">
+                <td class="code">{{ item.symbol }}</td>
+                <td class="name">{{ item.name || '—' }}</td>
+                <td>{{ item.trade_date || '—' }}</td>
+                <td>{{ item.open != null ? item.open.toFixed(2) : '—' }}</td>
+                <td>{{ item.high != null ? item.high.toFixed(2) : '—' }}</td>
+                <td>{{ item.low != null ? item.low.toFixed(2) : '—' }}</td>
+                <td :class="getPriceClass(item.pct_chg)">{{ item.close != null ? item.close.toFixed(2) : '—' }}</td>
+                <td :class="getPriceClass(item.pct_chg)">{{ formatChg(item.pct_chg) }}</td>
+                <td>{{ item.volume != null ? (item.volume / 10000).toFixed(0) + '万' : '—' }}</td>
+                <td>{{ formatAmount(item.amount) }}</td>
+              </template>
+              <template v-else>
+                <td v-for="col in 10" :key="`empty-${index}-${col}`">&nbsp;</td>
+              </template>
             </tr>
           </tbody>
         </table>

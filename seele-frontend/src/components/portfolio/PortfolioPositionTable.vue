@@ -1,9 +1,10 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, toRef } from 'vue'
 import { useViewport } from '@/composables/useViewport'
+import { useFixedRows } from '@/composables/useFixedRows'
 import MobileCardList from '@/components/common/MobileCardList.vue'
 
-defineProps({
+const props = defineProps({
   list: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false }
 })
@@ -78,6 +79,8 @@ function holdingDays (firstBuyDate) {
   const days = Math.ceil((new Date() - new Date(firstBuyDate)) / (1000 * 60 * 60 * 24))
   return days + ' 天'
 }
+
+const paddedList = useFixedRows(toRef(props, 'list'))
 </script>
 
 <template>
@@ -208,36 +211,46 @@ function holdingDays (firstBuyDate) {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="item in list" :key="item.symbol">
-            <td class="mono">
-              {{ item.symbol }}
-              <span v-if="alertText(item)" class="alert-badge">{{ alertText(item) }}</span>
-            </td>
-            <td>{{ item.name }}</td>
-            <td class="num">{{ item.quantity != null ? item.quantity.toLocaleString() : '-' }}</td>
-            <td class="num">{{ fmt(item.avg_cost) }}</td>
-            <td class="num">{{ fmt(item.current_price) }}</td>
-            <td class="num">{{ fmt(item.market_value) }}</td>
-            <td
-              class="num"
-              :class="pnlClass(pnlMode === 'history' ? item.history_pnl : item.unrealized_pnl)"
-            >
-              {{ fmt(pnlMode === 'history' ? item.history_pnl : item.unrealized_pnl) }}
-            </td>
-            <td
-              class="num"
-              :class="pnlClass(pnlMode === 'history' ? item.history_pnl_pct : item.unrealized_pnl_pct)"
-            >
-              {{ fmt(pnlMode === 'history' ? item.history_pnl_pct : item.unrealized_pnl_pct) }}%
-            </td>
-            <td class="num">{{ holdingDays(item.first_buy_date) }}</td>
-            <td>
-              <span class="group-tag" :class="item.group">{{ item.group || 'default' }}</span>
-            </td>
-            <td class="remark">{{ item.remark || '-' }}</td>
-            <td>
-              <button class="btn-edit" @click="startEdit(item)">编辑</button>
-            </td>
+          <tr
+            v-for="(item, index) in paddedList"
+            :key="item === null ? `empty-${index}` : (item.id || item.symbol || index)"
+            class="data-row"
+            :class="{ 'empty-row': item === null }"
+          >
+            <template v-if="item">
+              <td class="mono">
+                {{ item.symbol }}
+                <span v-if="alertText(item)" class="alert-badge">{{ alertText(item) }}</span>
+              </td>
+              <td>{{ item.name }}</td>
+              <td class="num">{{ item.quantity != null ? item.quantity.toLocaleString() : '-' }}</td>
+              <td class="num">{{ fmt(item.avg_cost) }}</td>
+              <td class="num">{{ fmt(item.current_price) }}</td>
+              <td class="num">{{ fmt(item.market_value) }}</td>
+              <td
+                class="num"
+                :class="pnlClass(pnlMode === 'history' ? item.history_pnl : item.unrealized_pnl)"
+              >
+                {{ fmt(pnlMode === 'history' ? item.history_pnl : item.unrealized_pnl) }}
+              </td>
+              <td
+                class="num"
+                :class="pnlClass(pnlMode === 'history' ? item.history_pnl_pct : item.unrealized_pnl_pct)"
+              >
+                {{ fmt(pnlMode === 'history' ? item.history_pnl_pct : item.unrealized_pnl_pct) }}%
+              </td>
+              <td class="num">{{ holdingDays(item.first_buy_date) }}</td>
+              <td>
+                <span class="group-tag" :class="item.group">{{ item.group || 'default' }}</span>
+              </td>
+              <td class="remark">{{ item.remark || '-' }}</td>
+              <td>
+                <button class="btn-edit" @click="startEdit(item)">编辑</button>
+              </td>
+            </template>
+            <template v-else>
+              <td v-for="col in ['symbol','name','quantity','avg_cost','current_price','market_value','pnl','pnl_pct','days','group','remark','act']" :key="col">&nbsp;</td>
+            </template>
           </tr>
           <tr v-if="editingSymbol" class="edit-row">
             <td colspan="12">

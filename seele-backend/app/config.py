@@ -2,8 +2,14 @@
 应用配置模块
 """
 
+from pathlib import Path
 from typing import Optional
 from functools import lru_cache
+
+
+_version_path = Path(__file__).resolve().parents[2] / 'VERSION'
+BASE_VERSION = _version_path.read_text(encoding='utf-8').strip() if _version_path.exists() else '2.3.0'
+APP_VERSION = BASE_VERSION
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings

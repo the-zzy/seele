@@ -1,5 +1,6 @@
 <script setup>
 import { useViewport } from '@/composables/useViewport'
+import { useFixedRows } from '@/composables/useFixedRows'
 import MobileCardList from '@/components/common/MobileCardList.vue'
 import {
   formatDate,
@@ -21,6 +22,8 @@ const props = defineProps({
 const emit = defineEmits(['sort', 'row-dblclick'])
 
 const { isMobile } = useViewport()
+
+const paddedList = useFixedRows(() => props.list)
 
 const columns = [
   { key: 'symbol', label: '代码', align: 'left' },
@@ -64,14 +67,6 @@ function onClick (item) {
   emit('row-dblclick', item)
 }
 
-function getChgBgClass (val) {
-  if (!val) return ''
-  const value = parseFloat(val)
-  if (value > 0) return 'up-bg'
-  if (value < 0) return 'down-bg'
-  return ''
-}
-
 function getChgClass (val) {
   if (val == null) return ''
   const value = parseFloat(val)
@@ -79,6 +74,15 @@ function getChgClass (val) {
   if (value < 0) return 'down'
   return ''
 }
+
+function getPctCellClass (val) {
+  if (val == null) return ''
+  const value = parseFloat(val)
+  if (value > 0) return 'cell-up'
+  if (value < 0) return 'cell-down'
+  return ''
+}
+
 </script>
 
 <template>
@@ -145,27 +149,33 @@ function getChgClass (val) {
       </thead>
       <tbody>
         <tr
-          v-for="item in list"
-          :key="item.id"
+          v-for="(item, index) in paddedList"
+          :key="item === null ? `empty-${index}` : (item.id || item.symbol || index)"
           class="data-row"
-          @dblclick="onDblClick(item)"
+          :class="{ 'empty-row': item === null }"
+          @dblclick="item && onDblClick(item)"
         >
-          <td class="code">{{ extractCodeNum(item.symbol) }}</td>
-          <td class="name">{{ item.name }}</td>
-          <td class="td-center">{{ formatDate(item.tradeDate) }}</td>
-          <td :class="getPriceClass(item.close, item.pctChg)">{{ formatNumber(item.close) }}</td>
-          <td :class="getChgBgClass(item.pctChg)">{{ formatPctChg(item.pctChg) }}</td>
-          <td>{{ formatAmount(item.amount) }}</td>
-          <td>{{ formatTurnover(item.turnover) }}</td>
-          <td class="g-ma">{{ formatNumber(item.ma5) }}</td>
-          <td class="g-ma">{{ formatNumber(item.ma10) }}</td>
-          <td class="g-ma">{{ formatNumber(item.ma20) }}</td>
-          <td class="g-ma">{{ formatNumber(item.ma30) }}</td>
-          <td class="g-ma">{{ formatNumber(item.ma60) }}</td>
-          <td class="g-vol">{{ formatVolume(item.volMa5) }}</td>
-          <td class="g-vol">{{ formatVolume(item.volMa10) }}</td>
-          <td class="g-turn">{{ formatTurnover(item.turnoverMa5) }}</td>
-          <td class="g-turn">{{ formatTurnover(item.turnoverMa10) }}</td>
+          <template v-if="item">
+            <td class="code">{{ extractCodeNum(item.symbol) }}</td>
+            <td class="name">{{ item.name }}</td>
+            <td class="td-center">{{ formatDate(item.tradeDate) }}</td>
+            <td :class="getPriceClass(item.close, item.pctChg)">{{ formatNumber(item.close) }}</td>
+            <td class="pct-cell" :class="getPctCellClass(item.pctChg)">{{ formatPctChg(item.pctChg) }}</td>
+            <td>{{ formatAmount(item.amount) }}</td>
+            <td>{{ formatTurnover(item.turnover) }}</td>
+            <td class="g-ma">{{ formatNumber(item.ma5) }}</td>
+            <td class="g-ma">{{ formatNumber(item.ma10) }}</td>
+            <td class="g-ma">{{ formatNumber(item.ma20) }}</td>
+            <td class="g-ma">{{ formatNumber(item.ma30) }}</td>
+            <td class="g-ma">{{ formatNumber(item.ma60) }}</td>
+            <td class="g-vol">{{ formatVolume(item.volMa5) }}</td>
+            <td class="g-vol">{{ formatVolume(item.volMa10) }}</td>
+            <td class="g-turn">{{ formatTurnover(item.turnoverMa5) }}</td>
+            <td class="g-turn">{{ formatTurnover(item.turnoverMa10) }}</td>
+          </template>
+          <template v-else>
+            <td v-for="col in columns" :key="col.key">&nbsp;</td>
+          </template>
         </tr>
       </tbody>
     </table>
@@ -174,11 +184,63 @@ function getChgClass (val) {
 
 <style scoped lang="scss">
 .table-section {
-  overflow-x: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .stock-table {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   min-width: 1200px;
+
+  thead,
+  tbody {
+    display: flex;
+    flex-direction: column;
+  }
+
+  thead {
+    flex-shrink: 0;
+  }
+
+  tbody {
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  tr {
+    display: flex;
+    flex: 0 0 10%;
+    min-height: 0;
+  }
+
+  th,
+  td {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 8px 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  th:first-child,
+  td:first-child,
+  th:nth-child(2),
+  td:nth-child(2) {
+    justify-content: flex-start;
+  }
+
+  th:nth-child(3),
+  td:nth-child(3) {
+    justify-content: center;
+  }
 
   th {
     &.g-ma { color: var(--accent); }
@@ -191,6 +253,18 @@ function getChgClass (val) {
     &.g-vol { background: rgba(217, 119, 87, 0.025); }
     &.g-turn { background: rgba(180, 108, 216, 0.025); }
   }
+}
+
+.pct-cell {
+  justify-content: center;
+
+  &.cell-up { background: var(--up-bg); }
+  &.cell-down { background: var(--down-bg); }
+}
+
+.stock-table tbody tr:hover {
+  .pct-cell.cell-up { background: var(--up-bg-hover); }
+  .pct-cell.cell-down { background: var(--down-bg-hover); }
 }
 
 .stock-card {

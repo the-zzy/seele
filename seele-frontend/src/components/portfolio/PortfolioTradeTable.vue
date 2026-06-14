@@ -1,8 +1,10 @@
 <script setup>
+import { toRef } from 'vue'
 import { useViewport } from '@/composables/useViewport'
+import { useFixedRows } from '@/composables/useFixedRows'
 import MobileCardList from '@/components/common/MobileCardList.vue'
 
-defineProps({
+const props = defineProps({
   list: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false }
 })
@@ -36,6 +38,8 @@ function onDelete (item) {
     emit('delete', item.id)
   }
 }
+
+const paddedList = useFixedRows(toRef(props, 'list'))
 
 function typeClass (item) {
   if (isDayTrade(item)) return 'daytrade'
@@ -107,26 +111,36 @@ function typeClass (item) {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="item in list" :key="item.id">
-            <td class="mono">{{ item.trade_date }}</td>
-            <td>
-              <span
-                class="tag"
-                :class="typeClass(item)"
-              >
-                {{ typeLabel(item) }}
-              </span>
-            </td>
-            <td class="mono">{{ item.symbol }}</td>
-            <td>{{ item.name }}</td>
-            <td class="num">{{ fmt(item.price) }}</td>
-            <td class="num">{{ item.quantity != null ? item.quantity.toLocaleString() : '-' }}</td>
-            <td class="num">{{ fmt(item.amount) }}</td>
-            <td class="num">{{ fmt(item.fee) }}</td>
-            <td class="act">
-              <button class="btn-edit" @click="onEdit(item)">编辑</button>
-              <button class="btn-del" @click="onDelete(item)">删除</button>
-            </td>
+          <tr
+            v-for="(item, index) in paddedList"
+            :key="item === null ? `empty-${index}` : (item.id || item.symbol || index)"
+            class="data-row"
+            :class="{ 'empty-row': item === null }"
+          >
+            <template v-if="item">
+              <td class="mono">{{ item.trade_date }}</td>
+              <td>
+                <span
+                  class="tag"
+                  :class="typeClass(item)"
+                >
+                  {{ typeLabel(item) }}
+                </span>
+              </td>
+              <td class="mono">{{ item.symbol }}</td>
+              <td>{{ item.name }}</td>
+              <td class="num">{{ fmt(item.price) }}</td>
+              <td class="num">{{ item.quantity != null ? item.quantity.toLocaleString() : '-' }}</td>
+              <td class="num">{{ fmt(item.amount) }}</td>
+              <td class="num">{{ fmt(item.fee) }}</td>
+              <td class="act">
+                <button class="btn-edit" @click="onEdit(item)">编辑</button>
+                <button class="btn-del" @click="onDelete(item)">删除</button>
+              </td>
+            </template>
+            <template v-else>
+              <td v-for="col in ['date','type','symbol','name','price','quantity','amount','fee','act']" :key="col">&nbsp;</td>
+            </template>
           </tr>
         </tbody>
       </table>

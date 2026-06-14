@@ -6,6 +6,7 @@ export function useSyncTask () {
   const syncing = reactive({})
   const progress = reactive({})
   const timers = reactive({})
+  const taskIds = reactive({})
   const localKeys = new Set()
 
   function clearPoll (key) {
@@ -13,6 +14,7 @@ export function useSyncTask () {
       clearInterval(timers[key])
       delete timers[key]
     }
+    delete taskIds[key]
     localKeys.delete(key)
   }
 
@@ -20,9 +22,10 @@ export function useSyncTask () {
     localKeys.forEach(clearPoll)
   }
 
-  function startPoll (taskKey, taskId, { interval = 2000, onDone } = {}) {
+  function startPoll (taskKey, taskId, { interval = 2000, onDone, logId } = {}) {
     clearPoll(taskKey)
     localKeys.add(taskKey)
+    taskIds[taskKey] = { taskId, logId }
     progress[taskKey] = { current: 0, total: 0, status: 'running' }
 
     const doPoll = async () => {
@@ -78,7 +81,7 @@ export function useSyncTask () {
           const confirmed = confirmAction ? await confirmAction(message, { type: 'existing', task: existing }) : confirm(message)
           if (confirmed) {
             syncing[taskKey] = true
-            startPoll(taskKey, existing.task_id, { interval, onDone })
+            startPoll(taskKey, existing.task_id, { interval, onDone, logId: existing.log_id })
           }
           return
         }
@@ -96,8 +99,9 @@ export function useSyncTask () {
     try {
       const res = await apiCall()
       const taskId = res?.task_id
+      const logId = res?.log_id
       if (taskId) {
-        startPoll(taskKey, taskId, { interval, onDone })
+        startPoll(taskKey, taskId, { interval, onDone, logId })
       } else {
         syncing[taskKey] = false
         if (onDone) onDone(null)
@@ -105,6 +109,20 @@ export function useSyncTask () {
     } catch (error) {
       toast.error('同步失败: ' + (error.message || '未知错误'))
       syncing[taskKey] = false
+    }
+  }
+
+  async function cancelTask (taskKey) {
+    const info = taskIds[taskKey]
+    if (!info?.taskId) return false
+    try {
+      await syncApi.cancelTask(info.taskId)
+      clearPoll(taskKey)
+      syncing[taskKey] = false
+      return true
+    } catch (error) {
+      toast.error('停止失败: ' + (error.response?.data?.detail || error.message))
+      return false
     }
   }
 
@@ -122,7 +140,7 @@ export function useSyncTask () {
               total: task.progress?.total || 0,
               status: 'running'
             }
-            startPoll(key, task.task_id, { interval, onDone })
+            startPoll(key, task.task_id, { interval, onDone, logId: task.log_id })
             break
           }
         }
@@ -137,10 +155,12 @@ export function useSyncTask () {
   return {
     syncing,
     progress,
+    taskIds,
     clearPoll,
     clearAll,
     startPoll,
     startSync,
+    cancelTask,
     restoreTasks
   }
 }

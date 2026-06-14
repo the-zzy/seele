@@ -114,12 +114,13 @@ def _cleanup_timeout_pipelines():
                             step["finished_at"] = datetime.now().isoformat()
 
 
-def _register_task(task_id: str, trade_date: str, job_type: str = 'unknown') -> None:
+def _register_task(task_id: str, trade_date: str, job_type: str = 'unknown', log_id: int | None = None) -> None:
     with _task_lock:
         _task_registry[task_id] = {
             "task_id": task_id,
             "trade_date": trade_date,
             "job_type": job_type,
+            "log_id": log_id,
             "status": "running",
             "started_at": datetime.now().isoformat(),
             "finished_at": None,
@@ -722,7 +723,7 @@ def post_sync_daily_by_date(
     )
     db.commit()
     task_id = str(uuid.uuid4())
-    _register_task(task_id, formatted_date, job_type='daily')
+    _register_task(task_id, formatted_date, job_type='daily', log_id=log.id)
     t = threading.Thread(target=_run_sync_bg, args=(task_id, formatted_date, log.id, only_missing), daemon=True)
     t.start()
     logger.info('[SYNC_DAILY_API] 已提交后台任务, log_id=%s, trade_date=%s, only_missing=%s', log.id, formatted_date, only_missing)
@@ -758,6 +759,7 @@ def get_active_tasks():
                 "task_id": t["task_id"],
                 "trade_date": t["trade_date"],
                 "job_type": t.get("job_type", "unknown"),
+                "log_id": t.get("log_id"),
                 "status": t["status"],
                 "started_at": t["started_at"],
                 "progress": t.get("progress"),
@@ -766,6 +768,52 @@ def get_active_tasks():
             if t["status"] == "running"
         ]
     return success({"tasks": tasks, "count": len(tasks)})
+
+
+# 3.2.5 取消正在运行的同步任务
+@router.post("/task/{task_id}/cancel")
+def post_cancel_task(
+    task_id: str,
+    db: Session = Depends(get_db),
+):
+    """取消正在运行的同步任务，并同步标记对应 job log 为 failed"""
+    with _task_lock:
+        task = _task_registry.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if task["status"] != "running":
+        raise HTTPException(status_code=400, detail="任务未在运行中")
+
+    task["status"] = "failed"
+    task["finished_at"] = datetime.now().isoformat()
+    task["error"] = "手动取消"
+
+    log_id = task.get("log_id")
+    if log_id:
+        db_obj = crud.sync_job_log_crud.get_by_id(db, log_id)
+        if db_obj and db_obj.status == 'running':
+            crud.sync_job_log_crud.finish(
+                db, log_id, 'failed',
+                success_count=db_obj.success_count or 0,
+                failed_count=db_obj.failed_count or 0,
+                skipped_count=db_obj.skipped_count or 0,
+                total_count=db_obj.total_count or 0,
+                error_message='手动取消',
+            )
+            db.commit()
+
+    crud.system_operation_log_crud.create(
+        db,
+        schemas.SystemOperationLogCreate(
+            operation_type='task_cancel',
+            target_type='task',
+            target_id=task_id,
+            detail=f'手动取消同步任务，job_type={task.get("job_type")}, log_id={log_id}',
+            result='success',
+        )
+    )
+    db.commit()
+    return success({"task_id": task_id, "status": "cancelled"})
 
 
 def _infer_market(symbol: str) -> str:
@@ -1069,7 +1117,7 @@ def post_sync_stock_basic(
     )
     db.commit()
     task_id = str(uuid.uuid4())
-    _register_task(task_id, "stock_basic", job_type='stock_basic')
+    _register_task(task_id, "stock_basic", job_type='stock_basic', log_id=log.id)
     t = threading.Thread(target=_run_sync_stock_basic_bg, args=(task_id, log.id), daemon=True)
     t.start()
     logger.info('[SYNC_STOCK_BASIC_API] 已提交后台任务, log_id=%s', log.id)
@@ -1316,7 +1364,7 @@ def post_sync_financial(
     db.commit()
     try:
         task_id = str(uuid.uuid4())
-        _register_task(task_id, "financial", job_type='financial')
+        _register_task(task_id, "financial", job_type='financial', log_id=log.id)
         # 在后台线程中执行，但需要把 log_id 传进去以便更新
         def _run_with_log():
             db2 = SessionLocal()
@@ -1636,7 +1684,7 @@ def post_sync_indicator(
     )
     db.commit()
     task_id = str(uuid.uuid4())
-    _register_task(task_id, trade_date, job_type='indicator')
+    _register_task(task_id, trade_date, job_type='indicator', log_id=log.id)
     t = threading.Thread(target=_run_sync_indicator_bg, args=(task_id, trade_date, log.id, only_missing), daemon=True)
     t.start()
     logger.info('[SYNC_INDICATOR_API] 已提交后台任务, log_id=%s, trade_date=%s, only_missing=%s', log.id, trade_date, only_missing)
@@ -1671,7 +1719,11 @@ def get_detailed_status(
     st_count = basic_stats.st_count or 0
     delisted_count = basic_stats.delisted_count or 0
     last_basic_sync = (
-        db.query(models.SyncJobLog.started_at)
+        db.query(
+            models.SyncJobLog.started_at,
+            models.SyncJobLog.success_count,
+            models.SyncJobLog.total_count,
+        )
         .filter(models.SyncJobLog.job_type == 'stock_basic')
         .order_by(models.SyncJobLog.started_at.desc())
         .first()
@@ -1730,6 +1782,7 @@ def get_detailed_status(
     # SyncJobLog.trade_date 是 String(8)，用 date_strs 过滤
     logs_raw = (
         db.query(
+            models.SyncJobLog.id,
             models.SyncJobLog.trade_date,
             models.SyncJobLog.job_type,
             models.SyncJobLog.status,
@@ -1748,11 +1801,11 @@ def get_detailed_status(
     daily_log_map: dict[str, tuple] = {}
     indicator_log_map: dict[str, tuple] = {}
     for row in logs_raw:
-        ds, jt = row[0], row[1]
+        log_id, ds, jt = row[0], row[1], row[2]
         if jt == 'daily' and ds not in daily_log_map:
-            daily_log_map[ds] = row[2:]
+            daily_log_map[ds] = (log_id, *row[3:])
         elif jt == 'indicator' and ds not in indicator_log_map:
-            indicator_log_map[ds] = row[2:]
+            indicator_log_map[ds] = (log_id, *row[3:])
 
     # 一次性拉取有效股票和停牌记录，在 Python 中计算每日预期（避免 N+1 查询）
     all_basics = db.query(
@@ -1807,18 +1860,20 @@ def get_detailed_status(
             'missing_daily': max(0, expected - daily_cnt),
             'missing_indicator': max(0, expected - indicator_cnt),
             'daily_log': {
-                'status': daily_log[0],
-                'success': daily_log[1],
-                'failed': daily_log[2],
-                'total': daily_log[3],
-                'started_at': daily_log[4].isoformat() if daily_log[4] else None,
+                'log_id': daily_log[0],
+                'status': daily_log[1],
+                'success': daily_log[2],
+                'failed': daily_log[3],
+                'total': daily_log[4],
+                'started_at': daily_log[5].isoformat() if daily_log[5] else None,
             } if daily_log else None,
             'indicator_log': {
-                'status': indicator_log[0],
-                'success': indicator_log[1],
-                'failed': indicator_log[2],
-                'total': indicator_log[3],
-                'started_at': indicator_log[4].isoformat() if indicator_log[4] else None,
+                'log_id': indicator_log[0],
+                'status': indicator_log[1],
+                'success': indicator_log[2],
+                'failed': indicator_log[3],
+                'total': indicator_log[4],
+                'started_at': indicator_log[5].isoformat() if indicator_log[5] else None,
             } if indicator_log else None,
         })
 
@@ -1878,7 +1933,11 @@ def get_detailed_status(
     )
     board_counts = {c: n for c, n in board_category_counts}
     last_board_list_sync = (
-        db.query(models.SyncJobLog.started_at)
+        db.query(
+            models.SyncJobLog.started_at,
+            models.SyncJobLog.success_count,
+            models.SyncJobLog.total_count,
+        )
         .filter(models.SyncJobLog.job_type == 'board_list')
         .order_by(models.SyncJobLog.started_at.desc())
         .first()
@@ -1907,6 +1966,8 @@ def get_detailed_status(
             'delisted_count': delisted_count,
             'valid_count': total_basic - st_count - delisted_count,
             'last_sync': last_basic_sync[0].isoformat() if last_basic_sync else None,
+            'total_count': (last_basic_sync[2] or 0) if last_basic_sync else 0,
+            'success_count': (last_basic_sync[1] or 0) if last_basic_sync else 0,
             'market_distribution': {m: c for m, c in market_dist},
         },
         'daily': daily_status,
@@ -1933,8 +1994,10 @@ def get_detailed_status(
             'industry_count': board_counts.get('industry', 0),
             'concept_count': board_counts.get('concept', 0),
             'etf_count': board_counts.get('etf', 0),
-            'last_sync': last_board_list_sync[0].isoformat() if last_board_list_sync else None,
-            'last_daily_sync': last_board_daily_sync[0].isoformat() if last_board_daily_sync else None,
+            'last_sync': last_board_daily_sync[0].isoformat() if last_board_daily_sync else None,
+            'last_list_sync': last_board_list_sync[0].isoformat() if last_board_list_sync else None,
+            'total_count': (last_board_list_sync[2] or 0) if last_board_list_sync else 0,
+            'success_count': (last_board_list_sync[1] or 0) if last_board_list_sync else 0,
             'latest_daily_date': latest_board_daily.isoformat() if latest_board_daily else None,
             'constituent_count': constituent_total,
         },
@@ -2824,7 +2887,7 @@ def _launch_single_task(db: Session, job_type: str, trade_date: str | None) -> t
         log = crud.sync_job_log_crud.create(
             db, schemas.SyncJobLogCreate(job_type='stock_basic', trigger_type='manual')
         )
-        _register_task(task_id, "stock_basic", job_type='stock_basic')
+        _register_task(task_id, "stock_basic", job_type='stock_basic', log_id=log.id)
         t = threading.Thread(target=_run_sync_stock_basic_bg, args=(task_id, log.id), daemon=True)
         t.start()
     elif job_type == "daily":
@@ -2832,7 +2895,7 @@ def _launch_single_task(db: Session, job_type: str, trade_date: str | None) -> t
         log = crud.sync_job_log_crud.create(
             db, schemas.SyncJobLogCreate(job_type='daily', trigger_type='manual', trade_date=formatted)
         )
-        _register_task(task_id, formatted, job_type='daily')
+        _register_task(task_id, formatted, job_type='daily', log_id=log.id)
         t = threading.Thread(target=_run_sync_bg, args=(task_id, formatted, log.id, False), daemon=True)
         t.start()
     elif job_type == "indicator":
@@ -2841,14 +2904,14 @@ def _launch_single_task(db: Session, job_type: str, trade_date: str | None) -> t
         log = crud.sync_job_log_crud.create(
             db, schemas.SyncJobLogCreate(job_type='indicator', trigger_type='manual', trade_date=formatted)
         )
-        _register_task(task_id, date_fmt, job_type='indicator')
+        _register_task(task_id, date_fmt, job_type='indicator', log_id=log.id)
         t = threading.Thread(target=_run_sync_indicator_bg, args=(task_id, date_fmt, log.id, True), daemon=True)
         t.start()
     elif job_type == "financial":
         log = crud.sync_job_log_crud.create(
             db, schemas.SyncJobLogCreate(job_type='financial', trigger_type='manual')
         )
-        _register_task(task_id, "financial", job_type='financial')
+        _register_task(task_id, "financial", job_type='financial', log_id=log.id)
         def _run_with_log():
             db2 = SessionLocal()
             try:
@@ -2878,14 +2941,14 @@ def _launch_single_task(db: Session, job_type: str, trade_date: str | None) -> t
         log = crud.sync_job_log_crud.create(
             db, schemas.SyncJobLogCreate(job_type='board_list', trigger_type='manual')
         )
-        _register_task(task_id, "board_list", job_type='board_list')
+        _register_task(task_id, "board_list", job_type='board_list', log_id=log.id)
         t = threading.Thread(target=_run_sync_board_list_bg, args=(task_id, log.id), daemon=True)
         t.start()
     elif job_type == "board_daily":
         log = crud.sync_job_log_crud.create(
             db, schemas.SyncJobLogCreate(job_type='board_daily', trigger_type='manual')
         )
-        _register_task(task_id, "board_daily", job_type='board_daily')
+        _register_task(task_id, "board_daily", job_type='board_daily', log_id=log.id)
         t = threading.Thread(
             target=_run_sync_board_daily_bg,
             args=(task_id, log.id, None, None),
@@ -2896,7 +2959,7 @@ def _launch_single_task(db: Session, job_type: str, trade_date: str | None) -> t
         log = crud.sync_job_log_crud.create(
             db, schemas.SyncJobLogCreate(job_type='board_constituent', trigger_type='manual')
         )
-        _register_task(task_id, "board_constituent", job_type='board_constituent')
+        _register_task(task_id, "board_constituent", job_type='board_constituent', log_id=log.id)
         t = threading.Thread(target=_run_sync_board_constituent_bg, args=(task_id, log.id), daemon=True)
         t.start()
     elif job_type == "index_daily":
@@ -2904,14 +2967,14 @@ def _launch_single_task(db: Session, job_type: str, trade_date: str | None) -> t
         log = crud.sync_job_log_crud.create(
             db, schemas.SyncJobLogCreate(job_type='index_daily', trigger_type='manual', trade_date=date_fmt.replace("-", ""))
         )
-        _register_task(task_id, date_fmt, job_type='index_daily')
+        _register_task(task_id, date_fmt, job_type='index_daily', log_id=log.id)
         t = threading.Thread(target=_run_sync_index_daily_bg, args=(task_id, date_fmt, log.id), daemon=True)
         t.start()
     elif job_type == "index_constituents":
         log = crud.sync_job_log_crud.create(
             db, schemas.SyncJobLogCreate(job_type='index_constituents', trigger_type='manual')
         )
-        _register_task(task_id, "index_constituents", job_type='index_constituents')
+        _register_task(task_id, "index_constituents", job_type='index_constituents', log_id=log.id)
         t = threading.Thread(target=_run_sync_index_constituents_bg, args=(task_id, "sh.000300", log.id), daemon=True)
         t.start()
     else:
@@ -3361,7 +3424,7 @@ def post_sync_history_full(
     )
     db.commit()
     task_id = str(uuid.uuid4())
-    _register_task(task_id, start_date, job_type='history_full')
+    _register_task(task_id, start_date, job_type='history_full', log_id=log.id)
     t = threading.Thread(
         target=_run_sync_history_full_bg,
         args=(task_id, start_date, end_date, log.id),
@@ -3438,7 +3501,7 @@ def post_sync_industry_detail(
     )
     db.commit()
     task_id = str(uuid.uuid4())
-    _register_task(task_id, "industry_detail", job_type='industry_detail')
+    _register_task(task_id, "industry_detail", job_type='industry_detail', log_id=log.id)
     t = threading.Thread(
         target=_run_sync_industry_detail_bg,
         args=(task_id, log.id),

@@ -246,6 +246,18 @@ input[type='checkbox'] {
     transition: background 0.12s;
 
     &:hover { background: var(--bg-tertiary); }
+
+    &.empty-row {
+      cursor: default;
+
+      &:hover { background: transparent; }
+
+      td {
+        color: transparent;
+        pointer-events: none;
+        border-bottom-color: transparent;
+      }
+    }
   }
 
   td {

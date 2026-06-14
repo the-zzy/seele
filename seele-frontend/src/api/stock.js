@@ -169,6 +169,13 @@ export const syncApi = {
     })
   },
 
+  cancelTask (taskId) {
+    return request({
+      url: `/sync/task/${taskId}/cancel`,
+      method: 'post'
+    })
+  },
+
   getDetailedStatus (dailyPageNum = 1, dailyPageSize = 5) {
     return request({
       url: '/sync/detailed-status',

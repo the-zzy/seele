@@ -14,7 +14,7 @@ const dailyPageNum = ref(1)
 const dailyPageSize = ref(5)
 const incrementalMap = ref({})
 
-const { syncing, progress: taskProgress, startSync, restoreTasks, clearPoll } = useSyncTask()
+const { syncing, progress: taskProgress, startSync, restoreTasks, clearPoll, cancelTask } = useSyncTask()
 const { isMobile } = useViewport()
 
 const pipeline = ref(null)
@@ -192,9 +192,35 @@ async function handleIndicatorSync (date) {
   })
 }
 
+async function handleCancelDaily (date) {
+  if (!confirm('确定要停止该日期的日线同步吗？')) return
+  const taskKey = `daily_${date.replace(/-/g, '')}`
+  const ok = await cancelTask(taskKey)
+  if (ok) await loadDetailedStatus()
+}
+
+async function handleCancelIndicator (date) {
+  if (!confirm('确定要停止该日期的指标计算吗？')) return
+  const taskKey = `indicator_${date.replace(/-/g, '')}`
+  const ok = await cancelTask(taskKey)
+  if (ok) await loadDetailedStatus()
+}
+
 function formatTime (ts) {
   if (!ts) return '-'
   return ts
+}
+
+function formatDate (ts) {
+  if (!ts) return '-'
+  const s = String(ts)
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10)
+  const d = new Date(s)
+  if (Number.isNaN(d.getTime())) return s
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 function formatNumber (n) {
@@ -356,8 +382,19 @@ onUnmounted(() => {
                 <span class="market-count">{{ formatNumber(count) }}</span>
               </div>
             </div>
-            <div class="last-sync">
-              最近同步: {{ formatTime(detailedStatus.stock_basic.last_sync) }}
+            <div class="sync-summary">
+              <div class="sync-summary-row">
+                <span class="summary-label">最新数据日期</span>
+                <span class="summary-value">{{ formatDate(detailedStatus.stock_basic.last_sync) }}</span>
+              </div>
+              <div class="sync-summary-row">
+                <span class="summary-label">共</span>
+                <span class="summary-value">{{ formatNumber(detailedStatus.stock_basic.total_count) }} 条</span>
+              </div>
+              <div class="sync-summary-row">
+                <span class="summary-label">成功</span>
+                <span class="summary-value">{{ formatNumber(detailedStatus.stock_basic.success_count) }} 条</span>
+              </div>
             </div>
           </div>
 
@@ -415,11 +452,19 @@ onUnmounted(() => {
                 <span class="market-count">{{ formatNumber(detailedStatus.board.etf_count) }}</span>
               </div>
             </div>
-            <div class="last-sync">
-              最近同步: {{ formatTime(detailedStatus.board.last_sync) }}
-              <span v-if="detailedStatus.board.latest_daily_date" class="last-sync-extra">
-                · 日线至 {{ detailedStatus.board.latest_daily_date }}
-              </span>
+            <div class="sync-summary">
+              <div class="sync-summary-row">
+                <span class="summary-label">最新数据日期</span>
+                <span class="summary-value">{{ formatDate(detailedStatus.board.latest_daily_date || detailedStatus.board.last_list_sync) }}</span>
+              </div>
+              <div class="sync-summary-row">
+                <span class="summary-label">共</span>
+                <span class="summary-value">{{ formatNumber(detailedStatus.board.total_count) }} 条</span>
+              </div>
+              <div class="sync-summary-row">
+                <span class="summary-label">成功</span>
+                <span class="summary-value">{{ formatNumber(detailedStatus.board.success_count) }} 条</span>
+              </div>
             </div>
             <div class="last-sync-extra-row">
               成分股 {{ formatNumber(detailedStatus.board.constituent_count) }} 条
@@ -482,6 +527,13 @@ onUnmounted(() => {
                       : '日线同步' }}
                   </button>
                   <button
+                    v-if="item.daily_log?.status === 'running'"
+                    class="btn-sync-small btn-cancel"
+                    @click="handleCancelDaily(item.date)"
+                  >
+                    停止
+                  </button>
+                  <button
                     class="btn-sync-small"
                     :disabled="syncing['indicator_' + item.date.replace(/-/g, '')]"
                     @click="handleIndicatorSync(item.date)"
@@ -491,6 +543,13 @@ onUnmounted(() => {
                         ? `计算中 ${taskProgress['indicator_' + item.date.replace(/-/g, '')].current}/${taskProgress['indicator_' + item.date.replace(/-/g, '')].total}`
                         : '计算中...')
                       : '指标计算' }}
+                  </button>
+                  <button
+                    v-if="item.indicator_log?.status === 'running'"
+                    class="btn-sync-small btn-cancel"
+                    @click="handleCancelIndicator(item.date)"
+                  >
+                    停止
                   </button>
                 </div>
               </div>
@@ -551,6 +610,13 @@ onUnmounted(() => {
                           : '日线同步' }}
                       </button>
                       <button
+                        v-if="row.daily_log?.status === 'running'"
+                        class="btn-sync-small btn-cancel"
+                        @click="handleCancelDaily(row.date)"
+                      >
+                        停止
+                      </button>
+                      <button
                         class="btn-sync-small"
                         :disabled="syncing['indicator_' + row.date.replace(/-/g, '')]"
                         @click="handleIndicatorSync(row.date)"
@@ -560,6 +626,13 @@ onUnmounted(() => {
                             ? `计算中 ${taskProgress['indicator_' + row.date.replace(/-/g, '')].current}/${taskProgress['indicator_' + row.date.replace(/-/g, '')].total}`
                             : '计算中...')
                           : '指标计算' }}
+                      </button>
+                      <button
+                        v-if="row.indicator_log?.status === 'running'"
+                        class="btn-sync-small btn-cancel"
+                        @click="handleCancelIndicator(row.date)"
+                      >
+                        停止
                       </button>
                     </div>
                   </td>
@@ -744,7 +817,10 @@ onUnmounted(() => {
     font-weight: 600;
   }
 
-  .last-sync {
+  .sync-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
     font-size: 11px;
     color: var(--text-muted);
     font-family: var(--font-mono);
@@ -752,9 +828,19 @@ onUnmounted(() => {
     border-top: 1px solid var(--rule);
   }
 
-  .last-sync-extra {
-    font-size: 11px;
-    color: var(--text-muted);
+  .sync-summary-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .summary-label {
+    color: var(--text-secondary);
+  }
+
+  .summary-value {
+    color: var(--text-primary);
+    font-weight: 600;
   }
 
   .last-sync-extra-row {
@@ -785,6 +871,10 @@ onUnmounted(() => {
   &:hover:not(:disabled) {
     opacity: 0.9;
   }
+}
+
+.btn-sync-small.btn-cancel {
+  background: var(--up);
 }
 
 .btn-missing {

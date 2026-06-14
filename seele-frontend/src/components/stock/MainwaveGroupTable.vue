@@ -1,7 +1,9 @@
 <script setup>
-import { computed, ref, watch, nextTick, onMounted } from 'vue'
+import { computed, ref, watch, nextTick, onMounted, toRef } from 'vue'
 import { useViewport } from '@/composables/useViewport'
+import { useFixedRows } from '@/composables/useFixedRows'
 import MobileCardList from '@/components/common/MobileCardList.vue'
+import BasePagination from '@/components/common/BasePagination.vue'
 import { formatNumber } from '@/utils/formatters'
 
 const props = defineProps({
@@ -36,8 +38,21 @@ const groups = computed(() => {
 })
 
 const activeLayer = ref(20)
+const pageSize = ref(10)
+const pageState = ref({
+  20: { pageNum: 1 },
+  10: { pageNum: 1 },
+  5: { pageNum: 1 },
+  OFF: { pageNum: 1 }
+})
 
 watch(() => props.list, (list) => {
+  pageState.value = {
+    20: { pageNum: 1 },
+    10: { pageNum: 1 },
+    5: { pageNum: 1 },
+    OFF: { pageNum: 1 }
+  }
   if (!list.length) return
   nextTick(() => {
     if (!groups.value[activeLayer.value]?.length) {
@@ -61,10 +76,35 @@ function updateIndicator () {
   }
 }
 
-watch(activeLayer, () => nextTick(updateIndicator))
+watch(activeLayer, () => {
+  if (!pageState.value[activeLayer.value]) {
+    pageState.value[activeLayer.value] = { pageNum: 1 }
+  }
+  nextTick(updateIndicator)
+})
 onMounted(() => nextTick(updateIndicator))
 
 const currentGroup = computed(() => groups.value[activeLayer.value] || [])
+
+const pageNum = computed(() => pageState.value[activeLayer.value]?.pageNum || 1)
+
+const paginatedGroup = computed(() => {
+  const start = (pageNum.value - 1) * pageSize.value
+  return currentGroup.value.slice(start, start + pageSize.value)
+})
+
+const groupTotal = computed(() => currentGroup.value.length)
+
+const paddedList = useFixedRows(paginatedGroup)
+
+function handlePageChange (newPage) {
+  pageState.value[activeLayer.value] = { pageNum: newPage }
+}
+
+function handlePageSizeChange (newSize) {
+  pageSize.value = newSize
+  pageState.value[activeLayer.value] = { pageNum: 1 }
+}
 
 function extractCodeNum (symbol) {
   if (!symbol) return ''
@@ -113,6 +153,14 @@ function getChgClass (val) {
   return ''
 }
 
+function getPctCellClass (val) {
+  if (val == null) return ''
+  const value = parseFloat(val)
+  if (value > 0) return 'cell-up'
+  if (value < 0) return 'cell-down'
+  return ''
+}
+
 function setTabRef (el, idx) {
   if (el) tabRefs.value[idx] = el
 }
@@ -149,7 +197,7 @@ function setTabRef (el, idx) {
         <div v-if="!currentGroup.length" class="state empty">该分组暂无数据</div>
         <MobileCardList
           v-else-if="isMobile"
-          :list="currentGroup"
+          :list="paginatedGroup"
           key-field="symbol"
           @click-item="onClick"
         >
@@ -208,32 +256,45 @@ function setTabRef (el, idx) {
           </thead>
           <tbody>
             <tr
-              v-for="item in currentGroup"
-              :key="item.symbol"
+              v-for="(item, index) in paddedList"
+              :key="item === null ? `empty-${index}` : (item.id || item.symbol || index)"
               class="data-row"
-              :class="{ holding: item.isHolding }"
-              @dblclick="onDblClick(item)"
+              :class="{ holding: item?.isHolding, 'empty-row': item === null }"
+              @dblclick="item && onDblClick(item)"
             >
-              <td class="code">{{ extractCodeNum(item.symbol) }}</td>
-              <td class="name">{{ item.name }}</td>
-              <td class="industry">{{ item.industry || '-' }}</td>
-              <td :class="getScoreClass(item.score)">
-                {{ getScoreLabel(item.score) }}
-              </td>
-              <td>{{ item.close != null ? formatNumber(item.close) : '-' }}</td>
-              <td :class="item.pctChg > 0 ? 'up' : item.pctChg < 0 ? 'down' : ''">
-                {{ item.pctChg != null ? (item.pctChg > 0 ? '+' : '') + item.pctChg.toFixed(2) + '%' : '-' }}
-              </td>
-              <td>{{ item.ma5 != null ? formatNumber(item.ma5) : '-' }}</td>
-              <td>{{ item.ma10 != null ? formatNumber(item.ma10) : '-' }}</td>
-              <td>{{ item.ma20 != null ? formatNumber(item.ma20) : '-' }}</td>
-              <td>{{ formatDate(item.launchDate) }}</td>
-              <td :class="item.launchPctChg > 0 ? 'up' : item.launchPctChg < 0 ? 'down' : ''">
-                {{ item.launchPctChg != null ? (item.launchPctChg > 0 ? '+' : '') + item.launchPctChg.toFixed(2) + '%' : '-' }}
-              </td>
+              <template v-if="item">
+                <td class="code">{{ extractCodeNum(item.symbol) }}</td>
+                <td class="name">{{ item.name }}</td>
+                <td class="industry">{{ item.industry || '-' }}</td>
+                <td :class="getScoreClass(item.score)">
+                  {{ getScoreLabel(item.score) }}
+                </td>
+                <td>{{ item.close != null ? formatNumber(item.close) : '-' }}</td>
+                <td class="pct-cell" :class="getPctCellClass(item.pctChg)">
+                  {{ item.pctChg != null ? (item.pctChg > 0 ? '+' : '') + item.pctChg.toFixed(2) + '%' : '-' }}
+                </td>
+                <td>{{ item.ma5 != null ? formatNumber(item.ma5) : '-' }}</td>
+                <td>{{ item.ma10 != null ? formatNumber(item.ma10) : '-' }}</td>
+                <td>{{ item.ma20 != null ? formatNumber(item.ma20) : '-' }}</td>
+                <td>{{ formatDate(item.launchDate) }}</td>
+                <td class="pct-cell" :class="getPctCellClass(item.launchPctChg)">
+                  {{ item.launchPctChg != null ? (item.launchPctChg > 0 ? '+' : '') + item.launchPctChg.toFixed(2) + '%' : '-' }}
+                </td>
+              </template>
+              <template v-else>
+                <td v-for="col in ['symbol','name','industry','score','close','pctChg','ma5','ma10','ma20','launchDate','launchPctChg']" :key="col">&nbsp;</td>
+              </template>
             </tr>
           </tbody>
         </table>
+        <BasePagination
+          v-if="groupTotal > 0"
+          :page-num="pageNum"
+          :page-size="pageSize"
+          :total="groupTotal"
+          @update:page-num="handlePageChange"
+          @update:page-size="handlePageSizeChange"
+        />
       </div>
     </template>
   </div>
@@ -242,15 +303,14 @@ function setTabRef (el, idx) {
 <style scoped lang="scss">
 .group-section {
   flex: 1;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 /* 横线滑块 Tab */
 .tab-slider {
-  position: sticky;
-  top: 0;
+  flex-shrink: 0;
   z-index: 10;
   background: var(--bg-primary);
   border-bottom: 1px solid var(--rule);
@@ -335,8 +395,80 @@ function setTabRef (el, idx) {
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.stock-table .industry {
-  text-align: left;
+.table-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.stock-table {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 1100px;
+
+  thead,
+  tbody {
+    display: flex;
+    flex-direction: column;
+  }
+
+  thead {
+    flex-shrink: 0;
+  }
+
+  tbody {
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  tr {
+    display: flex;
+    flex: 0 0 10%;
+    min-height: 0;
+  }
+
+  th,
+  td {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 8px 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  th:first-child,
+  td:first-child,
+  th:nth-child(2),
+  td:nth-child(2) {
+    justify-content: flex-start;
+  }
+
+  th:nth-child(3),
+  td:nth-child(3) {
+    justify-content: center;
+  }
+}
+
+.pct-cell {
+  justify-content: center;
+
+  &.cell-up { background: var(--up-bg); }
+  &.cell-down { background: var(--down-bg); }
+}
+
+.stock-table tbody tr:hover {
+  .pct-cell.cell-up { background: var(--up-bg-hover); }
+  .pct-cell.cell-down { background: var(--down-bg-hover); }
+}
+
+.stock-table tbody td.industry {
+  justify-content: flex-start;
 }
 
 .stock-table .data-row.holding {
