@@ -171,3 +171,22 @@ Bash/PowerShell (PID X)
 **判断是否有残留的唯一标准**：`netstat -ano | findstr :9000` 只能有**一个** `LISTENING` 进程。tasklist 看到 3 个 python 是正常的（shim + reloader + worker），但如果有两个都在监听 9000，或者有两个 start.py 各自带有 uvicorn 子进程，就是残留未清干净。
 
 <!-- 用户可在此追加新的项目级规则，我会自动读取 -->
+
+## Git 工作流规范
+
+### 禁止直接在 main 分支修改内容
+
+**main 分支只能通过 PR（Pull Request）合并进入，禁止任何直接提交、推送或覆盖。**
+
+所有代码变更必须在功能分支（如 `feature/xxx`）上开发，经过 PR review 后合并到 main。
+
+原因：
+- 保证 main 分支始终是可追溯、可回滚的
+- 防止本地实验性修改污染生产基线
+- 确保部署版本与代码审查记录一致
+
+如果需要在 main 上修复问题，应：
+1. 从 main 切出 `hotfix/xxx` 分支
+2. 在 hotfix 分支上修改
+3. 通过 PR 合并回 main
+
