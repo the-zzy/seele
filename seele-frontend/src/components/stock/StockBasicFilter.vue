@@ -123,7 +123,7 @@ function onReset () {
   border-radius: 5px;
   cursor: pointer;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.08em;
   transition: background 0.2s;
