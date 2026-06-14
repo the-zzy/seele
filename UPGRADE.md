@@ -80,12 +80,18 @@ git commit -m "chore: bump version to X.Y.Z"
 - Agent chat stream 请求补充 Bearer token
 - 清理临时 `daily_repair` 脚本和备份文件
 
-**数据库迁移**:
-- `2026-05-28-add-visitor-log.sql`
-- `2026-05-29-unify-collation.sql`
-- `2026-05-30-float-to-decimal.sql`
-- `2026-06-08-board-constituent-name.sql`
-- `scripts/add_industry_detail_column.py`
+**数据库迁移**：
+
+v2.3.0 新增迁移（从 v2.2 升级必须执行）：
+
+| 迁移文件 | 说明 |
+|----------|------|
+| `db-ops/migrations/2026-05-29-unify-collation.sql` | 统一全库 collation 为 `utf8mb4_unicode_ci` |
+| `db-ops/migrations/2026-06-08-board-constituent-name.sql` | `board_constituent` 新增 `name` 字段 |
+| `scripts/add_industry_detail_column.py` | `stock_basic` 新增 `industry_detail` 字段 |
+
+> 如果从 v2.1 或更早基线升级，还需先补执行「v2.1.0 → v2.2.0 间累积的历史迁移」章节中的 SQL。
+> `2026-05-28-add-visitor-log.sql` 和 `2026-05-30-float-to-decimal.sql` 已在 v2.2 前累积迁移中列出，请勿重复执行。
 
 **配置变更**:
 - `deploy/nginx-seele.conf` 增加 SSL 覆盖警告
@@ -191,23 +197,23 @@ git commit -m "chore: bump version to X.Y.Z"
 
 ## 远程手动操作备忘（示例）
 
-> 以下命令中的 `<PROD_IP>`、`<PROD_USER>`、`<DEPLOY_DIR>` 需替换为实际值。生产环境具体连接信息不应写入仓库。
+> ⚠️ **安全警示**：以下命令中的 `<PROD_IP>`、`<PROD_USER>`、`<DEPLOY_DIR>`、`<NGINX_CONF_PATH>` 是占位符。
+> 替换为真实值后**仅用于本地执行或内部加密文档**，禁止将真实 IP、用户名、路径、密码提交到 Git 仓库。
 
 ```bash
 # 1. 备份数据库
 mysqldump -u root -p seele > <DEPLOY_DIR>/backups/seele-$(date +%Y%m%d_%H%M%S).sql
 
-# 2. 执行数据库迁移（按顺序，根据实际版本选择）
-mysql -u root -p seele < <DEPLOY_DIR>/db-ops/migrations/2026-05-28-add-visitor-log.sql
-mysql -u root -p seele < <DEPLOY_DIR>/db-ops/migrations/2026-05-28-add-portfolio-trade-dividend.sql
+# 2. 执行 v2.3.0 增量迁移（从 v2.2 升级）
 mysql -u root -p seele < <DEPLOY_DIR>/db-ops/migrations/2026-05-29-unify-collation.sql
-mysql -u root -p seele < <DEPLOY_DIR>/db-ops/migrations/2026-05-30-float-to-decimal.sql
 mysql -u root -p seele < <DEPLOY_DIR>/db-ops/migrations/2026-06-08-board-constituent-name.sql
+
+# 如从 v2.1 或更早基线升级，需先补执行「v2.1.0 → v2.2.0 间累积的历史迁移」中的 SQL
 
 # 3. 添加 industry_detail 字段
 cd <DEPLOY_DIR>/seele-backend
 source .venv/bin/activate
-python <DEPLOY_DIR>/scripts/add_industry_detail_column.py
+python scripts/add_industry_detail_column.py
 
 # 4. 重启后端
 systemctl restart seele-backend
