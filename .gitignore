@@ -1,5 +1,6 @@
 node_modules/
 .claude/
 *.log
+*.zip
 miyoushe_images/
 seele_dump_*.sql
