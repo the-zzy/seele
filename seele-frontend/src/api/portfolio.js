@@ -195,6 +195,9 @@ export const portfolioApi = {
    * 更新持仓配置
    * @param {Object} data
    * @param {number} data.initial_capital - 初始资金
+   * @param {number} [data.commission_rate] - 佣金费率
+   * @param {number} [data.stamp_tax_rate] - 印花税税率
+   * @param {number} [data.transfer_rate] - 过户费费率
    */
   updateConfig (data) {
     return request({

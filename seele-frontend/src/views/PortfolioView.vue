@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed, nextTick, watch, toRef } from 'vue'
+import { ref, reactive, onMounted, computed, nextTick, watch, toRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { useEChart } from '@/composables/useEChart'
 import { useViewport } from '@/composables/useViewport'
@@ -26,6 +26,13 @@ const summary = ref({
   position_count: 0,
   initial_capital: 35000,
   total_return_pct: 0
+})
+
+const config = ref({
+  initial_capital: 35000,
+  commission_rate: 0.000235,
+  stamp_tax_rate: 0.0005,
+  transfer_rate: 0.00001
 })
 
 const router = useRouter()
@@ -58,9 +65,14 @@ const modalType = ref('BUY')
 const editingTrade = ref(null)
 const dayTradeModalVisible = ref(false)
 
-// 初始资金编辑
-const capitalModalVisible = ref(false)
-const capitalInput = ref('')
+// 持仓配置编辑
+const configModalVisible = ref(false)
+const configForm = reactive({
+  initial_capital: '',
+  commission_rate: '',
+  stamp_tax_rate: '',
+  transfer_rate: ''
+})
 
 // 预警
 const alerts = ref([])
@@ -79,6 +91,15 @@ async function loadSummary () {
   try {
     const res = await portfolioApi.getSummary()
     summary.value = res || {}
+    const cfg = await portfolioApi.getConfig()
+    if (cfg) {
+      config.value = {
+        initial_capital: cfg.initial_capital ?? 35000,
+        commission_rate: cfg.commission_rate ?? 0.000235,
+        stamp_tax_rate: cfg.stamp_tax_rate ?? 0.0005,
+        transfer_rate: cfg.transfer_rate ?? 0.00001
+      }
+    }
   } catch (e) {
     console.error('加载总览失败:', e)
   }
@@ -349,20 +370,29 @@ function openEditModal (item) {
   modalVisible.value = true
 }
 
-function openCapitalModal () {
-  capitalInput.value = String(summary.value.initial_capital || 35000)
-  capitalModalVisible.value = true
+function openConfigModal () {
+  configForm.initial_capital = String(config.value.initial_capital ?? 35000)
+  configForm.commission_rate = String(config.value.commission_rate ?? 0.000235)
+  configForm.stamp_tax_rate = String(config.value.stamp_tax_rate ?? 0.0005)
+  configForm.transfer_rate = String(config.value.transfer_rate ?? 0.00001)
+  configModalVisible.value = true
 }
 
-async function onUpdateCapital () {
-  const val = Number(capitalInput.value)
-  if (!val || val <= 0) {
+async function onUpdateConfig () {
+  const initialCapital = Number(configForm.initial_capital)
+  if (!initialCapital || initialCapital <= 0) {
     toast.warning('请输入有效的初始资金')
     return
   }
+  const payload = {
+    initial_capital: initialCapital,
+    commission_rate: Number(configForm.commission_rate),
+    stamp_tax_rate: Number(configForm.stamp_tax_rate),
+    transfer_rate: Number(configForm.transfer_rate)
+  }
   try {
-    await portfolioApi.updateConfig({ initial_capital: val })
-    capitalModalVisible.value = false
+    await portfolioApi.updateConfig(payload)
+    configModalVisible.value = false
     await loadSummary()
   } catch (e) {
     toast.error('设置失败: ' + (e.message || '未知错误'))
@@ -458,7 +488,7 @@ onMounted(() => {
         <span class="capital-hint">初始资金 {{ (summary.initial_capital || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
         <button class="btn-config" @click="onSyncPositions">同步持仓</button>
         <button class="btn-config" @click="onRebuildDaily">重建资产</button>
-        <button class="btn-config" @click="openCapitalModal">设置资金</button>
+        <button class="btn-config" @click="openConfigModal">配置</button>
         <button class="btn-primary" @click="openModal('BUY')">+ 买入</button>
         <button class="btn-sell" @click="openModal('SELL')">- 卖出</button>
         <button class="btn-daytrade" @click="openDayTradeModal">做T</button>
@@ -664,6 +694,7 @@ onMounted(() => {
       :type="modalType"
       :positions="positions"
       :edit-data="editingTrade"
+      :config="config"
       @submit="onSubmitTrade"
     />
 
@@ -693,22 +724,34 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- 初始资金设置弹窗 -->
-    <div v-if="capitalModalVisible" class="modal-overlay" @click.self="capitalModalVisible = false">
+    <!-- 持仓配置设置弹窗 -->
+    <div v-if="configModalVisible" class="modal-overlay" @click.self="configModalVisible = false">
       <div class="modal-panel capital-panel">
         <div class="modal-header">
-          <h3 class="modal-title">设置初始资金</h3>
-          <button class="modal-close" @click="capitalModalVisible = false">&times;</button>
+          <h3 class="modal-title">持仓配置</h3>
+          <button class="modal-close" @click="configModalVisible = false">&times;</button>
         </div>
         <div class="modal-body">
           <div class="form-row">
             <label>初始资金（元）</label>
-            <input v-model="capitalInput" placeholder="如 35000" type="number" step="1">
+            <input v-model="configForm.initial_capital" placeholder="如 35000" type="number" step="1">
+          </div>
+          <div class="form-row">
+            <label>佣金费率</label>
+            <input v-model="configForm.commission_rate" placeholder="如 0.000235" type="number" step="0.000001">
+          </div>
+          <div class="form-row">
+            <label>印花税税率</label>
+            <input v-model="configForm.stamp_tax_rate" placeholder="如 0.0005" type="number" step="0.000001">
+          </div>
+          <div class="form-row">
+            <label>过户费费率</label>
+            <input v-model="configForm.transfer_rate" placeholder="如 0.00001" type="number" step="0.000001">
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn-link" @click="capitalModalVisible = false">取消</button>
-          <button class="btn-primary" @click="onUpdateCapital">确认</button>
+          <button class="btn-link" @click="configModalVisible = false">取消</button>
+          <button class="btn-primary" @click="onUpdateConfig">确认</button>
         </div>
       </div>
     </div>

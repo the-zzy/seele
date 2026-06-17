@@ -7,7 +7,15 @@ const props = defineProps({
   visible: { type: Boolean, default: false },
   type: { type: String, default: 'BUY' }, // BUY / SELL
   positions: { type: Array, default: () => [] },
-  editData: { type: Object, default: null }
+  editData: { type: Object, default: null },
+  config: {
+    type: Object,
+    default: () => ({
+      commission_rate: 0.000235,
+      stamp_tax_rate: 0.0005,
+      transfer_rate: 0.00001
+    })
+  }
 })
 
 const emit = defineEmits(['update:visible', 'submit'])
@@ -18,6 +26,9 @@ const form = reactive({
   trade_date: '',
   price: '',
   quantity: '',
+  commission: '',
+  stampTax: '',
+  transferFee: '',
   fee: '',
   realizedPnl: '',
   dividend: '',
@@ -39,6 +50,9 @@ watch(() => props.visible, (val) => {
       form.trade_date = props.editData.trade_date || ''
       form.price = props.editData.price != null ? String(props.editData.price) : ''
       form.quantity = props.editData.quantity != null ? String(props.editData.quantity) : ''
+      form.commission = props.editData.commission != null ? String(props.editData.commission) : ''
+      form.stampTax = props.editData.stamp_tax != null ? String(props.editData.stamp_tax) : ''
+      form.transferFee = props.editData.transfer_fee != null ? String(props.editData.transfer_fee) : ''
       form.fee = props.editData.fee != null ? String(props.editData.fee) : ''
       form.realizedPnl = ''
       form.dividend = props.editData.dividend != null ? String(props.editData.dividend) : ''
@@ -50,6 +64,9 @@ watch(() => props.visible, (val) => {
       form.trade_date = new Date().toISOString().slice(0, 10)
       form.price = ''
       form.quantity = ''
+      form.commission = ''
+      form.stampTax = ''
+      form.transferFee = ''
       form.fee = ''
       form.realizedPnl = ''
       form.dividend = ''
@@ -140,6 +157,33 @@ function onSelectStock (item) {
   closeDropdown()
 }
 
+function calcFees () {
+  const price = Number(form.price)
+  const qty = Number(form.quantity)
+  if (!price || !qty || qty <= 0) {
+    return
+  }
+  const amount = price * qty
+  const commission = Math.max(amount * props.config.commission_rate, 5)
+  const stampTax = props.type === 'SELL' ? amount * props.config.stamp_tax_rate : 0
+  const transferFee = amount * props.config.transfer_rate
+  form.commission = roundMoney(commission)
+  form.stampTax = roundMoney(stampTax)
+  form.transferFee = roundMoney(transferFee)
+}
+
+function roundMoney (v) {
+  return String(Math.round(v * 100) / 100)
+}
+
+function syncFeeTotal () {
+  const total = Number(form.commission || 0) + Number(form.stampTax || 0) + Number(form.transferFee || 0)
+  form.fee = roundMoney(total)
+}
+
+watch(() => [form.price, form.quantity, props.type, props.config], calcFees, { deep: true })
+watch(() => [form.commission, form.stampTax, form.transferFee], syncFeeTotal, { deep: true })
+
 function onClose () {
   emit('update:visible', false)
 }
@@ -171,13 +215,22 @@ function onSubmit () {
     price: price,
     quantity: qty
   }
+  if (form.commission !== '' && form.commission != null) {
+    data.commission = Number(form.commission)
+  }
+  if (form.stampTax !== '' && form.stampTax != null) {
+    data.stamp_tax = Number(form.stampTax)
+  }
+  if (form.transferFee !== '' && form.transferFee != null) {
+    data.transfer_fee = Number(form.transferFee)
+  }
   if (form.fee !== '' && form.fee != null) {
     data.fee = Number(form.fee)
   }
   if (props.type === 'SELL' && form.realizedPnl !== '' && form.realizedPnl != null) {
     data.realized_pnl = Number(form.realizedPnl)
   }
-  if (props.type === 'SELL' && form.dividend !== '' && form.dividend != null) {
+  if (form.dividend !== '' && form.dividend != null) {
     data.dividend = Number(form.dividend)
   }
   if (form.remark) data.remark = form.remark.trim()
@@ -267,14 +320,28 @@ function onSubmit () {
             <input v-model="form.price" placeholder="元" type="number" step="0.01">
           </div>
         </div>
+        <div class="form-row">
+          <label>成交股数</label>
+          <input v-model="form.quantity" placeholder="100股的整数倍" type="number" step="100">
+        </div>
         <div class="form-grid">
           <div class="form-row">
-            <label>成交股数</label>
-            <input v-model="form.quantity" placeholder="100股的整数倍" type="number" step="100">
+            <label>佣金</label>
+            <input v-model="form.commission" placeholder="元" type="number" step="0.01">
           </div>
           <div class="form-row">
-            <label>手续费</label>
-            <input v-model="form.fee" placeholder="元（可选）" type="number" step="0.01">
+            <label>印花税</label>
+            <input v-model="form.stampTax" :placeholder="type === 'BUY' ? '买入不收' : '元'" type="number" step="0.01">
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label>过户费</label>
+            <input v-model="form.transferFee" placeholder="元" type="number" step="0.01">
+          </div>
+          <div class="form-row">
+            <label>手续费合计</label>
+            <input v-model="form.fee" placeholder="元" type="number" step="0.01" readonly>
           </div>
         </div>
         <div v-if="type === 'SELL'" class="form-grid">
@@ -402,6 +469,12 @@ function onSubmit () {
 
     &:focus {
       border-color: var(--border-focus);
+    }
+
+    &:read-only {
+      background: var(--bg-tertiary);
+      color: var(--text-muted);
+      cursor: not-allowed;
     }
   }
 }

@@ -451,10 +451,10 @@ def _sync_daily_bulk(trade_date: str, source: str = 'akshare', task_id: str | No
             workers = min(cpu_count, 4)
 
         symbol_list = [s.symbol for s in all_stocks]
-        chunk_size = 50
+        chunk_size = 25
         chunks = [symbol_list[i:i + chunk_size] for i in range(0, len(symbol_list), chunk_size)]
         workers = min(workers, len(chunks))
-        chunk_timeout = 180
+        chunk_timeout = 60
 
         def _consume_batch(records, skipped, failed):
             with _lock:
@@ -476,7 +476,7 @@ def _sync_daily_bulk(trade_date: str, source: str = 'akshare', task_id: str | No
         def _run_parallel(fetch_fn, extra_args):
             """通用并行分片调度器，捕获 _consume_batch 等外部闭包"""
             nonlocal _failed
-            executor = concurrent.futures.ProcessPoolExecutor(max_workers=workers)
+            executor = concurrent.futures.ProcessPoolExecutor(max_workers=workers, max_tasks_per_child=1)
             try:
                 future_meta = {}
                 next_chunk_idx = 0
@@ -542,18 +542,25 @@ def _sync_daily_bulk(trade_date: str, source: str = 'akshare', task_id: str | No
                         meta = future_meta[future]
                         symbols = meta["symbols"]
                         cancelled = future.cancel()
-                        logger.error(
-                            '[SYNC_DAILY_BULK] 子进程批次超时(%ss)，股票 %s~%s，数量 %s，cancelled=%s',
-                            chunk_timeout, symbols[0], symbols[-1], len(symbols), cancelled
-                        )
+                        if not cancelled:
+                            logger.error(
+                                '[SYNC_DAILY_BULK] 子进程批次超时(%ss)且无法取消，股票 %s~%s，数量 %s，可能是子进程卡死',
+                                chunk_timeout, symbols[0], symbols[-1], len(symbols)
+                            )
+                        else:
+                            logger.error(
+                                '[SYNC_DAILY_BULK] 子进程批次超时(%ss)，股票 %s~%s，数量 %s，cancelled=%s',
+                                chunk_timeout, symbols[0], symbols[-1], len(symbols), cancelled
+                            )
                         failed = [
                             {"symbol": symbol, "reason": f"batch timeout ({chunk_timeout}s)"}
                             for symbol in symbols
                         ]
                         _consume_batch([], [], failed)
-                        next_future = _submit_next_chunk()
-                        if next_future is not None:
-                            pending.add(next_future)
+                        # 如果子进程无法取消，说明有进程卡死，不再提交新 chunk，等待 shutdown 清理
+                        if not cancelled:
+                            logger.warning('[SYNC_DAILY_BULK] 检测到卡死子进程，停止提交新 chunk')
+                            next_chunk_idx = len(chunks)
             finally:
                 executor.shutdown(wait=False, cancel_futures=True)
 
@@ -695,6 +702,112 @@ def _run_sync_bg(task_id: str, trade_date: str, log_id: int, only_missing: bool 
         db.close()
 
 
+def _run_sync_single_stock_bg(task_id: str, symbol: str, trade_date: str, log_id: int) -> None:
+    """后台执行单只股票日线+指标同步任务"""
+    db = SessionLocal()
+    try:
+        formatted_date = trade_date.replace("-", "")
+        trade_date_obj = datetime.strptime(formatted_date, "%Y%m%d").date()
+        date_str = trade_date_obj.strftime("%Y-%m-%d")
+
+        _update_task_progress(task_id, 1, 3)
+
+        # 1. 拉取日线数据：先 baostock，失败则回退 akshare
+        records = []
+        failed = []
+        source = "baostock"
+        try:
+            if _test_baostock():
+                baostock_records, _, baostock_failed = _fetch_baostock_chunk([symbol], formatted_date)
+                records = baostock_records
+                failed = baostock_failed
+        except Exception as exc:
+            logger.warning('[SYNC_SINGLE] baostock 拉取失败: %s', exc)
+
+        if not records:
+            source = "akshare"
+            try:
+                ak_records, _, ak_failed = _fetch_akshare_single(symbol, formatted_date, {})
+                records = ak_records
+                if not failed:
+                    failed = ak_failed
+            except Exception as exc:
+                logger.warning('[SYNC_SINGLE] akshare 拉取失败: %s', exc)
+
+        if not records:
+            msg = f"未获取到 {symbol} 在 {date_str} 的日线数据"
+            crud.sync_job_log_crud.finish(db, log_id, 'failed', error_message=msg)
+            db.commit()
+            _finish_task(task_id, error=msg)
+            return
+
+        # 2. 写入/更新日线记录
+        daily_record = records[0]
+        daily_record['trade_date'] = date_str
+        crud.stock_daily_crud.upsert(db, schemas.StockDailyCreate(**daily_record))
+        db.commit()
+
+        _update_task_progress(task_id, 2, 3)
+
+        # 3. 计算并写入指标
+        indicator_data = _build_indicator_for_symbol(db, symbol, trade_date_obj, lookback=60)
+        if indicator_data is None:
+            indicator_data = {field: -1 for field in INDICATOR_FIELDS}
+        indicator_data.pop('symbol', None)
+        indicator_data.pop('trade_date', None)
+        crud.stock_daily_indicator_crud.create_or_update(db, symbol, trade_date_obj, indicator_data)
+        db.commit()
+
+        indicator_stats = _calc_indicator_stats([indicator_data])
+
+        _update_task_progress(task_id, 3, 3)
+        result = {
+            'symbol': symbol,
+            'trade_date': formatted_date,
+            'source': source,
+            'daily_upserted': 1,
+            'indicator_upserted': 1,
+            'failed': failed,
+            'indicator_stats': indicator_stats,
+        }
+        crud.sync_job_log_crud.finish(
+            db, log_id, 'success',
+            success_count=1,
+            failed_count=len(failed),
+            total_count=1,
+            trade_date=formatted_date,
+            extra_info=f'single stock sync {symbol} {date_str}, source={source}',
+        )
+        db.commit()
+        _finish_task(task_id, result=result)
+    except Exception as exc:
+        logger.error('[SYNC_SINGLE] 任务异常: %s', exc)
+        logger.error(traceback.format_exc())
+        _finish_task(task_id, error=str(exc))
+        crud.sync_job_log_crud.finish(db, log_id, 'failed', error_message=str(exc)[:2000])
+        db.commit()
+        try:
+            db_err = SessionLocal()
+            crud.system_error_log_crud.create(
+                db_err,
+                schemas.SystemErrorLogCreate(
+                    level='error',
+                    source='sync_single_stock_bg',
+                    trace_id=str(log_id),
+                    message=f'单股同步异常: {exc}'[:1000],
+                    detail=traceback.format_exc()[:4000],
+                )
+            )
+            db_err.commit()
+        except Exception as exc2:
+            logger.warning('[SYNC] 写入 system_error_log 失败: %s', exc2)
+        finally:
+            if 'db_err' in locals():
+                db_err.close()
+    finally:
+        db.close()
+
+
 # 3.2.1 按日期同步全部A股日线数据（后台异步版）
 @router.post("/daily/date/{trade_date}")
 def post_sync_daily_by_date(
@@ -733,6 +846,50 @@ def post_sync_daily_by_date(
         "trade_date": formatted_date,
         "status": "running",
         "hint": "同步任务已提交后台执行，约需 5-10 秒，请稍后刷新页面查看",
+    })
+
+
+# 3.2.2 按股票+日期同步单股日线数据及指标（后台异步版）
+@router.post("/daily/stock/{symbol}/date/{trade_date}")
+def post_sync_daily_single_stock(
+    symbol: str,
+    trade_date: str,
+    db: Session = Depends(get_db),
+):
+    """
+    同步单只股票指定日期的日线数据及指标（后台异步版）
+    - 先尝试 Baostock，失败回退 AkShare
+    - 日线写入后自动计算并写入指标
+    """
+    formatted_date = trade_date.replace("-", "")
+    log = crud.sync_job_log_crud.create(
+        db, schemas.SyncJobLogCreate(job_type='daily_single', trigger_type='manual', trade_date=formatted_date)
+    )
+    crud.system_operation_log_crud.create(
+        db,
+        schemas.SystemOperationLogCreate(
+            operation_type='sync_manual',
+            target_type='job',
+            target_id=str(log.id),
+            detail=f'手动触发单股同步，股票={symbol}, 日期={formatted_date}',
+            result='success',
+        )
+    )
+    db.commit()
+    task_id = str(uuid.uuid4())
+    _register_task(task_id, formatted_date, job_type='daily_single', log_id=log.id)
+    with _task_lock:
+        _task_registry[task_id]['symbol'] = symbol
+    t = threading.Thread(target=_run_sync_single_stock_bg, args=(task_id, symbol, formatted_date, log.id), daemon=True)
+    t.start()
+    logger.info('[SYNC_SINGLE_API] 已提交后台任务, log_id=%s, symbol=%s, trade_date=%s', log.id, symbol, formatted_date)
+    return success({
+        "task_id": task_id,
+        "log_id": log.id,
+        "symbol": symbol,
+        "trade_date": formatted_date,
+        "status": "running",
+        "hint": "单股同步任务已提交后台执行，约需 3-5 秒，请稍后刷新页面查看",
     })
 
 
@@ -1505,11 +1662,12 @@ def _run_sync_indicator_bg(task_id: str, trade_date: str, log_id: int, only_miss
     db = SessionLocal()
     try:
         formatted_date = trade_date.replace("-", "")
+        trade_date_obj = datetime.strptime(formatted_date, '%Y%m%d').date()
 
         # 验证交易日期是否存在
         exists = (
             db.query(models.StockDaily)
-            .filter(models.StockDaily.trade_date == formatted_date)
+            .filter(models.StockDaily.trade_date == trade_date_obj)
             .first()
         )
         if not exists:
@@ -1523,14 +1681,14 @@ def _run_sync_indicator_bg(task_id: str, trade_date: str, log_id: int, only_miss
         symbols = [
             row[0] for row in
             db.query(models.StockDaily.symbol).filter(
-                models.StockDaily.trade_date == formatted_date
+                models.StockDaily.trade_date == trade_date_obj
             ).distinct().all()
         ]
 
         if only_missing:
             existing = set(
                 row[0] for row in db.query(models.StockDailyIndicator.symbol)
-                .filter(models.StockDailyIndicator.trade_date == formatted_date)
+                .filter(models.StockDailyIndicator.trade_date == trade_date_obj)
                 .all()
             )
             symbols = [s for s in symbols if s not in existing]
@@ -1554,7 +1712,6 @@ def _run_sync_indicator_bg(task_id: str, trade_date: str, log_id: int, only_miss
         _failed_count = 0
 
         # 批量预查询所有股票的历史数据，避免 N+1
-        trade_date_obj = datetime.strptime(formatted_date, '%Y%m%d').date()
         start_date_obj = trade_date_obj - timedelta(days=90)
 
         all_rows = (
@@ -1595,7 +1752,7 @@ def _run_sync_indicator_bg(task_id: str, trade_date: str, log_id: int, only_miss
                     _failed_count += 1
                 else:
                     indicator_data["symbol"] = symbol
-                    indicator_data["trade_date"] = formatted_date
+                    indicator_data["trade_date"] = trade_date_obj
                     _items.append(indicator_data)
                     _success_count += 1
 

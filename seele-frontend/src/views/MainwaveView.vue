@@ -71,9 +71,6 @@ async function loadData () {
     }
 
     const res = await stockDailyApi.getMainwavePicker(params)
-    if (res?.trade_date) {
-      filterForm.value.tradeDate = res.trade_date
-    }
     groupList.value = (res?.list || []).map(item => ({
       id: item.id,
       symbol: item.symbol,
@@ -154,7 +151,7 @@ onMounted(async () => {
   <div class="mainwave page">
     <PageHero
       section="选股策略"
-      number="03.9"
+      number="08.3"
       title="主升浪分组"
       description="基于交易日期筛选符合主升浪门槛的主板标的，按趋势强度分层分组。双击行跳转K线图。"
       meta="趋势分层"
@@ -165,6 +162,13 @@ onMounted(async () => {
       @search="handleSearch"
       @reset="handleReset"
     />
+
+    <div
+      v-if="!loading && groupList.length === 0 && filterForm.tradeDate"
+      class="date-tip"
+    >
+      {{ filterForm.tradeDate }} 暂无数据，请前往同步任务同步该日期的日线和指标数据
+    </div>
 
     <MainwaveGroupTable
       :list="groupList"
@@ -186,5 +190,14 @@ onMounted(async () => {
   @media (max-width: 768px) {
     padding: 4px 16px 12px;
   }
+}
+
+.date-tip {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  padding: 4px 10px;
+  border-radius: 4px;
+  margin: -4px 0 8px;
 }
 </style>

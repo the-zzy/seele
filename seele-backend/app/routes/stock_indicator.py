@@ -6,7 +6,7 @@
 
 import logging
 import math
-from datetime import date
+from datetime import date, datetime
 from typing import List, Optional
 
 import pandas as pd
@@ -243,11 +243,12 @@ def compute_indicators(
 ):
     """计算指定交易日所有主板的日线指标并入库"""
     formatted_date = trade_date.replace("-", "")
+    trade_date_obj = datetime.strptime(formatted_date, '%Y%m%d').date()
 
     # 验证交易日期是否存在
     exists = (
         db.query(models.StockDaily)
-        .filter(models.StockDaily.trade_date == formatted_date)
+        .filter(models.StockDaily.trade_date == trade_date_obj)
         .first()
     )
     if not exists:
@@ -257,7 +258,7 @@ def compute_indicators(
     symbols = [
         row[0] for row in
         db.query(models.StockDaily.symbol)
-        .filter(models.StockDaily.trade_date == formatted_date)
+        .filter(models.StockDaily.trade_date == trade_date_obj)
         .distinct()
         .all()
     ]
@@ -280,7 +281,7 @@ def compute_indicators(
         db.query(models.StockDaily)
         .filter(
             models.StockDaily.symbol.in_(symbols),
-            models.StockDaily.trade_date <= formatted_date,
+            models.StockDaily.trade_date <= trade_date_obj,
         )
         .order_by(models.StockDaily.symbol, models.StockDaily.trade_date.desc())
         .all()
@@ -293,13 +294,13 @@ def compute_indicators(
 
     for symbol in symbols:
         indicator_data = _build_indicator_for_symbol(
-            db, symbol, formatted_date, rows=rows_by_symbol.get(symbol)
+            db, symbol, trade_date_obj, rows=rows_by_symbol.get(symbol)
         )
         if indicator_data is None:
             failed_count += 1
             continue
         indicator_data["symbol"] = symbol
-        indicator_data["trade_date"] = formatted_date
+        indicator_data["trade_date"] = trade_date_obj
         items.append(indicator_data)
         success_count += 1
 

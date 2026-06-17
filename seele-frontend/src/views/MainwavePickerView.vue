@@ -183,7 +183,7 @@ onMounted(async () => {
   <div class="stock-basic page">
     <PageHero
       section="选股策略"
-      number="03.7"
+      number="08.1"
       title="主升浪选股"
       description="基于交易日期筛选符合主升浪门槛的主板标的：流通市值≥200亿、股价≤300元、10日换手≥2%、10日成交额≥2亿。双击行跳转K线图。"
       meta="选股门槛"

@@ -211,7 +211,7 @@ onUnmounted(() => {
   <div class="stock-indicator page">
     <PageHero
       section="股票日线数据"
-      number="02.2"
+      number="03.2"
       title="指标数据"
       description="均线、均量、均换手等衍生指标。基于已同步的日线行情批量计算并落库。"
       meta="衍生指标"

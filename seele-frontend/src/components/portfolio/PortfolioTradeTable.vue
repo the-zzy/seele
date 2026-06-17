@@ -84,7 +84,19 @@ function typeClass (item) {
               <span class="field-value">{{ fmt(item.amount) }}</span>
             </div>
             <div class="card-field">
-              <span class="field-label">手续费</span>
+              <span class="field-label">佣金</span>
+              <span class="field-value">{{ fmt(item.commission) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">印花税</span>
+              <span class="field-value">{{ fmt(item.stamp_tax) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">过户费</span>
+              <span class="field-value">{{ fmt(item.transfer_fee) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">手续费合计</span>
               <span class="field-value">{{ fmt(item.fee) }}</span>
             </div>
           </div>
@@ -106,6 +118,9 @@ function typeClass (item) {
             <th class="num">价格</th>
             <th class="num">股数</th>
             <th class="num">金额</th>
+            <th class="num">佣金</th>
+            <th class="num">印花税</th>
+            <th class="num">过户费</th>
             <th class="num">手续费</th>
             <th class="act">操作</th>
           </tr>
@@ -132,6 +147,9 @@ function typeClass (item) {
               <td class="num">{{ fmt(item.price) }}</td>
               <td class="num">{{ item.quantity != null ? item.quantity.toLocaleString() : '-' }}</td>
               <td class="num">{{ fmt(item.amount) }}</td>
+              <td class="num">{{ fmt(item.commission) }}</td>
+              <td class="num">{{ fmt(item.stamp_tax) }}</td>
+              <td class="num">{{ fmt(item.transfer_fee) }}</td>
               <td class="num">{{ fmt(item.fee) }}</td>
               <td class="act">
                 <button class="btn-edit" @click="onEdit(item)">编辑</button>
@@ -139,7 +157,7 @@ function typeClass (item) {
               </td>
             </template>
             <template v-else>
-              <td v-for="col in ['date','type','symbol','name','price','quantity','amount','fee','act']" :key="col">&nbsp;</td>
+              <td v-for="col in ['date','type','symbol','name','price','quantity','amount','commission','stamp_tax','transfer_fee','fee','act']" :key="col">&nbsp;</td>
             </template>
           </tr>
         </tbody>
@@ -154,7 +172,7 @@ function typeClass (item) {
 }
 
 .stock-table {
-  min-width: 720px;
+  min-width: 980px;
 }
 
 .num {

@@ -173,7 +173,7 @@ onMounted(async () => {
   <div class="scorer-page page">
     <PageHero
       section="选股策略"
-      number="03.8"
+      number="08.2"
       title="主升浪评分"
       description="对主升浪选股结果进行多维度评分：趋势形态、方向分散、板块强度、业绩质量、市值流动性、催化剂。满分100分，60分及格，80分强烈推荐。"
       meta="评分体系"

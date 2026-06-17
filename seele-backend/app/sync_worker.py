@@ -98,8 +98,13 @@ def _fetch_baostock_chunk(symbols: list, trade_date: str) -> tuple:
     socket.setdefaulttimeout(10)
 
     def _login():
-        lg = bs.login()
-        return lg.error_code == '0', lg.error_msg
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as te:
+            ft = te.submit(bs.login)
+            try:
+                lg = ft.result(timeout=10)
+                return lg.error_code == '0', lg.error_msg
+            except concurrent.futures.TimeoutError:
+                return False, 'baostock login timeout (10s)'
 
     def _fetch_one(symbol: str) -> tuple:
         """返回 (record_dict | None, skip_symbol | None, fail_dict | None)"""

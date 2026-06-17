@@ -6,6 +6,7 @@ import StockBasicView from '../views/StockBasicView.vue'
 import StockKLineView from '../views/StockKLineView.vue'
 import ChgDistributionView from '../views/ChgDistributionView.vue'
 import PortfolioView from '../views/PortfolioView.vue'
+import BacktestView from '../views/BacktestView.vue'
 import MainwaveView from '../views/MainwaveView.vue'
 import MainwavePickerView from '../views/MainwavePickerView.vue'
 import MainwaveScorerView from '../views/MainwaveScorerView.vue'
@@ -60,6 +61,12 @@ const routes = [
     name: 'portfolio',
     component: PortfolioView,
     meta: { title: '持仓管理', nav: true, navOrder: 40, section: '资产' }
+  },
+  {
+    path: '/backtest',
+    name: 'backtest',
+    component: BacktestView,
+    meta: { title: '回测', nav: true, navOrder: 41, section: '资产' }
   },
   {
     path: '/mainwave/picker',
