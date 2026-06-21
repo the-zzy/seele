@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { stockDailyApi, tradeCalendarApi } from '@/api/stock'
+import { useTableSort } from '@/composables/useTableSort'
 import MainwavePickerFilter from '@/components/stock/MainwavePickerFilter.vue'
 import MainwaveGroupTable from '@/components/stock/MainwaveGroupTable.vue'
 import PageHero from '@/components/common/PageHero.vue'
@@ -20,6 +21,12 @@ const filterForm = ref({
   avgTurnoverMin: 2,
   avgAmountMin: 2,
   maBull: true
+})
+
+const { sortField, sortOrder, handleSort } = useTableSort({
+  defaultField: 'score',
+  defaultOrder: 'desc',
+  getDefaultOrder: field => field === 'score' ? 'desc' : 'asc'
 })
 
 async function loadLatestTradeDate () {
@@ -173,6 +180,9 @@ onMounted(async () => {
     <MainwaveGroupTable
       :list="groupList"
       :loading="loading"
+      :sort-field="sortField"
+      :sort-order="sortOrder"
+      @sort="handleSort"
       @row-dblclick="handleRowDblClick"
     />
   </div>

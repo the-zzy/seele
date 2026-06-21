@@ -4,6 +4,7 @@ import { backtestApi } from '@/api/backtest'
 import { stockDailyApi } from '@/api/stock'
 import { toast } from '@/composables/useToast'
 import { useEChart } from '@/composables/useEChart'
+import { useTableSort } from '@/composables/useTableSort'
 import PageHero from '@/components/common/PageHero.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import BacktestStatsCards from '@/components/backtest/BacktestStatsCards.vue'
@@ -32,6 +33,10 @@ const form = ref({
   initialCapital: 40000,
   aiModel: 'deepseek-v4-pro'
 })
+
+const tradeSort = useTableSort({ defaultField: 'trade_date', defaultOrder: 'desc' })
+const positionSort = useTableSort({ defaultField: 'symbol', defaultOrder: 'asc' })
+const poolSort = useTableSort({ defaultField: 'score', defaultOrder: 'desc' })
 
 const trendRef = useEChart()
 const dailyPnlRef = useEChart()
@@ -613,17 +618,26 @@ async function loadLatestRun () {
         v-if="activeTab === 'positions'"
         :positions="positions"
         :close-map="closeMap"
+        :sort-field="positionSort.sortField"
+        :sort-order="positionSort.sortOrder"
+        @sort="positionSort.handleSort"
       />
 
       <BacktestTradeTable
         v-else-if="activeTab === 'trades'"
         :list="trades"
         :loading="loading"
+        :sort-field="tradeSort.sortField"
+        :sort-order="tradeSort.sortOrder"
+        @sort="tradeSort.handleSort"
       />
 
       <BacktestPoolTable
         v-else-if="activeTab === 'pool'"
         :list="pool"
+        :sort-field="poolSort.sortField"
+        :sort-order="poolSort.sortOrder"
+        @sort="poolSort.handleSort"
       />
 
       <div v-else-if="activeTab === 'snapshots'" class="table-wrap">

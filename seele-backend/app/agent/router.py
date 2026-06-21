@@ -7,6 +7,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from openai import APIError, AuthenticationError, PermissionDeniedError, RateLimitError
 from sqlalchemy.orm import Session
 
 from app.agent.client import MoonshotClient
@@ -15,12 +16,24 @@ from app.agent.executor import ToolExecutor
 from app.agent.schemas import ChatRequest, ChatResponse, ChatEvent
 from app.agent.session import session_manager
 from app.agent.tools import registry
+from app.config import get_settings
 from app.database import SessionLocal, get_db
 from app.response import success
 
 router = APIRouter(prefix='/agent', tags=['AI Agent'])
 
-client = MoonshotClient()
+client = MoonshotClient(model=get_settings().llm_model)
+
+
+def _handle_llm_error(exc: APIError) -> HTTPException:
+    """将 openai 异常转换为友好的 HTTP 异常"""
+    if isinstance(exc, PermissionDeniedError):
+        return HTTPException(status_code=403, detail=f'LLM API 权限被拒绝: {exc.body.get("error", {}).get("message", str(exc))}')
+    if isinstance(exc, AuthenticationError):
+        return HTTPException(status_code=401, detail='LLM API Key 无效或已过期')
+    if isinstance(exc, RateLimitError):
+        return HTTPException(status_code=429, detail='LLM API 速率限制，请稍后再试')
+    return HTTPException(status_code=502, detail=f'LLM API 调用失败: {getattr(exc, "message", str(exc))}')
 
 
 def _build_assistant_message(assistant_msg):
@@ -69,7 +82,10 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
     tools = registry.get_openai_tools(allowed_categories=allowed)
 
     # 第一次 LLM 调用
-    response = await client.chat(messages=messages, tools=tools if tools else None)
+    try:
+        response = await client.chat(messages=messages, tools=tools if tools else None)
+    except APIError as exc:
+        raise _handle_llm_error(exc)
     choice = response.choices[0]
     assistant_msg = choice.message
 
@@ -84,7 +100,10 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
         # 第二次 LLM 调用（带入工具结果）
         messages.append(_build_assistant_message(assistant_msg))
         messages.extend(tool_results)
-        final_response = await client.chat(messages=messages, tools=None)
+        try:
+            final_response = await client.chat(messages=messages, tools=None)
+        except APIError as exc:
+            raise _handle_llm_error(exc)
         final_content = final_response.choices[0].message.content
         session_manager.append(session_id, [{'role': 'assistant', 'content': final_content}])
 

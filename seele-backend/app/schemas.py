@@ -4,7 +4,7 @@
 
 from datetime import date, datetime
 from typing import Optional, List, Any
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ==================== 通用响应 ====================
 
@@ -415,12 +415,10 @@ class PortfolioTradeCreate(BaseModel):
     price: float = Field(..., description='成交价格')
     quantity: int = Field(..., description='成交股数')
     amount: Optional[float] = Field(None, description='成交金额（不传则自动计算）')
-    commission: Optional[float] = Field(None, description='手续费/佣金')
     stamp_tax: Optional[float] = Field(None, description='印花税')
     transfer_fee: Optional[float] = Field(None, description='过户费')
-    fee: Optional[float] = Field(None, description='交易手续费合计（不传则自动计算）')
+    commission: Optional[float] = Field(None, description='券商佣金/手续费（不传则自动计算）')
     dividend: Optional[float] = Field(0, description='分红金额')
-    realized_pnl: Optional[float] = Field(None, description='实际盈亏金额（卖出时可选，用于自动计算手续费）')
     remark: Optional[str] = Field(None, description='备注')
 
     @field_validator('trade_date', mode='before')
@@ -474,14 +472,25 @@ class PortfolioTradeResponse(BaseModel):
     price: float
     quantity: int
     amount: float
-    commission: Optional[float] = 0
     stamp_tax: Optional[float] = 0
     transfer_fee: Optional[float] = 0
-    fee: Optional[float] = 0
+    commission: Optional[float] = 0
+    total_fee: Optional[float] = None
     dividend: Optional[float] = 0
     remark: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+    @model_validator(mode='after')
+    def compute_total_fee(self):
+        if self.total_fee is None:
+            self.total_fee = round(
+                float(self.commission or 0)
+                + float(self.stamp_tax or 0)
+                + float(self.transfer_fee or 0),
+                2,
+            )
+        return self
 
     @field_validator('trade_date', mode='before')
     @classmethod
@@ -512,12 +521,10 @@ class PortfolioTradeUpdate(BaseModel):
     price: Optional[float] = Field(None, description='成交价格')
     quantity: Optional[int] = Field(None, description='成交股数')
     amount: Optional[float] = Field(None, description='成交金额')
-    commission: Optional[float] = Field(None, description='手续费/佣金')
     stamp_tax: Optional[float] = Field(None, description='印花税')
     transfer_fee: Optional[float] = Field(None, description='过户费')
-    fee: Optional[float] = Field(None, description='交易手续费合计')
+    commission: Optional[float] = Field(None, description='券商佣金/手续费')
     dividend: Optional[float] = Field(None, description='分红金额')
-    realized_pnl: Optional[float] = Field(None, description='实际盈亏金额（卖出时填写，用于重新计算手续费）')
     remark: Optional[str] = Field(None, description='备注')
 
     @field_validator('trade_date', mode='before')
@@ -731,6 +738,9 @@ class PortfolioPositionResponse(BaseModel):
     group: Optional[str] = 'default'
     remark: Optional[str] = None
     first_buy_date: Optional[str] = None
+    current_holding_start_date: Optional[str] = None
+    current_pnl: Optional[float] = None
+    current_pnl_pct: Optional[float] = None
     updated_at: Optional[str] = None
 
     @field_validator('first_buy_date', mode='before')

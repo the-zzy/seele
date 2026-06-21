@@ -29,8 +29,9 @@ class LlmClient:
             api_key = settings.moonshot_api_key
             base_url = 'https://api.moonshot.cn/v1'
 
+        self.api_key = api_key or 'dummy'
         self.client = AsyncOpenAI(
-            api_key=api_key or 'dummy',
+            api_key=self.api_key,
             base_url=base_url,
             timeout=timeout,
             max_retries=max_retries,
@@ -60,5 +61,5 @@ class LlmClient:
 class MoonshotClient(LlmClient):
     """兼容旧调用方式的 Moonshot 客户端"""
 
-    def __init__(self, timeout: float = 60.0, max_retries: int = 2):
-        super().__init__(timeout=timeout, max_retries=max_retries)
+    def __init__(self, model: str | None = None, timeout: float = 60.0, max_retries: int = 2):
+        super().__init__(model=model, timeout=timeout, max_retries=max_retries)

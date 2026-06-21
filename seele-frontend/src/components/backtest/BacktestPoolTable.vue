@@ -1,10 +1,29 @@
 <script setup>
-defineProps({
+const props = defineProps({
   list: {
     type: Array,
     default: () => []
+  },
+  sortField: {
+    type: String,
+    default: 'score'
+  },
+  sortOrder: {
+    type: String,
+    default: 'desc'
   }
 })
+
+const emit = defineEmits(['sort'])
+
+function onSort (field) {
+  emit('sort', field)
+}
+
+function getSortIcon (field) {
+  if (field !== props.sortField) return '⇅'
+  return props.sortOrder === 'asc' ? '▲' : '▼'
+}
 
 function fmt (v) {
   if (v == null) return '-'
@@ -20,14 +39,14 @@ function fmt (v) {
     <table v-else class="stock-table">
       <thead>
         <tr>
-          <th>股票代码</th>
-          <th>股票名称</th>
-          <th class="num">层</th>
-          <th class="num">收盘价</th>
-          <th class="num">MA5</th>
-          <th class="num">MA10</th>
-          <th class="num">MA20</th>
-          <th class="num">评分</th>
+          <th class="sortable" @click="onSort('symbol')"><span class="th-label">股票代码</span><span class="sort-icon">{{ getSortIcon('symbol') }}</span></th>
+          <th class="sortable" @click="onSort('name')"><span class="th-label">股票名称</span><span class="sort-icon">{{ getSortIcon('name') }}</span></th>
+          <th class="sortable num" @click="onSort('layer')"><span class="th-label">层</span><span class="sort-icon">{{ getSortIcon('layer') }}</span></th>
+          <th class="sortable num" @click="onSort('close')"><span class="th-label">收盘价</span><span class="sort-icon">{{ getSortIcon('close') }}</span></th>
+          <th class="sortable num" @click="onSort('ma5')"><span class="th-label">MA5</span><span class="sort-icon">{{ getSortIcon('ma5') }}</span></th>
+          <th class="sortable num" @click="onSort('ma10')"><span class="th-label">MA10</span><span class="sort-icon">{{ getSortIcon('ma10') }}</span></th>
+          <th class="sortable num" @click="onSort('ma20')"><span class="th-label">MA20</span><span class="sort-icon">{{ getSortIcon('ma20') }}</span></th>
+          <th class="sortable num" @click="onSort('score')"><span class="th-label">评分</span><span class="sort-icon">{{ getSortIcon('score') }}</span></th>
         </tr>
       </thead>
       <tbody>
@@ -56,6 +75,24 @@ function fmt (v) {
 .stock-table {
   min-width: 560px;
   width: 100%;
+
+  th.sortable {
+    cursor: pointer;
+    user-select: none;
+
+    &:hover {
+      color: var(--text-primary);
+    }
+  }
+
+  .th-label {
+    margin-right: 4px;
+  }
+
+  .sort-icon {
+    font-size: 10px;
+    color: var(--text-muted);
+  }
 }
 
 .state {

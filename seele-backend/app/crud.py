@@ -3,7 +3,7 @@
 """
 
 from typing import List, Optional
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from collections import defaultdict
 from sqlalchemy import func, and_, or_
 from sqlalchemy.orm import Session, load_only
@@ -2118,12 +2118,15 @@ class TradeCalendarCRUD:
     """交易日历 CRUD"""
 
     def get_latest(self, db: Session) -> Optional[date]:
-        """获取最近一个交易日（不超过今天）"""
+        """获取最近一个交易日（16:00 前取前一天，16:00 后取当天）"""
+        now = datetime.now()
+        # 16:00 之前认为当天数据尚未生成，取前一个交易日
+        cutoff_date = date.today() if now.hour >= 16 else date.today() - timedelta(days=1)
         row = (
             db.query(models.TradeCalendar)
             .filter(
                 models.TradeCalendar.is_trading_day == 1,
-                models.TradeCalendar.trade_date <= date.today(),
+                models.TradeCalendar.trade_date <= cutoff_date,
             )
             .order_by(models.TradeCalendar.trade_date.desc())
             .first()

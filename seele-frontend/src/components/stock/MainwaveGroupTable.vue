@@ -8,10 +8,12 @@ import { formatNumber } from '@/utils/formatters'
 
 const props = defineProps({
   list: { type: Array, default: () => [] },
-  loading: Boolean
+  loading: Boolean,
+  sortField: { type: String, default: 'score' },
+  sortOrder: { type: String, default: 'desc' }
 })
 
-const emit = defineEmits(['row-dblclick'])
+const emit = defineEmits(['sort', 'row-dblclick'])
 
 const { isMobile } = useViewport()
 
@@ -84,7 +86,39 @@ watch(activeLayer, () => {
 })
 onMounted(() => nextTick(updateIndicator))
 
-const currentGroup = computed(() => groups.value[activeLayer.value] || [])
+const currentGroup = computed(() => {
+  const group = groups.value[activeLayer.value] || []
+  const field = props.sortField
+  const order = props.sortOrder
+  const multiplier = order === 'desc' ? -1 : 1
+
+  return [...group].sort((a, b) => {
+    let va, vb
+    switch (field) {
+      case 'score':
+        va = a.score?.total ?? -1
+        vb = b.score?.total ?? -1
+        break
+      case 'launchDate':
+        va = a.launchDate || ''
+        vb = b.launchDate || ''
+        break
+      default:
+        va = a[field]
+        vb = b[field]
+    }
+
+    if (va == null && vb == null) return 0
+    if (va == null) return 1 * multiplier
+    if (vb == null) return -1 * multiplier
+
+    if (typeof va === 'number' && typeof vb === 'number') {
+      return (va - vb) * multiplier
+    }
+
+    return String(va).localeCompare(String(vb), 'zh-CN') * multiplier
+  })
+})
 
 const pageNum = computed(() => pageState.value[activeLayer.value]?.pageNum || 1)
 
@@ -159,6 +193,15 @@ function getPctCellClass (val) {
   if (value > 0) return 'cell-up'
   if (value < 0) return 'cell-down'
   return ''
+}
+
+function onSort (field) {
+  emit('sort', field)
+}
+
+function getSortIcon (field) {
+  if (field !== props.sortField) return '⇅'
+  return props.sortOrder === 'asc' ? '▲' : '▼'
 }
 
 function setTabRef (el, idx) {
@@ -241,17 +284,17 @@ function setTabRef (el, idx) {
         <table v-else class="stock-table">
           <thead>
             <tr>
-              <th>代码</th>
-              <th>名称</th>
-              <th>板块</th>
-              <th>评分</th>
-              <th>股价</th>
-              <th>涨幅</th>
-              <th>MA5</th>
-              <th>MA10</th>
-              <th>MA20</th>
-              <th>启动日</th>
-              <th>启动至今</th>
+              <th class="sortable" @click="onSort('symbol')"><span class="th-label">代码</span><span class="sort-icon">{{ getSortIcon('symbol') }}</span></th>
+              <th class="sortable" @click="onSort('name')"><span class="th-label">名称</span><span class="sort-icon">{{ getSortIcon('name') }}</span></th>
+              <th class="sortable" @click="onSort('industry')"><span class="th-label">板块</span><span class="sort-icon">{{ getSortIcon('industry') }}</span></th>
+              <th class="sortable" @click="onSort('score')"><span class="th-label">评分</span><span class="sort-icon">{{ getSortIcon('score') }}</span></th>
+              <th class="sortable" @click="onSort('close')"><span class="th-label">股价</span><span class="sort-icon">{{ getSortIcon('close') }}</span></th>
+              <th class="sortable" @click="onSort('pctChg')"><span class="th-label">涨幅</span><span class="sort-icon">{{ getSortIcon('pctChg') }}</span></th>
+              <th class="sortable" @click="onSort('ma5')"><span class="th-label">MA5</span><span class="sort-icon">{{ getSortIcon('ma5') }}</span></th>
+              <th class="sortable" @click="onSort('ma10')"><span class="th-label">MA10</span><span class="sort-icon">{{ getSortIcon('ma10') }}</span></th>
+              <th class="sortable" @click="onSort('ma20')"><span class="th-label">MA20</span><span class="sort-icon">{{ getSortIcon('ma20') }}</span></th>
+              <th class="sortable" @click="onSort('launchDate')"><span class="th-label">启动日</span><span class="sort-icon">{{ getSortIcon('launchDate') }}</span></th>
+              <th class="sortable" @click="onSort('launchPctChg')"><span class="th-label">启动至今</span><span class="sort-icon">{{ getSortIcon('launchPctChg') }}</span></th>
             </tr>
           </thead>
           <tbody>
@@ -452,6 +495,24 @@ function setTabRef (el, idx) {
   th:nth-child(3),
   td:nth-child(3) {
     justify-content: center;
+  }
+
+  th.sortable {
+    cursor: pointer;
+    user-select: none;
+
+    &:hover {
+      color: var(--text-primary);
+    }
+  }
+
+  .th-label {
+    margin-right: 4px;
+  }
+
+  .sort-icon {
+    font-size: 10px;
+    color: var(--text-muted);
   }
 }
 

@@ -2,6 +2,7 @@
 东方财富 F10 公司概况抓取服务
 """
 
+import gzip
 import json
 import logging
 import urllib.request
@@ -25,6 +26,15 @@ def _infer_market_prefix(symbol: str) -> str:
     return 'SZ'
 
 
+def _decode_response(resp) -> str:
+    """解码响应，支持 gzip 压缩"""
+    raw = resp.read()
+    encoding = resp.headers.get('Content-Encoding', '')
+    if encoding == 'gzip':
+        raw = gzip.decompress(raw)
+    return raw.decode('utf-8', errors='replace')
+
+
 def fetch_company_survey(symbol: str) -> Optional[schemas.StockCompanyProfileCreate]:
     """从东方财富 F10 抓取单只股票的公司概况
 
@@ -46,7 +56,7 @@ def fetch_company_survey(symbol: str) -> Optional[schemas.StockCompanyProfileCre
             },
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
-            raw = resp.read().decode('utf-8')
+            raw = _decode_response(resp)
     except Exception as exc:
         logger.warning('[COMPANY_SURVEY] 请求失败 %s: %s', symbol, exc)
         return None

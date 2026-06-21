@@ -5,6 +5,7 @@ import { useEChart } from '@/composables/useEChart'
 import { useViewport } from '@/composables/useViewport'
 import { useFixedRows } from '@/composables/useFixedRows'
 import { toast } from '@/composables/useToast'
+import { useTableSort } from '@/composables/useTableSort'
 import { portfolioApi } from '@/api/portfolio'
 import PageHero from '@/components/common/PageHero.vue'
 import PortfolioStatsCards from '@/components/portfolio/PortfolioStatsCards.vue'
@@ -44,8 +45,6 @@ const trades = ref([])
 const closedList = ref([])
 const loading = ref(false)
 
-const closedPaddedList = useFixedRows(closedList)
-
 // 交易记录分页
 const tradePageNum = ref(1)
 const tradePageSize = ref(10)
@@ -58,6 +57,34 @@ const closedTotal = ref(0)
 
 // 标签页
 const activeTab = ref('positions') // positions | trades | closed
+
+// 排序状态
+const positionSort = useTableSort({ defaultField: 'symbol', defaultOrder: 'asc' })
+const tradeSort = useTableSort({ defaultField: 'trade_date', defaultOrder: 'desc' })
+const closedSort = useTableSort({ defaultField: 'close_date', defaultOrder: 'desc' })
+
+const sortedClosedList = computed(() => {
+  const field = closedSort.sortField.value
+  const order = closedSort.sortOrder.value
+  const multiplier = order === 'desc' ? -1 : 1
+
+  return [...closedList.value].sort((a, b) => {
+    const va = a[field]
+    const vb = b[field]
+
+    if (va == null && vb == null) return 0
+    if (va == null) return 1 * multiplier
+    if (vb == null) return -1 * multiplier
+
+    if (typeof va === 'number' && typeof vb === 'number') {
+      return (va - vb) * multiplier
+    }
+
+    return String(va).localeCompare(String(vb), 'zh-CN') * multiplier
+  })
+})
+
+const closedPaddedList = useFixedRows(sortedClosedList)
 
 // 弹窗
 const modalVisible = ref(false)
@@ -489,7 +516,7 @@ onMounted(() => {
         <button class="btn-config" @click="onSyncPositions">同步持仓</button>
         <button class="btn-config" @click="onRebuildDaily">重建资产</button>
         <button class="btn-config" @click="openConfigModal">配置</button>
-        <button class="btn-primary" @click="openModal('BUY')">+ 买入</button>
+        <button class="btn-buy" @click="openModal('BUY')">+ 买入</button>
         <button class="btn-sell" @click="openModal('SELL')">- 卖出</button>
         <button class="btn-daytrade" @click="openDayTradeModal">做T</button>
       </template>
@@ -563,6 +590,9 @@ onMounted(() => {
       v-if="activeTab === 'positions'"
       :list="positions"
       :loading="loading"
+      :sort-field="positionSort.sortField"
+      :sort-order="positionSort.sortOrder"
+      @sort="positionSort.handleSort"
       @update-position="onUpdatePosition"
     />
 
@@ -570,6 +600,9 @@ onMounted(() => {
       <PortfolioTradeTable
         :list="trades"
         :loading="loading"
+        :sort-field="tradeSort.sortField"
+        :sort-order="tradeSort.sortOrder"
+        @sort="tradeSort.handleSort"
         @edit="openEditModal"
         @delete="onDeleteTrade"
       />
@@ -601,7 +634,6 @@ onMounted(() => {
               <div class="card-header">
                 <span class="card-symbol">{{ item.symbol }}</span>
                 <span class="card-name">{{ item.name }}</span>
-                <span class="card-days">{{ Math.ceil((new Date(item.close_date) - new Date(item.open_date)) / (1000 * 60 * 60 * 24)) }} 天</span>
               </div>
               <div class="card-fields">
                 <div class="card-field">
@@ -613,22 +645,11 @@ onMounted(() => {
                   <span class="field-value">{{ Number(item.total_sell_amount).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
                 </div>
                 <div class="card-field">
-                  <span class="field-label">手续费</span>
-                  <span class="field-value">{{ Number(item.total_fee || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
-                </div>
-                <div class="card-field">
                   <span class="field-label">实现盈亏</span>
                   <span
                     class="field-value"
                     :class="Number(item.realized_pnl) > 0 ? 'up' : Number(item.realized_pnl) < 0 ? 'down' : ''"
                   >{{ Number(item.realized_pnl).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
-                </div>
-                <div class="card-field">
-                  <span class="field-label">盈亏比例</span>
-                  <span
-                    class="field-value"
-                    :class="Number(item.pnl_pct) > 0 ? 'up' : Number(item.pnl_pct) < 0 ? 'down' : ''"
-                  >{{ Number(item.pnl_pct).toFixed(2) }}%</span>
                 </div>
               </div>
             </div>
@@ -638,14 +659,11 @@ onMounted(() => {
           <table class="stock-table">
             <thead>
               <tr>
-                <th>股票代码</th>
-                <th>股票名称</th>
-                <th class="num">总买入</th>
-                <th class="num">总卖出</th>
-                <th class="num">手续费</th>
-                <th class="num">实现盈亏</th>
-                <th class="num">盈亏比例</th>
-                <th class="num">持仓天数</th>
+                <th class="sortable" @click="closedSort.handleSort('symbol')"><span class="th-label">股票代码</span><span class="sort-icon">{{ closedSort.getSortIcon('symbol') }}</span></th>
+                <th class="sortable" @click="closedSort.handleSort('name')"><span class="th-label">股票名称</span><span class="sort-icon">{{ closedSort.getSortIcon('name') }}</span></th>
+                <th class="sortable num" @click="closedSort.handleSort('total_buy_amount')"><span class="th-label">总买入</span><span class="sort-icon">{{ closedSort.getSortIcon('total_buy_amount') }}</span></th>
+                <th class="sortable num" @click="closedSort.handleSort('total_sell_amount')"><span class="th-label">总卖出</span><span class="sort-icon">{{ closedSort.getSortIcon('total_sell_amount') }}</span></th>
+                <th class="sortable num" @click="closedSort.handleSort('realized_pnl')"><span class="th-label">实现盈亏</span><span class="sort-icon">{{ closedSort.getSortIcon('realized_pnl') }}</span></th>
               </tr>
             </thead>
             <tbody>
@@ -660,19 +678,12 @@ onMounted(() => {
                   <td>{{ item.name }}</td>
                   <td class="num">{{ Number(item.total_buy_amount).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }}</td>
                   <td class="num">{{ Number(item.total_sell_amount).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }}</td>
-                  <td class="num">{{ Number(item.total_fee || 0).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }}</td>
                   <td class="num" :class="Number(item.realized_pnl) > 0 ? 'up' : Number(item.realized_pnl) < 0 ? 'down' : ''">
                     {{ Number(item.realized_pnl).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }}
                   </td>
-                  <td class="num" :class="Number(item.pnl_pct) > 0 ? 'up' : Number(item.pnl_pct) < 0 ? 'down' : ''">
-                    {{ Number(item.pnl_pct).toFixed(2) }}%
-                  </td>
-                  <td class="num">
-                    {{ Math.ceil((new Date(item.close_date) - new Date(item.open_date)) / (1000 * 60 * 60 * 24)) }}
-                  </td>
                 </template>
                 <template v-else>
-                  <td v-for="col in ['symbol','name','total_buy','total_sell','fee','realized_pnl','pnl_pct','days']" :key="col">&nbsp;</td>
+                  <td v-for="col in ['symbol','name','total_buy','total_sell','realized_pnl']" :key="col">&nbsp;</td>
                 </template>
               </tr>
             </tbody>
@@ -934,7 +945,7 @@ onMounted(() => {
   }
 }
 
-.btn-sell {
+.btn-buy {
   padding: 7px 16px;
   border: none;
   border-radius: 6px;
@@ -946,6 +957,21 @@ onMounted(() => {
 
   &:hover {
     background: #e04345;
+  }
+}
+
+.btn-sell {
+  padding: 7px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  color: #fff;
+  background: var(--accent);
+
+  &:hover {
+    background: var(--accent-hover);
   }
 }
 
@@ -1061,12 +1087,6 @@ onMounted(() => {
     white-space: nowrap;
   }
 
-  .card-days {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--text-muted);
-  }
-
   .card-fields {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
@@ -1121,6 +1141,24 @@ onMounted(() => {
 
   .stock-table {
     min-width: 720px;
+
+    th.sortable {
+      cursor: pointer;
+      user-select: none;
+
+      &:hover {
+        color: var(--text-primary);
+      }
+    }
+
+    .th-label {
+      margin-right: 4px;
+    }
+
+    .sort-icon {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
   }
 }
 

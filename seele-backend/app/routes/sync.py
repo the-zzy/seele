@@ -166,17 +166,32 @@ def _cleanup_timeout_tasks():
 
 
 def _cleanup_db_timeout_tasks(db: Session):
-    """自动清理数据库中超时的 running 记录"""
+    """自动清理数据库中超时的 running 记录，并同步清理内存任务状态"""
     cutoff = datetime.now() - timedelta(minutes=TASK_TIMEOUT_MINUTES)
-    db.query(models.SyncJobLog).filter(
+    timeout_logs = db.query(models.SyncJobLog.id).filter(
         models.SyncJobLog.status == 'running',
         models.SyncJobLog.started_at < cutoff
+    ).all()
+    if not timeout_logs:
+        return
+
+    timeout_ids = {row[0] for row in timeout_logs}
+    db.query(models.SyncJobLog).filter(
+        models.SyncJobLog.id.in_(timeout_ids)
     ).update({
         'status': 'failed',
         'ended_at': datetime.now(),
         'error_message': f'任务超时（超过 {TASK_TIMEOUT_MINUTES} 分钟）'
     }, synchronize_session=False)
     db.commit()
+
+    # 同步清理内存中对应任务状态
+    with _task_lock:
+        for task_id, task in list(_task_registry.items()):
+            if task.get('log_id') in timeout_ids and task.get('status') == 'running':
+                task['status'] = 'failed'
+                task['finished_at'] = datetime.now().isoformat()
+                task['error'] = f'任务超时（超过 {TASK_TIMEOUT_MINUTES} 分钟）'
 
 
 def format_date(d: date) -> str:
@@ -199,17 +214,17 @@ def _test_baostock() -> bool:
                 bs.logout()
             return ok
         except Exception as exc:
-            print(f'[SYNC] Baostock test failed: {exc}')
+            logger.warning('[SYNC] Baostock test failed: %s', exc)
             return False
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(_do_login)
             ok = future.result(timeout=10)
     except concurrent.futures.TimeoutError:
-        print('[SYNC] Baostock test timeout (10s)')
+        logger.warning('[SYNC] Baostock test timeout (10s)')
         ok = False
     except Exception as exc:
-        print(f'[SYNC] Baostock test failed: {exc}')
+        logger.warning('[SYNC] Baostock test failed: %s', exc)
         ok = False
     _source_test_cache['baostock'] = (ok, now)
     return ok
@@ -234,7 +249,7 @@ def _test_akshare() -> bool:
             socket.setdefaulttimeout(old_timeout)
         ok = df is not None and not df.empty
     except Exception as exc:
-        print(f'[SYNC] AkShare test failed: {exc}')
+        logger.warning('[SYNC] AkShare test failed: %s', exc)
         ok = False
     _source_test_cache['akshare'] = (ok, now)
     return ok
@@ -440,12 +455,13 @@ def _sync_daily_bulk(trade_date: str, source: str = 'akshare', task_id: str | No
                 "summary": "无需要同步的股票",
             }
 
-        # 多进程并行拉取（baostock / akshare 均走 ProcessPoolExecutor）
-        # baostock：每个子进程独立登录，互不干扰
-        # akshare：绕过 py_mini_racer 全局锁
+        # 多进程并行拉取（akshare 走 ProcessPoolExecutor 绕过 py_mini_racer 全局锁）
+        # baostock 改为单进程：服务端对同 IP 多 session 不友好，并发反而容易互相卡住
         cpu_count = os.cpu_count() or 4
         workers = min(cpu_count, 6)
-        if _total_stocks < 200:
+        if source == 'baostock':
+            workers = 1
+        elif _total_stocks < 200:
             workers = 1
         elif _total_stocks < 1000:
             workers = min(cpu_count, 4)
@@ -565,7 +581,27 @@ def _sync_daily_bulk(trade_date: str, source: str = 'akshare', task_id: str | No
                 executor.shutdown(wait=False, cancel_futures=True)
 
         # ----- 主数据源拉取 -----
-        if source == 'baostock':
+        if workers == 1:
+            # 单进程直接顺序执行，避免 ProcessPoolExecutor 在 Windows 上的 fork 开销和僵尸进程风险
+            fetch_fn = _fetch_baostock_chunk if source == 'baostock' else _fetch_akshare_batch
+            for chunk in chunks:
+                try:
+                    if source == 'baostock':
+                        records, skipped, failed = fetch_fn(chunk, trade_date)
+                    else:
+                        records, skipped, failed = fetch_fn(chunk, trade_date, preclose_map)
+                    _consume_batch(records, skipped, failed)
+                except Exception as exc:
+                    logger.error(
+                        '[SYNC_DAILY_BULK] 单进程批次异常，股票 %s~%s，数量 %s，错误: %s',
+                        chunk[0], chunk[-1], len(chunk), exc
+                    )
+                    failed = [
+                        {'symbol': symbol, 'reason': f'batch exception: {exc}'}
+                        for symbol in chunk
+                    ]
+                    _consume_batch([], [], failed)
+        elif source == 'baostock':
             _run_parallel(_fetch_baostock_chunk, (trade_date,))
         else:
             _run_parallel(_fetch_akshare_batch, (trade_date, preclose_map))

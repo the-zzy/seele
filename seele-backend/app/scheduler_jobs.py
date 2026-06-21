@@ -147,8 +147,7 @@ def scheduled_sync_financial(db, log_id: int) -> None:
 
 @_with_job_log('indicator')
 def scheduled_compute_indicators(db, log_id: int) -> None:
-    """定时计算日线指标（提交后台线程执行，与手动触发行为一致）"""
-    import threading
+    """定时计算日线指标（同步执行，与后台任务行为一致）"""
     import uuid
 
     today = datetime.now()
@@ -195,15 +194,8 @@ def scheduled_compute_indicators(db, log_id: int) -> None:
 
     task_id = str(uuid.uuid4())
     _register_task(task_id, trade_date, job_type='indicator', log_id=log_id)
-    t = threading.Thread(
-        target=_run_sync_indicator_bg,
-        args=(task_id, formatted_date, log_id, True),
-        daemon=True,
-    )
-    t.start()
-    logger.info('[SCHEDULER] 指标计算后台线程已启动, task_id=%s, log_id=%s', task_id, log_id)
-    # 后台线程自行更新日志状态，定时任务立即返回
-    return
+    _run_sync_indicator_bg(task_id, formatted_date, log_id, True)
+    logger.info('[SCHEDULER] 指标计算完成, task_id=%s, log_id=%s', task_id, log_id)
 
 
 def _run_scheduled_sync_board_daily(db, log_id: int, only_missing: bool = False) -> None:

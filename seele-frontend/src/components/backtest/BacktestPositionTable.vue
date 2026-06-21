@@ -9,8 +9,27 @@ const props = defineProps({
   closeMap: {
     type: Object,
     default: () => ({})
+  },
+  sortField: {
+    type: String,
+    default: 'symbol'
+  },
+  sortOrder: {
+    type: String,
+    default: 'asc'
   }
 })
+
+const emit = defineEmits(['sort'])
+
+function onSort (field) {
+  emit('sort', field)
+}
+
+function getSortIcon (field) {
+  if (field !== props.sortField) return '⇅'
+  return props.sortOrder === 'asc' ? '▲' : '▼'
+}
 
 function fmt (v) {
   if (v == null) return '-'
@@ -46,7 +65,25 @@ const items = computed(() => {
       unrealized_pct: unrealizedPct
     })
   }
-  return result
+
+  const field = props.sortField
+  const order = props.sortOrder
+  const multiplier = order === 'desc' ? -1 : 1
+
+  return result.sort((a, b) => {
+    const va = a[field]
+    const vb = b[field]
+
+    if (va == null && vb == null) return 0
+    if (va == null) return 1 * multiplier
+    if (vb == null) return -1 * multiplier
+
+    if (typeof va === 'number' && typeof vb === 'number') {
+      return (va - vb) * multiplier
+    }
+
+    return String(va).localeCompare(String(vb), 'zh-CN') * multiplier
+  })
 })
 </script>
 
@@ -56,13 +93,13 @@ const items = computed(() => {
     <table v-else class="stock-table">
       <thead>
         <tr>
-          <th>股票代码</th>
-          <th>股票名称</th>
-          <th class="num">持仓股数</th>
-          <th class="num">平均成本</th>
-          <th class="num">收盘价</th>
-          <th class="num">市值</th>
-          <th class="num">浮动盈亏</th>
+          <th class="sortable" @click="onSort('symbol')"><span class="th-label">股票代码</span><span class="sort-icon">{{ getSortIcon('symbol') }}</span></th>
+          <th class="sortable" @click="onSort('name')"><span class="th-label">股票名称</span><span class="sort-icon">{{ getSortIcon('name') }}</span></th>
+          <th class="sortable num" @click="onSort('quantity')"><span class="th-label">持仓股数</span><span class="sort-icon">{{ getSortIcon('quantity') }}</span></th>
+          <th class="sortable num" @click="onSort('avg_cost')"><span class="th-label">平均成本</span><span class="sort-icon">{{ getSortIcon('avg_cost') }}</span></th>
+          <th class="sortable num" @click="onSort('close')"><span class="th-label">收盘价</span><span class="sort-icon">{{ getSortIcon('close') }}</span></th>
+          <th class="sortable num" @click="onSort('market_value')"><span class="th-label">市值</span><span class="sort-icon">{{ getSortIcon('market_value') }}</span></th>
+          <th class="sortable num" @click="onSort('unrealized')"><span class="th-label">浮动盈亏</span><span class="sort-icon">{{ getSortIcon('unrealized') }}</span></th>
         </tr>
       </thead>
       <tbody>
@@ -92,6 +129,24 @@ const items = computed(() => {
 .stock-table {
   min-width: 640px;
   width: 100%;
+
+  th.sortable {
+    cursor: pointer;
+    user-select: none;
+
+    &:hover {
+      color: var(--text-primary);
+    }
+  }
+
+  .th-label {
+    margin-right: 4px;
+  }
+
+  .sort-icon {
+    font-size: 10px;
+    color: var(--text-muted);
+  }
 }
 
 .state {

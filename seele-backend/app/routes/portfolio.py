@@ -111,30 +111,28 @@ def _calc_trade_fees(
     stamp_tax_rate: float,
     transfer_rate: float,
 ) -> dict:
-    """根据交易类型和配置费率计算三费及合计
+    """根据交易类型和配置费率计算印花税、过户费及券商佣金
 
-    返回: {'commission': ..., 'stamp_tax': ..., 'transfer_fee': ..., 'fee': ...}
+    券商佣金部分按不免五处理（最低 5 元）。
+    返回: {'commission': ..., 'stamp_tax': ..., 'transfer_fee': ...}
     """
     amount = float(amount)
     commission = round(max(amount * commission_rate, 5.0), 2)
     stamp_tax = round(amount * stamp_tax_rate, 2) if trade_type == 'SELL' else 0.0
     transfer_fee = round(amount * transfer_rate, 2)
-    fee = round(commission + stamp_tax + transfer_fee, 2)
     return {
         'commission': commission,
         'stamp_tax': stamp_tax,
         'transfer_fee': transfer_fee,
-        'fee': fee,
     }
 
 
 def _apply_trade_fees(data: dict, trade_type: str, config: models.PortfolioConfig) -> dict:
-    """根据配置自动补齐交易三费，并计算合计 fee
+    """根据配置自动补齐交易费用
 
     规则：
-    - 如果 commission / stamp_tax / transfer_fee 均未传入，按默认费率自动计算。
-    - 如果部分传入，只补齐未传入的部分。
-    - 始终按传入值或计算值重新计算 fee 合计。
+    - 如果 commission / stamp_tax / transfer_fee 未传入，按默认费率自动计算。
+    - 券商佣金部分始终按 amount * commission_rate 计算，不免五（最低 5 元）。
     """
     amount = float(data.get('amount', 0))
     commission_rate = float(config.commission_rate)
@@ -147,12 +145,6 @@ def _apply_trade_fees(data: dict, trade_type: str, config: models.PortfolioConfi
         if data.get(key) is None:
             data[key] = auto_fees[key]
 
-    data['fee'] = round(
-        float(data.get('commission', 0))
-        + float(data.get('stamp_tax', 0))
-        + float(data.get('transfer_fee', 0)),
-        2,
-    )
     return data
 
 
@@ -234,6 +226,37 @@ def _calc_history_pnl(market_value: float, trades: List[models.PortfolioTrade]) 
     )
     total_dividend = sum(float(t.dividend or 0) for t in trades)
     return market_value + total_sell - total_buy - total_fee + total_dividend
+
+
+def _calc_current_holding_start_date(trades: List[models.PortfolioTrade]) -> Optional[date]:
+    """计算当前连续持仓周期的起始买入日期
+
+    从今天往前推，找到最近一次持仓数量从 0 变为大于 0 的买入交易日。
+    如果当前没有持仓，返回 None。
+    """
+    sorted_trades = sorted(trades, key=lambda t: (t.trade_date, t.id))
+    current_qty = 0
+    start_date = None
+    for t in sorted_trades:
+        if t.trade_type == 'BUY':
+            if current_qty == 0:
+                start_date = t.trade_date
+            current_qty += t.quantity
+        else:
+            current_qty -= t.quantity
+            if current_qty <= 0:
+                current_qty = 0
+                start_date = None
+    return start_date
+
+
+def _calc_current_pnl(market_value: float, trades: List[models.PortfolioTrade]) -> float:
+    """计算当前连续持仓周期的盈亏（含本周期内已卖出部分、手续费和分红）"""
+    start_date = _calc_current_holding_start_date(trades)
+    if start_date is None:
+        return 0.0
+    period_trades = [t for t in trades if t.trade_date >= start_date]
+    return _calc_history_pnl(market_value, period_trades)
 
 
 def _sync_position_snapshot(db: Session, symbol: str) -> Optional[models.PortfolioPosition]:
@@ -536,26 +559,12 @@ def create_trade(
     if price_err:
         return {'code': 400, 'message': price_err}
 
-    # 构建数据，排除 realized_pnl（模型无此字段）
-    data = obj_in.model_dump(exclude={'realized_pnl'})
+    data = obj_in.model_dump()
     if data.get('amount') is None and data.get('price') and data.get('quantity'):
         data['amount'] = round(data['price'] * data['quantity'], 4)
 
     config = _get_config(db)
     data = _apply_trade_fees(data, obj_in.trade_type, config)
-
-    # 卖出时若填写了实际盈亏，以佣金为调整项使 fee 匹配目标值
-    if obj_in.trade_type == 'SELL' and obj_in.realized_pnl is not None:
-        existing_trades = portfolio_trade_crud.get_by_symbol(db, obj_in.symbol)
-        fifo_cost = _calc_new_sell_comprehensive_cost(existing_trades, obj_in.quantity)
-        theoretical_pnl = data['amount'] - fifo_cost
-        target_fee = round(theoretical_pnl - obj_in.realized_pnl, 2)
-        if target_fee < 0:
-            return {'code': 400, 'message': f'计算得出的手续费为 {target_fee} 元，小于0，请检查盈亏金额是否填写正确'}
-        data['commission'] = round(
-            target_fee - float(data.get('stamp_tax', 0)) - float(data.get('transfer_fee', 0)), 2
-        )
-        data['fee'] = target_fee
 
     trade = models.PortfolioTrade(**data)
     db.add(trade)
@@ -612,10 +621,9 @@ def create_day_trade(
         price=obj_in.buy_price,
         quantity=quantity,
         amount=buy_amount,
-        commission=0,
         stamp_tax=0,
         transfer_fee=0,
-        fee=0,
+        commission=0,
         dividend=0,
         remark=remark,
     )
@@ -627,10 +635,9 @@ def create_day_trade(
         price=obj_in.sell_price,
         quantity=quantity,
         amount=sell_amount,
-        commission=0,
         stamp_tax=0,
         transfer_fee=0,
-        fee=0,
+        commission=0,
         dividend=0,
         remark=remark,
     )
@@ -701,29 +708,6 @@ def update_trade(
 
     config = _get_config(db)
     update_data = _apply_trade_fees(update_data, trade.trade_type, config)
-
-    # 卖出时若提供了实际盈亏，以佣金为调整项使 fee 匹配目标值
-    if (
-        trade.trade_type == 'SELL'
-        and update_data.get('realized_pnl') is not None
-    ):
-        existing_trades = [
-            t for t in portfolio_trade_crud.get_by_symbol(db, trade.symbol)
-            if t.id != id
-        ]
-        sell_qty = update_data.get('quantity', trade.quantity)
-        fifo_cost = _calc_new_sell_comprehensive_cost(existing_trades, sell_qty)
-        amount = update_data.get('amount', float(trade.amount))
-        theoretical_pnl = amount - fifo_cost
-        target_fee = round(theoretical_pnl - update_data['realized_pnl'], 2)
-        if target_fee < 0:
-            return {'code': 400, 'message': f'计算得出的手续费为 {target_fee} 元，小于0，请检查盈亏金额是否填写正确'}
-        update_data['commission'] = round(
-            target_fee - float(update_data.get('stamp_tax', 0)) - float(update_data.get('transfer_fee', 0)), 2
-        )
-        update_data['fee'] = target_fee
-        # realized_pnl 不是模型字段，不入库
-        update_data.pop('realized_pnl', None)
 
     portfolio_trade_crud.update(db, id, update_data)
 
@@ -830,6 +814,13 @@ def get_positions(
         data['history_pnl'] = round(history_pnl, 4)
         current_cost = float(p.avg_cost) * int(p.quantity)
         data['history_pnl_pct'] = round(history_pnl / current_cost * 100, 4) if current_cost > 0 else None
+
+        # 计算当前连续持仓周期的盈亏与起始日
+        current_start = _calc_current_holding_start_date(symbol_trades)
+        data['current_holding_start_date'] = current_start.strftime('%Y-%m-%d') if current_start else None
+        current_pnl = _calc_current_pnl(mv, symbol_trades)
+        data['current_pnl'] = round(current_pnl, 4)
+        data['current_pnl_pct'] = round(current_pnl / current_cost * 100, 4) if current_cost > 0 else None
 
         items.append(data)
 

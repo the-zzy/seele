@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { toast } from '@/composables/useToast'
 import { useStockData } from '@/composables/useStockData'
 import { useSyncTask } from '@/composables/useSyncTask'
+import { useTableSort } from '@/composables/useTableSort'
 import { syncApi, tradeCalendarApi } from '@/api/stock'
 import StockFilterPanel from '@/components/stock/StockFilterPanel.vue'
 import StockDataTable from '@/components/stock/StockDataTable.vue'
@@ -85,8 +86,11 @@ const singleSyncProgress = computed(() => {
   return { visible: false, percent: 0, current: 0, total: 0, message: '' }
 })
 
-const sortField = ref('symbol')
-const sortOrder = ref('asc')
+const { sortField, sortOrder, handleSort } = useTableSort({
+  defaultField: 'symbol',
+  defaultOrder: 'asc',
+  onChange: () => handleSearch()
+})
 const confirmDialog = reactive({
   visible: false,
   title: '',
@@ -134,16 +138,6 @@ function confirmSyncAction (message, context = {}) {
     detail: '同步任务会在后台异步执行，页面可实时查看进度；期间可以继续浏览其它数据。',
     confirmText: '开始获取'
   })
-}
-
-function handleSort (field) {
-  if (sortField.value === field) {
-    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
-  } else {
-    sortField.value = field
-    sortOrder.value = 'asc'
-  }
-  handleSearch()
 }
 
 function handleRowDblClick (item) {

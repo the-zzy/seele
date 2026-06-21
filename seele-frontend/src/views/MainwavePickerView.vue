@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { stockDailyApi, tradeCalendarApi } from '@/api/stock'
 import { formatNumber } from '@/utils/formatters'
+import { useTableSort } from '@/composables/useTableSort'
 import MainwavePickerFilter from '@/components/stock/MainwavePickerFilter.vue'
 import MainwaveTable from '@/components/stock/MainwaveTable.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
@@ -27,18 +28,12 @@ const filterForm = ref({
   maBull: true
 })
 
-const sortField = ref('score')
-const sortOrder = ref('desc')
-
-function handleSort (field) {
-  if (sortField.value === field) {
-    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
-  } else {
-    sortField.value = field
-    sortOrder.value = 'asc'
-  }
-  loadData()
-}
+const { sortField, sortOrder, handleSort } = useTableSort({
+  defaultField: 'score',
+  defaultOrder: 'desc',
+  getDefaultOrder: field => field === 'score' ? 'desc' : 'asc',
+  onChange: () => loadData()
+})
 
 async function loadLatestTradeDate () {
   try {

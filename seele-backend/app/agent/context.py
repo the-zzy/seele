@@ -86,7 +86,7 @@ Seele 是一个中文 A 股数据管理与分析平台，核心模块如下：
 - symbol, name, report_date, net_profit, net_profit_yoy, roe, gross_profit_ratio, net_profit_ratio, revenue_yoy, eps, debt_ratio, total_assets, total_equity
 
 ### portfolio_trade — 交易记录
-- symbol, name, trade_type (BUY/SELL), trade_date, price, quantity, amount, fee, remark
+- symbol, name, trade_type (BUY/SELL), trade_date, price, quantity, amount, commission, stamp_tax, transfer_fee, dividend, remark
 
 ### portfolio_position — 当前持仓快照
 - symbol, name, quantity, avg_cost, current_price, market_value, unrealized_pnl, unrealized_pnl_pct, stop_loss_price, take_profit_price, group, remark

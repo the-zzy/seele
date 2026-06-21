@@ -42,14 +42,14 @@ async def lifespan(app: FastAPI):
     scheduler = get_scheduler()
     scheduler.add_job(
         scheduled_sync_stock_basic,
-        trigger=CronTrigger(hour=1, minute=0, day_of_week='mon-fri'),
+        trigger=CronTrigger(hour=16, minute=0, day_of_week='mon-fri'),
         id='sync_stock_basic',
         name='股票基础信息同步',
         replace_existing=True,
     )
     scheduler.add_job(
         scheduled_sync_daily,
-        trigger=CronTrigger(hour=16, minute=0, day_of_week='mon-fri'),
+        trigger=CronTrigger(hour=23, minute=55, day_of_week='mon-fri'),
         id='sync_daily',
         name='股票日线数据同步',
         replace_existing=True,
@@ -256,6 +256,21 @@ def root():
 def health():
     """健康检查"""
     return success("OK")
+
+
+@app.get('/scheduler-jobs', dependencies=auth_dep)
+def scheduler_jobs():
+    """调试：列出当前 scheduler 中的任务"""
+    scheduler = get_scheduler()
+    jobs = []
+    for job in scheduler.get_jobs():
+        jobs.append({
+            'id': job.id,
+            'name': job.name,
+            'trigger': str(job.trigger),
+            'next_run_time': job.next_run_time.isoformat() if job.next_run_time else None,
+        })
+    return success(jobs)
 
 
 if __name__ == "__main__":
