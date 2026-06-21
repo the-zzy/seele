@@ -2,7 +2,8 @@
 
 ## 2026-06-22
 - `portfolio_trade` 费用字段精简：删除 `fee` 合计字段，保留 `commission`、`stamp_tax`、`transfer_fee` 三个明细字段
-- 合计费用由前端/接口实时计算
+- 合计费用由前端/接口实时计算，不再冗余存储
+- 数据库层面对已有数据：将旧 `fee` 按 `commission = GREATEST(fee - stamp_tax - transfer_fee, 0)` 拆分填入 `commission`
 - 适用版本：v2.4
 
 ## 2026-06-18

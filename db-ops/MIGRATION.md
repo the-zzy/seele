@@ -176,6 +176,20 @@ mysql -u root -p seele < /tmp/seele_backup_YYYYMMDD_HHMMSS.sql
 systemctl start seele-backend
 ```
 
+回滚后验证：
+
+```bash
+# 1. 确认后端进程正常且端口监听
+ss -tlnp | grep 9000
+
+# 2. 检查关键接口健康状态
+curl -s http://127.0.0.1:9000/health | grep -E '"status"|"ok"'
+
+# 3. 验证关键表结构与回滚前一致
+mysql -u root -p"$DB_PASS" seele -e "DESCRIBE portfolio_trade;"
+mysql -u root -p"$DB_PASS" seele -e "DESCRIBE portfolio_config;"
+```
+
 ## 六、检查清单
 
 - [ ] 迁移前已备份数据库
