@@ -1,10 +1,11 @@
 <script setup>
-import { ref, onMounted, computed, nextTick, watch, toRef } from 'vue'
+import { ref, reactive, onMounted, computed, nextTick, watch, toRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { useEChart } from '@/composables/useEChart'
 import { useViewport } from '@/composables/useViewport'
 import { useFixedRows } from '@/composables/useFixedRows'
 import { toast } from '@/composables/useToast'
+import { useTableSort } from '@/composables/useTableSort'
 import { portfolioApi } from '@/api/portfolio'
 import PageHero from '@/components/common/PageHero.vue'
 import PortfolioStatsCards from '@/components/portfolio/PortfolioStatsCards.vue'
@@ -28,6 +29,13 @@ const summary = ref({
   total_return_pct: 0
 })
 
+const config = ref({
+  initial_capital: 35000,
+  commission_rate: 0.000235,
+  stamp_tax_rate: 0.0005,
+  transfer_rate: 0.00001
+})
+
 const router = useRouter()
 const { isMobile } = useViewport()
 
@@ -36,8 +44,6 @@ const positions = ref([])
 const trades = ref([])
 const closedList = ref([])
 const loading = ref(false)
-
-const closedPaddedList = useFixedRows(closedList)
 
 // 交易记录分页
 const tradePageNum = ref(1)
@@ -52,15 +58,48 @@ const closedTotal = ref(0)
 // 标签页
 const activeTab = ref('positions') // positions | trades | closed
 
+// 排序状态
+const positionSort = useTableSort({ defaultField: 'symbol', defaultOrder: 'asc' })
+const tradeSort = useTableSort({ defaultField: 'trade_date', defaultOrder: 'desc' })
+const closedSort = useTableSort({ defaultField: 'close_date', defaultOrder: 'desc' })
+
+const sortedClosedList = computed(() => {
+  const field = closedSort.sortField.value
+  const order = closedSort.sortOrder.value
+  const multiplier = order === 'desc' ? -1 : 1
+
+  return [...closedList.value].sort((a, b) => {
+    const va = a[field]
+    const vb = b[field]
+
+    if (va == null && vb == null) return 0
+    if (va == null) return 1 * multiplier
+    if (vb == null) return -1 * multiplier
+
+    if (typeof va === 'number' && typeof vb === 'number') {
+      return (va - vb) * multiplier
+    }
+
+    return String(va).localeCompare(String(vb), 'zh-CN') * multiplier
+  })
+})
+
+const closedPaddedList = useFixedRows(sortedClosedList)
+
 // 弹窗
 const modalVisible = ref(false)
 const modalType = ref('BUY')
 const editingTrade = ref(null)
 const dayTradeModalVisible = ref(false)
 
-// 初始资金编辑
-const capitalModalVisible = ref(false)
-const capitalInput = ref('')
+// 持仓配置编辑
+const configModalVisible = ref(false)
+const configForm = reactive({
+  initial_capital: '',
+  commission_rate: '',
+  stamp_tax_rate: '',
+  transfer_rate: ''
+})
 
 // 预警
 const alerts = ref([])
@@ -79,6 +118,15 @@ async function loadSummary () {
   try {
     const res = await portfolioApi.getSummary()
     summary.value = res || {}
+    const cfg = await portfolioApi.getConfig()
+    if (cfg) {
+      config.value = {
+        initial_capital: cfg.initial_capital ?? 35000,
+        commission_rate: cfg.commission_rate ?? 0.000235,
+        stamp_tax_rate: cfg.stamp_tax_rate ?? 0.0005,
+        transfer_rate: cfg.transfer_rate ?? 0.00001
+      }
+    }
   } catch (e) {
     console.error('加载总览失败:', e)
   }
@@ -349,20 +397,29 @@ function openEditModal (item) {
   modalVisible.value = true
 }
 
-function openCapitalModal () {
-  capitalInput.value = String(summary.value.initial_capital || 35000)
-  capitalModalVisible.value = true
+function openConfigModal () {
+  configForm.initial_capital = String(config.value.initial_capital ?? 35000)
+  configForm.commission_rate = String(config.value.commission_rate ?? 0.000235)
+  configForm.stamp_tax_rate = String(config.value.stamp_tax_rate ?? 0.0005)
+  configForm.transfer_rate = String(config.value.transfer_rate ?? 0.00001)
+  configModalVisible.value = true
 }
 
-async function onUpdateCapital () {
-  const val = Number(capitalInput.value)
-  if (!val || val <= 0) {
+async function onUpdateConfig () {
+  const initialCapital = Number(configForm.initial_capital)
+  if (!initialCapital || initialCapital <= 0) {
     toast.warning('请输入有效的初始资金')
     return
   }
+  const payload = {
+    initial_capital: initialCapital,
+    commission_rate: Number(configForm.commission_rate),
+    stamp_tax_rate: Number(configForm.stamp_tax_rate),
+    transfer_rate: Number(configForm.transfer_rate)
+  }
   try {
-    await portfolioApi.updateConfig({ initial_capital: val })
-    capitalModalVisible.value = false
+    await portfolioApi.updateConfig(payload)
+    configModalVisible.value = false
     await loadSummary()
   } catch (e) {
     toast.error('设置失败: ' + (e.message || '未知错误'))
@@ -458,8 +515,8 @@ onMounted(() => {
         <span class="capital-hint">初始资金 {{ (summary.initial_capital || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
         <button class="btn-config" @click="onSyncPositions">同步持仓</button>
         <button class="btn-config" @click="onRebuildDaily">重建资产</button>
-        <button class="btn-config" @click="openCapitalModal">设置资金</button>
-        <button class="btn-primary" @click="openModal('BUY')">+ 买入</button>
+        <button class="btn-config" @click="openConfigModal">配置</button>
+        <button class="btn-buy" @click="openModal('BUY')">+ 买入</button>
         <button class="btn-sell" @click="openModal('SELL')">- 卖出</button>
         <button class="btn-daytrade" @click="openDayTradeModal">做T</button>
       </template>
@@ -533,6 +590,9 @@ onMounted(() => {
       v-if="activeTab === 'positions'"
       :list="positions"
       :loading="loading"
+      :sort-field="positionSort.sortField"
+      :sort-order="positionSort.sortOrder"
+      @sort="positionSort.handleSort"
       @update-position="onUpdatePosition"
     />
 
@@ -540,6 +600,9 @@ onMounted(() => {
       <PortfolioTradeTable
         :list="trades"
         :loading="loading"
+        :sort-field="tradeSort.sortField"
+        :sort-order="tradeSort.sortOrder"
+        @sort="tradeSort.handleSort"
         @edit="openEditModal"
         @delete="onDeleteTrade"
       />
@@ -571,7 +634,6 @@ onMounted(() => {
               <div class="card-header">
                 <span class="card-symbol">{{ item.symbol }}</span>
                 <span class="card-name">{{ item.name }}</span>
-                <span class="card-days">{{ Math.ceil((new Date(item.close_date) - new Date(item.open_date)) / (1000 * 60 * 60 * 24)) }} 天</span>
               </div>
               <div class="card-fields">
                 <div class="card-field">
@@ -583,22 +645,11 @@ onMounted(() => {
                   <span class="field-value">{{ Number(item.total_sell_amount).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
                 </div>
                 <div class="card-field">
-                  <span class="field-label">手续费</span>
-                  <span class="field-value">{{ Number(item.total_fee || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
-                </div>
-                <div class="card-field">
                   <span class="field-label">实现盈亏</span>
                   <span
                     class="field-value"
                     :class="Number(item.realized_pnl) > 0 ? 'up' : Number(item.realized_pnl) < 0 ? 'down' : ''"
                   >{{ Number(item.realized_pnl).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
-                </div>
-                <div class="card-field">
-                  <span class="field-label">盈亏比例</span>
-                  <span
-                    class="field-value"
-                    :class="Number(item.pnl_pct) > 0 ? 'up' : Number(item.pnl_pct) < 0 ? 'down' : ''"
-                  >{{ Number(item.pnl_pct).toFixed(2) }}%</span>
                 </div>
               </div>
             </div>
@@ -608,14 +659,11 @@ onMounted(() => {
           <table class="stock-table">
             <thead>
               <tr>
-                <th>股票代码</th>
-                <th>股票名称</th>
-                <th class="num">总买入</th>
-                <th class="num">总卖出</th>
-                <th class="num">手续费</th>
-                <th class="num">实现盈亏</th>
-                <th class="num">盈亏比例</th>
-                <th class="num">持仓天数</th>
+                <th class="sortable" @click="closedSort.handleSort('symbol')"><span class="th-label">股票代码</span><span class="sort-icon">{{ closedSort.getSortIcon('symbol') }}</span></th>
+                <th class="sortable" @click="closedSort.handleSort('name')"><span class="th-label">股票名称</span><span class="sort-icon">{{ closedSort.getSortIcon('name') }}</span></th>
+                <th class="sortable num" @click="closedSort.handleSort('total_buy_amount')"><span class="th-label">总买入</span><span class="sort-icon">{{ closedSort.getSortIcon('total_buy_amount') }}</span></th>
+                <th class="sortable num" @click="closedSort.handleSort('total_sell_amount')"><span class="th-label">总卖出</span><span class="sort-icon">{{ closedSort.getSortIcon('total_sell_amount') }}</span></th>
+                <th class="sortable num" @click="closedSort.handleSort('realized_pnl')"><span class="th-label">实现盈亏</span><span class="sort-icon">{{ closedSort.getSortIcon('realized_pnl') }}</span></th>
               </tr>
             </thead>
             <tbody>
@@ -630,19 +678,12 @@ onMounted(() => {
                   <td>{{ item.name }}</td>
                   <td class="num">{{ Number(item.total_buy_amount).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }}</td>
                   <td class="num">{{ Number(item.total_sell_amount).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }}</td>
-                  <td class="num">{{ Number(item.total_fee || 0).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }}</td>
                   <td class="num" :class="Number(item.realized_pnl) > 0 ? 'up' : Number(item.realized_pnl) < 0 ? 'down' : ''">
                     {{ Number(item.realized_pnl).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }}
                   </td>
-                  <td class="num" :class="Number(item.pnl_pct) > 0 ? 'up' : Number(item.pnl_pct) < 0 ? 'down' : ''">
-                    {{ Number(item.pnl_pct).toFixed(2) }}%
-                  </td>
-                  <td class="num">
-                    {{ Math.ceil((new Date(item.close_date) - new Date(item.open_date)) / (1000 * 60 * 60 * 24)) }}
-                  </td>
                 </template>
                 <template v-else>
-                  <td v-for="col in ['symbol','name','total_buy','total_sell','fee','realized_pnl','pnl_pct','days']" :key="col">&nbsp;</td>
+                  <td v-for="col in ['symbol','name','total_buy','total_sell','realized_pnl']" :key="col">&nbsp;</td>
                 </template>
               </tr>
             </tbody>
@@ -664,6 +705,7 @@ onMounted(() => {
       :type="modalType"
       :positions="positions"
       :edit-data="editingTrade"
+      :config="config"
       @submit="onSubmitTrade"
     />
 
@@ -693,22 +735,34 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- 初始资金设置弹窗 -->
-    <div v-if="capitalModalVisible" class="modal-overlay" @click.self="capitalModalVisible = false">
+    <!-- 持仓配置设置弹窗 -->
+    <div v-if="configModalVisible" class="modal-overlay" @click.self="configModalVisible = false">
       <div class="modal-panel capital-panel">
         <div class="modal-header">
-          <h3 class="modal-title">设置初始资金</h3>
-          <button class="modal-close" @click="capitalModalVisible = false">&times;</button>
+          <h3 class="modal-title">持仓配置</h3>
+          <button class="modal-close" @click="configModalVisible = false">&times;</button>
         </div>
         <div class="modal-body">
           <div class="form-row">
             <label>初始资金（元）</label>
-            <input v-model="capitalInput" placeholder="如 35000" type="number" step="1">
+            <input v-model="configForm.initial_capital" placeholder="如 35000" type="number" step="1">
+          </div>
+          <div class="form-row">
+            <label>佣金费率</label>
+            <input v-model="configForm.commission_rate" placeholder="如 0.000235" type="number" step="0.000001">
+          </div>
+          <div class="form-row">
+            <label>印花税税率</label>
+            <input v-model="configForm.stamp_tax_rate" placeholder="如 0.0005" type="number" step="0.000001">
+          </div>
+          <div class="form-row">
+            <label>过户费费率</label>
+            <input v-model="configForm.transfer_rate" placeholder="如 0.00001" type="number" step="0.000001">
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn-link" @click="capitalModalVisible = false">取消</button>
-          <button class="btn-primary" @click="onUpdateCapital">确认</button>
+          <button class="btn-link" @click="configModalVisible = false">取消</button>
+          <button class="btn-primary" @click="onUpdateConfig">确认</button>
         </div>
       </div>
     </div>
@@ -891,7 +945,7 @@ onMounted(() => {
   }
 }
 
-.btn-sell {
+.btn-buy {
   padding: 7px 16px;
   border: none;
   border-radius: 6px;
@@ -903,6 +957,21 @@ onMounted(() => {
 
   &:hover {
     background: #e04345;
+  }
+}
+
+.btn-sell {
+  padding: 7px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  color: #fff;
+  background: var(--accent);
+
+  &:hover {
+    background: var(--accent-hover);
   }
 }
 
@@ -1018,12 +1087,6 @@ onMounted(() => {
     white-space: nowrap;
   }
 
-  .card-days {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--text-muted);
-  }
-
   .card-fields {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
@@ -1078,6 +1141,24 @@ onMounted(() => {
 
   .stock-table {
     min-width: 720px;
+
+    th.sortable {
+      cursor: pointer;
+      user-select: none;
+
+      &:hover {
+        color: var(--text-primary);
+      }
+    }
+
+    .th-label {
+      margin-right: 4px;
+    }
+
+    .sort-icon {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
   }
 }
 

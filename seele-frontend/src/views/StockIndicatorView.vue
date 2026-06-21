@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { toast } from '@/composables/useToast'
 import { useStockData } from '@/composables/useStockData'
 import { useSyncTask } from '@/composables/useSyncTask'
+import { useTableSort } from '@/composables/useTableSort'
 import { syncApi, stockIndicatorApi, tradeCalendarApi } from '@/api/stock'
 import StockFilterPanel from '@/components/stock/StockFilterPanel.vue'
 import StockIndicatorTable from '@/components/stock/StockIndicatorTable.vue'
@@ -59,18 +60,11 @@ const computing = ref(false)
 const computeResult = ref({ visible: false, message: '', tone: 'info' })
 let computeResultTimer = null
 
-const sortField = ref('symbol')
-const sortOrder = ref('asc')
-
-function handleSort (field) {
-  if (sortField.value === field) {
-    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
-  } else {
-    sortField.value = field
-    sortOrder.value = 'asc'
-  }
-  handleSearch()
-}
+const { sortField, sortOrder, handleSort } = useTableSort({
+  defaultField: 'symbol',
+  defaultOrder: 'asc',
+  onChange: () => handleSearch()
+})
 
 function handleRowDblClick (item) {
   if (!item.symbol) return
@@ -211,7 +205,7 @@ onUnmounted(() => {
   <div class="stock-indicator page">
     <PageHero
       section="股票日线数据"
-      number="02.2"
+      number="03.2"
       title="指标数据"
       description="均线、均量、均换手等衍生指标。基于已同步的日线行情批量计算并落库。"
       meta="衍生指标"

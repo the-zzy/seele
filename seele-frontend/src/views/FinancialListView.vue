@@ -2,6 +2,7 @@
 import { reactive, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { financialApi } from '@/api/financial'
+import { useTableSort } from '@/composables/useTableSort'
 import FinancialListTable from '@/components/stock/FinancialListTable.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
 import PageHero from '@/components/common/PageHero.vue'
@@ -24,18 +25,11 @@ let filterForm = reactive({
   gross_profit_ratio_max: ''
 })
 
-const sortField = ref('roe')
-const sortOrder = ref('desc')
-
-function handleSort (field) {
-  if (sortField.value === field) {
-    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
-  } else {
-    sortField.value = field
-    sortOrder.value = 'desc'
-  }
-  loadData()
-}
+const { sortField, sortOrder, handleSort } = useTableSort({
+  defaultField: 'roe',
+  defaultOrder: 'desc',
+  onChange: () => loadData()
+})
 
 function buildParams () {
   const params = {

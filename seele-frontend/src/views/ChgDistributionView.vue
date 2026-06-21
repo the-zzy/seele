@@ -145,7 +145,7 @@ onMounted(() => {
   <div class="chg-distribution picker-page">
     <PageHero
       section="市场情绪"
-      number="02.1"
+      number="04.1"
       title="涨幅分布统计"
       description="按日期区间统计每日市场涨跌家数及强势标的占比，识别市场强弱节奏。点击柱状图查看当日板块分布。"
       meta="占比分布"

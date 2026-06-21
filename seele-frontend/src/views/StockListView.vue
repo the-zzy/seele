@@ -4,9 +4,11 @@ import { useRouter } from 'vue-router'
 import { toast } from '@/composables/useToast'
 import { useStockData } from '@/composables/useStockData'
 import { useSyncTask } from '@/composables/useSyncTask'
+import { useTableSort } from '@/composables/useTableSort'
 import { syncApi, tradeCalendarApi } from '@/api/stock'
 import StockFilterPanel from '@/components/stock/StockFilterPanel.vue'
 import StockDataTable from '@/components/stock/StockDataTable.vue'
+import SyncSingleStockModal from '@/components/stock/SyncSingleStockModal.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
 import SyncProgress from '@/components/common/SyncProgress.vue'
 import PageHero from '@/components/common/PageHero.vue'
@@ -62,8 +64,33 @@ const syncProgress = computed(() => {
   return { visible: false, percent: 0, current: 0, total: 0, message: '' }
 })
 
-const sortField = ref('symbol')
-const sortOrder = ref('asc')
+const singleSyncKey = ref('')
+const singleSyncVisible = ref(false)
+
+const singleSyncing = computed(() => !!syncMap[singleSyncKey.value])
+const singleSyncProgress = computed(() => {
+  const p = taskProgress[singleSyncKey.value] || { current: 0, total: 0, status: '' }
+  const current = p.current || 0
+  const total = p.total || 0
+  const percent = total ? Math.round(current / total * 100) : 0
+
+  if (p.status === 'success') {
+    return { visible: true, percent: 100, current, total, message: '单股同步完成' }
+  }
+  if (p.status === 'failed') {
+    return { visible: true, percent: 0, current: 0, total: 0, message: '单股同步失败' }
+  }
+  if (p.status === 'running') {
+    return { visible: true, percent, current, total, message: `正在同步单股: ${current} / ${total}` }
+  }
+  return { visible: false, percent: 0, current: 0, total: 0, message: '' }
+})
+
+const { sortField, sortOrder, handleSort } = useTableSort({
+  defaultField: 'symbol',
+  defaultOrder: 'asc',
+  onChange: () => handleSearch()
+})
 const confirmDialog = reactive({
   visible: false,
   title: '',
@@ -111,16 +138,6 @@ function confirmSyncAction (message, context = {}) {
     detail: '同步任务会在后台异步执行，页面可实时查看进度；期间可以继续浏览其它数据。',
     confirmText: '开始获取'
   })
-}
-
-function handleSort (field) {
-  if (sortField.value === field) {
-    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
-  } else {
-    sortField.value = field
-    sortOrder.value = 'asc'
-  }
-  handleSearch()
 }
 
 function handleRowDblClick (item) {
@@ -213,6 +230,25 @@ async function handleFetchData () {
   })
 }
 
+async function handleSyncSingleStock ({ symbol, trade_date: tradeDate }) {
+  singleSyncVisible.value = false
+  const key = `single_stock_${symbol}_${tradeDate.replace(/-/g, '')}`
+  singleSyncKey.value = key
+
+  await startSync(key, () => syncApi.syncSingleStock(symbol, tradeDate), {
+    interval: 2000,
+    onDone: (data) => {
+      if (data?.status === 'success') {
+        toast.success(`${symbol} ${tradeDate} 同步完成`)
+        clearCache()
+        handleSearch()
+      } else {
+        toast.error(`${symbol} ${tradeDate} 同步失败`)
+      }
+    }
+  })
+}
+
 onMounted(async () => {
   const date = await loadLatestTradeDate()
   if (date) {
@@ -222,7 +258,15 @@ onMounted(async () => {
   // 刷新后自动恢复正在运行的同步任务跟踪
   const tradeDateFormatted = filterForm.tradeDate?.replace(/-/g, '')
   await restoreTasks([
-    t => t.job_type === 'daily' && t.trade_date === tradeDateFormatted ? syncKey.value : null
+    t => t.job_type === 'daily' && t.trade_date === tradeDateFormatted ? syncKey.value : null,
+    t => {
+      if (t.job_type === 'daily_single' && t.trade_date === tradeDateFormatted) {
+        const key = `single_stock_${t.symbol || ''}_${t.trade_date}`
+        singleSyncKey.value = key
+        return key
+      }
+      return null
+    }
   ], {
     interval: 3000,
     onDone: (data) => {
@@ -239,11 +283,15 @@ onMounted(async () => {
   <div class="stock-list page">
     <PageHero
       section="股票日线数据"
-      number="02.1"
+      number="03.1"
       title="基本数据"
       description="按交易日期检索全市场基础日线行情：开高低收、涨跌、成交。指标列在「指标数据」中独立维护。"
       meta="行情快照"
-    />
+    >
+      <template #actions>
+        <button class="btn-ghost" @click="singleSyncVisible = true">同步单股</button>
+      </template>
+    </PageHero>
 
     <StockFilterPanel
       v-model="filterForm"
@@ -262,6 +310,14 @@ onMounted(async () => {
       :message="syncProgress.message"
     />
 
+    <SyncProgress
+      :visible="singleSyncProgress.visible"
+      :percent="singleSyncProgress.percent"
+      :current="singleSyncProgress.current"
+      :total="singleSyncProgress.total"
+      :message="singleSyncProgress.message"
+    />
+
     <StockDataTable
       :list="stockList"
       :sort-field="sortField"
@@ -278,6 +334,11 @@ onMounted(async () => {
       :total="total"
       @update:page-num="handlePageChange"
       @update:page-size="handlePageSizeChange"
+    />
+
+    <SyncSingleStockModal
+      v-model:visible="singleSyncVisible"
+      @submit="handleSyncSingleStock"
     />
 
     <ConfirmDialog
@@ -304,6 +365,26 @@ onMounted(async () => {
 
   @media (max-width: 768px) {
     padding: 4px 16px 12px;
+  }
+}
+
+.btn-ghost {
+  padding: 6px 14px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: all 0.2s;
+
+  &:hover {
+    border-color: var(--text-faint);
+    color: var(--text-primary);
   }
 }
 </style>

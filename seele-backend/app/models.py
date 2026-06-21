@@ -2,7 +2,7 @@
 数据库模型模块
 """
 
-from sqlalchemy import Column, Integer, String, Float, Numeric, Date, Text, UniqueConstraint, BigInteger, TIMESTAMP, Index
+from sqlalchemy import Column, Integer, String, Float, Numeric, Date, Text, UniqueConstraint, BigInteger, TIMESTAMP, Index, ForeignKey
 from sqlalchemy.sql import func
 
 from app.database import Base
@@ -107,7 +107,9 @@ class PortfolioTrade(Base):
     price = Column(Numeric(18, 4), nullable=False, comment='成交价格')
     quantity = Column(Integer, nullable=False, comment='成交股数')
     amount = Column(Numeric(18, 4), nullable=False, comment='成交金额')
-    fee = Column(Numeric(18, 4), default=0, comment='交易手续费')
+    stamp_tax = Column(Numeric(18, 2), default=0, comment='印花税')
+    transfer_fee = Column(Numeric(18, 2), default=0, comment='过户费')
+    commission = Column(Numeric(18, 2), default=0, comment='券商佣金/手续费')
     dividend = Column(Numeric(18, 4), default=0, comment='分红金额')
     remark = Column(String(255), comment='备注')
     created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
@@ -222,6 +224,9 @@ class PortfolioConfig(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     initial_capital = Column(Numeric(18, 4), nullable=False, default=35000.0, comment='初始资金')
+    commission_rate = Column(Numeric(18, 6), nullable=False, default=0.000235, comment='佣金费率')
+    stamp_tax_rate = Column(Numeric(18, 6), nullable=False, default=0.0005, comment='印花税税率')
+    transfer_rate = Column(Numeric(18, 6), nullable=False, default=0.00001, comment='过户费费率')
     created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
 
@@ -411,7 +416,7 @@ class SyncJobLog(Base):
     total_count = Column(Integer, nullable=True, default=0, comment='总处理数')
     trade_date = Column(String(8), nullable=True, comment='关联交易日')
     error_message = Column(String(2000), nullable=True, comment='错误信息')
-    extra_info = Column(String(1000), nullable=True, comment='额外信息')
+    extra_info = Column(Text, nullable=True, comment='额外信息')
 
     __table_args__ = {
         'mysql_collate': 'utf8mb4_unicode_ci',
@@ -542,3 +547,107 @@ class VisitorLog(Base):
     __table_args__ = {
         'mysql_collate': 'utf8mb4_unicode_ci',
     }
+
+
+class BacktestRun(Base):
+    """回测运行表"""
+    __tablename__ = 'backtest_run'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    start_date = Column(Date, nullable=False, comment='开始日期')
+    end_date = Column(Date, nullable=True, comment='结束日期（自动运行用）')
+    current_date = Column(Date, nullable=False, comment='当前已处理日期')
+    initial_capital = Column(Numeric(18, 4), nullable=False, default=40000, comment='初始资金')
+    cash = Column(Numeric(18, 4), nullable=False, default=40000, comment='剩余现金')
+    status = Column(String(20), nullable=False, default='running', comment='状态 running/completed/failed')
+    total_market_value = Column(Numeric(18, 4), nullable=False, default=0, comment='持仓总市值')
+    total_return_pct = Column(Numeric(18, 4), nullable=False, default=0, comment='总收益率%')
+    ai_model = Column(String(50), nullable=False, default='deepseek-v4-pro', comment='AI 模型')
+    created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
+
+    __table_args__ = {
+        'mysql_collate': 'utf8mb4_unicode_ci',
+    }
+
+
+class BacktestTrade(Base):
+    """回测交易记录表"""
+    __tablename__ = 'backtest_trade'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(Integer, ForeignKey('backtest_run.id'), nullable=False, index=True, comment='回测ID')
+    symbol = Column(String(20), nullable=False, comment='股票代码')
+    name = Column(String(100), comment='股票名称')
+    trade_type = Column(String(10), nullable=False, comment='交易类型 BUY/SELL')
+    trade_date = Column(Date, nullable=False, index=True, comment='交易日期')
+    price = Column(Numeric(18, 4), nullable=False, comment='成交价格')
+    quantity = Column(Integer, nullable=False, comment='成交股数（100倍数）')
+    amount = Column(Numeric(18, 4), nullable=False, comment='成交金额')
+    fee = Column(Numeric(18, 4), default=0, comment='手续费')
+    created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
+
+    __table_args__ = {
+        'mysql_collate': 'utf8mb4_unicode_ci',
+    }
+
+
+class BacktestDailySnapshot(Base):
+    """回测每日快照表"""
+    __tablename__ = 'backtest_daily_snapshot'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(Integer, ForeignKey('backtest_run.id'), nullable=False, index=True, comment='回测ID')
+    trade_date = Column(Date, nullable=False, index=True, comment='交易日期')
+    cash = Column(Numeric(18, 4), nullable=False, default=0, comment='现金')
+    total_market_value = Column(Numeric(18, 4), nullable=False, default=0, comment='总市值')
+    total_asset = Column(Numeric(18, 4), nullable=False, default=0, comment='总资产')
+    daily_pnl = Column(Numeric(18, 4), nullable=False, default=0, comment='当日盈亏')
+    cumulative_pnl = Column(Numeric(18, 4), nullable=False, default=0, comment='累计盈亏')
+    unrealized_pnl = Column(Numeric(18, 4), nullable=False, default=0, comment='浮动盈亏')
+    created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
+
+    __table_args__ = (
+        UniqueConstraint('run_id', 'trade_date', name='uq_backtest_snapshot_run_date'),
+        {'mysql_collate': 'utf8mb4_unicode_ci'},
+    )
+
+
+class BacktestDecisionLog(Base):
+    """回测 AI 决策日志表"""
+    __tablename__ = 'backtest_decision_log'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(Integer, ForeignKey('backtest_run.id'), nullable=False, index=True, comment='回测ID')
+    trade_date = Column(Date, nullable=False, comment='交易日期')
+    prompt_snapshot = Column(Text, comment='提示词快照')
+    llm_raw_response = Column(Text, comment='LLM 原始响应')
+    parsed_actions = Column(Text, comment='解析后的动作(JSON)')
+    latency_ms = Column(Integer, comment='耗时(ms)')
+    created_at = Column(TIMESTAMP, server_default=func.now(), comment='创建时间')
+
+    __table_args__ = {
+        'mysql_collate': 'utf8mb4_unicode_ci',
+    }
+
+
+class BacktestTask(Base):
+    """回测后台任务表（用于持久化任务状态、防并发、刷新后恢复轮询）"""
+    __tablename__ = 'backtest_task'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(String(64), unique=True, nullable=False, index=True, comment='任务UUID')
+    run_id = Column(Integer, ForeignKey('backtest_run.id'), nullable=True, index=True, comment='回测ID')
+    status = Column(String(20), nullable=False, default='running', comment='状态 running/success/failed')
+    result_json = Column(Text, nullable=True, comment='任务结果JSON')
+    error = Column(Text, nullable=True, comment='错误信息')
+    progress_current = Column(Integer, nullable=True, comment='进度当前值')
+    progress_total = Column(Integer, nullable=True, comment='进度总数')
+    started_at = Column(TIMESTAMP, server_default=func.now(), comment='开始时间')
+    finished_at = Column(TIMESTAMP, nullable=True, comment='结束时间')
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), comment='更新时间')
+
+    __table_args__ = (
+        Index('idx_backtest_task_run_status', 'run_id', 'status'),
+        {'mysql_collate': 'utf8mb4_unicode_ci'},
+    )

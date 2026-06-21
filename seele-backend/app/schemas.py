@@ -4,7 +4,7 @@
 
 from datetime import date, datetime
 from typing import Optional, List, Any
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ==================== 通用响应 ====================
 
@@ -415,9 +415,10 @@ class PortfolioTradeCreate(BaseModel):
     price: float = Field(..., description='成交价格')
     quantity: int = Field(..., description='成交股数')
     amount: Optional[float] = Field(None, description='成交金额（不传则自动计算）')
-    fee: Optional[float] = Field(0, description='交易手续费')
+    stamp_tax: Optional[float] = Field(None, description='印花税')
+    transfer_fee: Optional[float] = Field(None, description='过户费')
+    commission: Optional[float] = Field(None, description='券商佣金/手续费（不传则自动计算）')
     dividend: Optional[float] = Field(0, description='分红金额')
-    realized_pnl: Optional[float] = Field(None, description='实际盈亏金额（卖出时可选，用于自动计算手续费）')
     remark: Optional[str] = Field(None, description='备注')
 
     @field_validator('trade_date', mode='before')
@@ -471,11 +472,25 @@ class PortfolioTradeResponse(BaseModel):
     price: float
     quantity: int
     amount: float
-    fee: Optional[float] = 0
+    stamp_tax: Optional[float] = 0
+    transfer_fee: Optional[float] = 0
+    commission: Optional[float] = 0
+    total_fee: Optional[float] = None
     dividend: Optional[float] = 0
     remark: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+    @model_validator(mode='after')
+    def compute_total_fee(self):
+        if self.total_fee is None:
+            self.total_fee = round(
+                float(self.commission or 0)
+                + float(self.stamp_tax or 0)
+                + float(self.transfer_fee or 0),
+                2,
+            )
+        return self
 
     @field_validator('trade_date', mode='before')
     @classmethod
@@ -506,9 +521,10 @@ class PortfolioTradeUpdate(BaseModel):
     price: Optional[float] = Field(None, description='成交价格')
     quantity: Optional[int] = Field(None, description='成交股数')
     amount: Optional[float] = Field(None, description='成交金额')
-    fee: Optional[float] = Field(None, description='交易手续费')
+    stamp_tax: Optional[float] = Field(None, description='印花税')
+    transfer_fee: Optional[float] = Field(None, description='过户费')
+    commission: Optional[float] = Field(None, description='券商佣金/手续费')
     dividend: Optional[float] = Field(None, description='分红金额')
-    realized_pnl: Optional[float] = Field(None, description='实际盈亏金额（卖出时填写，用于重新计算手续费）')
     remark: Optional[str] = Field(None, description='备注')
 
     @field_validator('trade_date', mode='before')
@@ -609,6 +625,9 @@ class PortfolioSummary(BaseModel):
 class PortfolioConfigUpdate(BaseModel):
     """持仓配置-更新"""
     initial_capital: float = Field(..., description='初始资金')
+    commission_rate: Optional[float] = Field(0.000235, description='佣金费率')
+    stamp_tax_rate: Optional[float] = Field(0.0005, description='印花税税率')
+    transfer_rate: Optional[float] = Field(0.00001, description='过户费费率')
 
 
 class DailyPnlItem(BaseModel):
@@ -719,6 +738,9 @@ class PortfolioPositionResponse(BaseModel):
     group: Optional[str] = 'default'
     remark: Optional[str] = None
     first_buy_date: Optional[str] = None
+    current_holding_start_date: Optional[str] = None
+    current_pnl: Optional[float] = None
+    current_pnl_pct: Optional[float] = None
     updated_at: Optional[str] = None
 
     @field_validator('first_buy_date', mode='before')
@@ -1250,4 +1272,183 @@ class VisitorLogQuery(BaseModel):
     page_size: int = Field(default=20, description='每页条数')
     ip_address: Optional[str] = Field(None, description='IP地址')
     days: Optional[int] = Field(None, description='最近N天')
+
+
+# ==================== 回测 ====================
+
+
+class BacktestCreate(BaseModel):
+    """回测-创建"""
+    start_date: str = Field(..., description='开始日期 YYYY-MM-DD')
+    end_date: Optional[str] = Field(None, description='结束日期 YYYY-MM-DD（自动运行用）')
+    initial_capital: Optional[float] = Field(default=40000, description='初始资金')
+    ai_model: Optional[str] = Field(default='deepseek-v4-pro', description='AI 模型')
+
+
+class BacktestResponse(BaseModel):
+    """回测-响应"""
+    id: int
+    start_date: str
+    end_date: Optional[str] = None
+    current_date: str
+    initial_capital: float
+    cash: float
+    status: str
+    total_market_value: float
+    total_return_pct: float
+    ai_model: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    @field_validator('start_date', 'end_date', 'current_date', mode='before')
+    @classmethod
+    def validate_date(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d')
+        return str(v)
+
+    @field_validator('created_at', 'updated_at', mode='before')
+    @classmethod
+    def validate_timestamp(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d %H:%M:%S')
+        return str(v)
+
+    class Config:
+        from_attributes = True
+
+
+class BacktestTradeAction(BaseModel):
+    """回测-AI 交易动作"""
+    symbol: str
+    quantity: int
+
+
+class BacktestDecisionOutput(BaseModel):
+    """回测-AI 决策输出"""
+    sell: List[BacktestTradeAction] = Field(default_factory=list)
+    buy: List[BacktestTradeAction] = Field(default_factory=list)
+    reasoning: str = Field(default='', description='决策理由')
+
+
+class BacktestTradeResponse(BaseModel):
+    """回测交易记录-响应"""
+    id: int
+    run_id: int
+    symbol: str
+    name: Optional[str] = None
+    trade_type: str
+    trade_date: str
+    price: float
+    quantity: int
+    amount: float
+    fee: Optional[float] = 0
+    created_at: Optional[str] = None
+
+    @field_validator('trade_date', mode='before')
+    @classmethod
+    def validate_date(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d')
+        return str(v)
+
+    @field_validator('created_at', mode='before')
+    @classmethod
+    def validate_timestamp(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d %H:%M:%S')
+        return str(v)
+
+    class Config:
+        from_attributes = True
+
+
+class BacktestSnapshotResponse(BaseModel):
+    """回测每日快照-响应"""
+    id: int
+    run_id: int
+    trade_date: str
+    cash: float
+    total_market_value: float
+    total_asset: float
+    daily_pnl: float
+    cumulative_pnl: float
+    unrealized_pnl: float
+    created_at: Optional[str] = None
+
+    @field_validator('trade_date', mode='before')
+    @classmethod
+    def validate_date(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d')
+        return str(v)
+
+    @field_validator('created_at', mode='before')
+    @classmethod
+    def validate_timestamp(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d %H:%M:%S')
+        return str(v)
+
+    class Config:
+        from_attributes = True
+
+
+class BacktestDecisionLogResponse(BaseModel):
+    """回测 AI 决策日志-响应"""
+    id: int
+    run_id: int
+    trade_date: str
+    parsed_actions: Optional[str] = None
+    latency_ms: Optional[int] = None
+    created_at: Optional[str] = None
+
+    @field_validator('trade_date', mode='before')
+    @classmethod
+    def validate_date(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d')
+        return str(v)
+
+    @field_validator('created_at', mode='before')
+    @classmethod
+    def validate_timestamp(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d %H:%M:%S')
+        return str(v)
+
+    class Config:
+        from_attributes = True
+
+
+class BacktestStepResponse(BaseModel):
+    """回测-手动步进响应"""
+    run: BacktestResponse
+    snapshot: Optional[BacktestSnapshotResponse] = None
+    trades: List[BacktestTradeResponse] = Field(default_factory=list)
+    reasoning: str = Field(default='', description='AI 决策理由')
+    pool: List[dict] = Field(default_factory=list, description='当日可买入池子')
+
+
+class BacktestQuery(BaseModel):
+    """回测-列表查询"""
+    page_num: int = Field(default=1, ge=1, description='页码')
+    page_size: int = Field(default=20, ge=1, le=100, description='每页条数')
+    status: Optional[str] = Field(None, description='状态过滤')
 

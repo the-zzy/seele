@@ -2,6 +2,7 @@
 import { reactive, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { stockBasicApi } from '@/api/stock'
+import { useTableSort } from '@/composables/useTableSort'
 import StockBasicFilter from '@/components/stock/StockBasicFilter.vue'
 import StockBasicTable from '@/components/stock/StockBasicTable.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
@@ -22,18 +23,11 @@ let filterForm = reactive({
   area: ''
 })
 
-const sortField = ref('symbol')
-const sortOrder = ref('asc')
-
-function handleSort (field) {
-  if (sortField.value === field) {
-    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
-  } else {
-    sortField.value = field
-    sortOrder.value = 'asc'
-  }
-  loadData()
-}
+const { sortField, sortOrder, handleSort } = useTableSort({
+  defaultField: 'symbol',
+  defaultOrder: 'asc',
+  onChange: () => loadData()
+})
 
 async function loadData () {
   loading.value = true

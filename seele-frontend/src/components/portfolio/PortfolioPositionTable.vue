@@ -1,15 +1,17 @@
 <script setup>
-import { ref, toRef } from 'vue'
+import { computed, ref } from 'vue'
 import { useViewport } from '@/composables/useViewport'
 import { useFixedRows } from '@/composables/useFixedRows'
 import MobileCardList from '@/components/common/MobileCardList.vue'
 
 const props = defineProps({
   list: { type: Array, default: () => [] },
-  loading: { type: Boolean, default: false }
+  loading: { type: Boolean, default: false },
+  sortField: { type: String, default: 'symbol' },
+  sortOrder: { type: String, default: 'asc' }
 })
 
-const emit = defineEmits(['edit', 'update-position'])
+const emit = defineEmits(['edit', 'update-position', 'sort'])
 
 const { isMobile } = useViewport()
 
@@ -74,13 +76,43 @@ function saveEdit (symbol) {
   editingSymbol.value = null
 }
 
-function holdingDays (firstBuyDate) {
-  if (!firstBuyDate) return '-'
-  const days = Math.ceil((new Date() - new Date(firstBuyDate)) / (1000 * 60 * 60 * 24))
+function holdingDays (startDate) {
+  if (!startDate) return '-'
+  const days = Math.ceil((new Date() - new Date(startDate)) / (1000 * 60 * 60 * 24))
   return days + ' 天'
 }
 
-const paddedList = useFixedRows(toRef(props, 'list'))
+function onSort (field) {
+  emit('sort', field)
+}
+
+function getSortIcon (field) {
+  if (field !== props.sortField) return '⇅'
+  return props.sortOrder === 'asc' ? '▲' : '▼'
+}
+
+const sortedList = computed(() => {
+  const field = props.sortField
+  const order = props.sortOrder
+  const multiplier = order === 'desc' ? -1 : 1
+
+  return [...props.list].sort((a, b) => {
+    const va = a[field]
+    const vb = b[field]
+
+    if (va == null && vb == null) return 0
+    if (va == null) return 1 * multiplier
+    if (vb == null) return -1 * multiplier
+
+    if (typeof va === 'number' && typeof vb === 'number') {
+      return (va - vb) * multiplier
+    }
+
+    return String(va).localeCompare(String(vb), 'zh-CN') * multiplier
+  })
+})
+
+const paddedList = useFixedRows(sortedList)
 </script>
 
 <template>
@@ -140,19 +172,19 @@ const paddedList = useFixedRows(toRef(props, 'list'))
               <span class="field-label">{{ pnlMode === 'history' ? '历史盈亏' : '当前盈亏' }}</span>
               <span
                 class="field-value"
-                :class="pnlClass(pnlMode === 'history' ? item.history_pnl : item.unrealized_pnl)"
-              >{{ fmt(pnlMode === 'history' ? item.history_pnl : item.unrealized_pnl) }}</span>
+                :class="pnlClass(pnlMode === 'history' ? item.history_pnl : item.current_pnl)"
+              >{{ fmt(pnlMode === 'history' ? item.history_pnl : item.current_pnl) }}</span>
             </div>
             <div class="card-field">
               <span class="field-label">盈亏比例</span>
               <span
                 class="field-value"
-                :class="pnlClass(pnlMode === 'history' ? item.history_pnl_pct : item.unrealized_pnl_pct)"
-              >{{ fmt(pnlMode === 'history' ? item.history_pnl_pct : item.unrealized_pnl_pct) }}%</span>
+                :class="pnlClass(pnlMode === 'history' ? item.history_pnl_pct : item.current_pnl_pct)"
+              >{{ fmt(pnlMode === 'history' ? item.history_pnl_pct : item.current_pnl_pct) }}%</span>
             </div>
             <div class="card-field">
               <span class="field-label">持仓天数</span>
-              <span class="field-value">{{ holdingDays(item.first_buy_date) }}</span>
+              <span class="field-value">{{ holdingDays(item.current_holding_start_date) }}</span>
             </div>
             <div class="card-field wide">
               <span class="field-label">备注</span>
@@ -196,17 +228,17 @@ const paddedList = useFixedRows(toRef(props, 'list'))
       <table class="stock-table">
         <thead>
           <tr>
-            <th>股票代码</th>
-            <th>股票名称</th>
-            <th class="num">持仓股数</th>
-            <th class="num">平均成本</th>
-            <th class="num">最新价</th>
-            <th class="num">市值</th>
-            <th class="num">{{ pnlMode === 'history' ? '历史盈亏' : '当前盈亏' }}</th>
-            <th class="num">盈亏比例</th>
-            <th>持仓天数</th>
-            <th>分组</th>
-            <th>备注</th>
+            <th class="sortable" @click="onSort('symbol')"><span class="th-label">股票代码</span><span class="sort-icon">{{ getSortIcon('symbol') }}</span></th>
+            <th class="sortable" @click="onSort('name')"><span class="th-label">股票名称</span><span class="sort-icon">{{ getSortIcon('name') }}</span></th>
+            <th class="sortable num" @click="onSort('quantity')"><span class="th-label">持仓股数</span><span class="sort-icon">{{ getSortIcon('quantity') }}</span></th>
+            <th class="sortable num" @click="onSort('avg_cost')"><span class="th-label">平均成本</span><span class="sort-icon">{{ getSortIcon('avg_cost') }}</span></th>
+            <th class="sortable num" @click="onSort('current_price')"><span class="th-label">最新价</span><span class="sort-icon">{{ getSortIcon('current_price') }}</span></th>
+            <th class="sortable num" @click="onSort('market_value')"><span class="th-label">市值</span><span class="sort-icon">{{ getSortIcon('market_value') }}</span></th>
+            <th class="sortable num" @click="pnlMode === 'history' ? onSort('history_pnl') : onSort('current_pnl')"><span class="th-label">{{ pnlMode === 'history' ? '历史盈亏' : '当前盈亏' }}</span><span class="sort-icon">{{ getSortIcon(pnlMode === 'history' ? 'history_pnl' : 'current_pnl') }}</span></th>
+            <th class="sortable num" @click="pnlMode === 'history' ? onSort('history_pnl_pct') : onSort('current_pnl_pct')"><span class="th-label">盈亏比例</span><span class="sort-icon">{{ getSortIcon(pnlMode === 'history' ? 'history_pnl_pct' : 'current_pnl_pct') }}</span></th>
+            <th class="sortable" @click="onSort('current_holding_start_date')"><span class="th-label">持仓天数</span><span class="sort-icon">{{ getSortIcon('current_holding_start_date') }}</span></th>
+            <th class="sortable" @click="onSort('group')"><span class="th-label">分组</span><span class="sort-icon">{{ getSortIcon('group') }}</span></th>
+            <th class="sortable" @click="onSort('remark')"><span class="th-label">备注</span><span class="sort-icon">{{ getSortIcon('remark') }}</span></th>
             <th>操作</th>
           </tr>
         </thead>
@@ -229,17 +261,17 @@ const paddedList = useFixedRows(toRef(props, 'list'))
               <td class="num">{{ fmt(item.market_value) }}</td>
               <td
                 class="num"
-                :class="pnlClass(pnlMode === 'history' ? item.history_pnl : item.unrealized_pnl)"
+                :class="pnlClass(pnlMode === 'history' ? item.history_pnl : item.current_pnl)"
               >
-                {{ fmt(pnlMode === 'history' ? item.history_pnl : item.unrealized_pnl) }}
+                {{ fmt(pnlMode === 'history' ? item.history_pnl : item.current_pnl) }}
               </td>
               <td
                 class="num"
-                :class="pnlClass(pnlMode === 'history' ? item.history_pnl_pct : item.unrealized_pnl_pct)"
+                :class="pnlClass(pnlMode === 'history' ? item.history_pnl_pct : item.current_pnl_pct)"
               >
-                {{ fmt(pnlMode === 'history' ? item.history_pnl_pct : item.unrealized_pnl_pct) }}%
+                {{ fmt(pnlMode === 'history' ? item.history_pnl_pct : item.current_pnl_pct) }}%
               </td>
-              <td class="num">{{ holdingDays(item.first_buy_date) }}</td>
+              <td class="num">{{ holdingDays(item.current_holding_start_date) }}</td>
               <td>
                 <span class="group-tag" :class="item.group">{{ item.group || 'default' }}</span>
               </td>
@@ -332,6 +364,24 @@ const paddedList = useFixedRows(toRef(props, 'list'))
 
 .stock-table {
   min-width: 960px;
+
+  th.sortable {
+    cursor: pointer;
+    user-select: none;
+
+    &:hover {
+      color: var(--text-primary);
+    }
+  }
+
+  .th-label {
+    margin-right: 4px;
+  }
+
+  .sort-icon {
+    font-size: 10px;
+    color: var(--text-muted);
+  }
 }
 
 .num {

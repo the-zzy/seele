@@ -14,3 +14,12 @@
 - 查看表结构：阅读 `schema.md`
 - 执行变更：在 `migrations/` 下新增脚本，记录变更原因，然后执行
 - 创建新表：在 `migrations/` 下编写 SQL/脚本，执行后更新 `schema.md`
+- **远程生产环境迁移**：参考 [`MIGRATION.md`](MIGRATION.md)
+
+## 相关文档
+
+| 文件 | 说明 |
+|------|------|
+| `schema.md` | 当前数据库完整表结构快照 |
+| `CHANGELOG.md` | 数据库变更历史记录 |
+| `MIGRATION.md` | 远程生产环境迁移操作手册 |

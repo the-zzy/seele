@@ -258,7 +258,38 @@ def get_stock_daily_all_by_date(
     )
 
 
-# 2.2 根据股票代码查询全部日线数据（关联指标表）
+# 2.2 批量获取指定日期收盘价（轻量接口）
+# 注意：必须放在 /symbol/{symbol} 动态路由之前，否则会被后者匹配为 symbol="close"。
+@router.get('/close')
+def get_stock_daily_close(
+    symbols: str = Query(..., description='股票代码，逗号分隔'),
+    trade_date: str = Query(..., description='交易日期 YYYY-MM-DD'),
+    db: Session = Depends(get_db),
+):
+    """批量获取指定股票在指定日期的收盘价，仅返回 close 和 trade_date"""
+    symbol_list = [s.strip() for s in symbols.split(',') if s.strip()]
+    if not symbol_list:
+        raise HTTPException(status_code=400, detail='symbols 不能为空')
+
+    formatted_date = trade_date.replace('-', '')
+    rows = (
+        db.query(models.StockDaily.symbol, models.StockDaily.close, models.StockDaily.trade_date)
+        .filter(
+            models.StockDaily.symbol.in_(symbol_list),
+            models.StockDaily.trade_date == formatted_date,
+        )
+        .all()
+    )
+    return success({
+        row[0]: {
+            'close': float(row[1]) if row[1] is not None else None,
+            'trade_date': str(row[2]),
+        }
+        for row in rows
+    })
+
+
+# 2.3 根据股票代码查询全部日线数据（关联指标表）
 @router.get("/symbol/{symbol}")
 def get_stock_daily_by_symbol(
     symbol: str,

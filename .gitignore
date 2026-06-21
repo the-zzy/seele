@@ -2,6 +2,7 @@ node_modules/
 .claude/
 *.log
 /*.zip
+*.tar.gz
 miyoushe_images/
 seele_dump_*.sql
 deploy/changelog/

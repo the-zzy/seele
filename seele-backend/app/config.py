@@ -37,7 +37,15 @@ class Settings(BaseSettings):
 
     # Moonshot AI (Kimi) 配置
     moonshot_api_key: str = ""
-    moonshot_model: str = "kimi-k2.6"
+    moonshot_model: str = "kimi-k2.7"
+
+    # DeepSeek AI 配置
+    deepseek_api_key: str = ""
+    deepseek_model: str = "deepseek-v4-pro"
+    deepseek_base_url: str = "https://api.deepseek.com/v1"
+
+    # 默认 LLM 模型（为空时按可用 key 自动选择）
+    llm_model: Optional[str] = None
 
     # 认证配置
     secret_key: str = ""
@@ -48,6 +56,10 @@ class Settings(BaseSettings):
     qiniu_secret_key: str = ""
     qiniu_bucket: str = ""
     qiniu_domain: str = ""
+
+    # 聚宽 JQData 配置
+    jqdata_username: str = ""
+    jqdata_password: str = ""
 
     # 以下为可覆盖参数，None 表示使用 deploy_env 自动推导
     db_pool_size: Optional[int] = None
@@ -83,6 +95,13 @@ class Settings(BaseSettings):
         if not self.secret_key:
             import secrets
             self.secret_key = secrets.token_urlsafe(32)
+
+        # 未显式指定 LLM 模型时，按可用 API key 自动选择
+        if not self.llm_model:
+            if self.deepseek_api_key:
+                self.llm_model = self.deepseek_model
+            else:
+                self.llm_model = self.moonshot_model
         return self
 
     @property

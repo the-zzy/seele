@@ -3,7 +3,7 @@
 """
 
 from typing import List, Optional
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from collections import defaultdict
 from sqlalchemy import func, and_, or_
 from sqlalchemy.orm import Session, load_only
@@ -165,7 +165,7 @@ class StockBasicCRUD:
                 else:
                     trade_date = date.today().strftime("%Y-%m-%d")
         else:
-            # 检查传入的日期是否有 indicator 数据，如果没有则 fallback
+            # 用户明确选择了日期：有数据就查，没数据直接返回空，不自动切换
             formatted_check = trade_date.replace("-", "")
             has_indicator = (
                 db.query(models.StockDailyIndicator)
@@ -173,14 +173,7 @@ class StockBasicCRUD:
                 .first()
             )
             if not has_indicator:
-                from sqlalchemy import distinct
-                latest_indicator_date = (
-                    db.query(distinct(models.StockDailyIndicator.trade_date))
-                    .order_by(models.StockDailyIndicator.trade_date.desc())
-                    .first()
-                )
-                if latest_indicator_date:
-                    trade_date = str(latest_indicator_date[0])
+                return [], 0, trade_date
         formatted_date = trade_date.replace("-", "")
         holding_symbols = _get_holding_symbols(db)
 
@@ -1277,10 +1270,23 @@ class PortfolioConfigCRUD:
             db.add(config)
         return config
 
-    def update(self, db: Session, initial_capital: float) -> models.PortfolioConfig:
-        """更新初始资金（不自动 commit，由调用方统一提交）"""
+    def update(
+        self,
+        db: Session,
+        initial_capital: float,
+        commission_rate: Optional[float] = None,
+        stamp_tax_rate: Optional[float] = None,
+        transfer_rate: Optional[float] = None,
+    ) -> models.PortfolioConfig:
+        """更新持仓配置（不自动 commit，由调用方统一提交）"""
         config = self.get_or_create(db)
         config.initial_capital = initial_capital
+        if commission_rate is not None:
+            config.commission_rate = commission_rate
+        if stamp_tax_rate is not None:
+            config.stamp_tax_rate = stamp_tax_rate
+        if transfer_rate is not None:
+            config.transfer_rate = transfer_rate
         return config
 
 
@@ -2112,12 +2118,15 @@ class TradeCalendarCRUD:
     """交易日历 CRUD"""
 
     def get_latest(self, db: Session) -> Optional[date]:
-        """获取最近一个交易日（不超过今天）"""
+        """获取最近一个交易日（16:00 前取前一天，16:00 后取当天）"""
+        now = datetime.now()
+        # 16:00 之前认为当天数据尚未生成，取前一个交易日
+        cutoff_date = date.today() if now.hour >= 16 else date.today() - timedelta(days=1)
         row = (
             db.query(models.TradeCalendar)
             .filter(
                 models.TradeCalendar.is_trading_day == 1,
-                models.TradeCalendar.trade_date <= date.today(),
+                models.TradeCalendar.trade_date <= cutoff_date,
             )
             .order_by(models.TradeCalendar.trade_date.desc())
             .first()
@@ -2198,3 +2207,174 @@ class VisitorLogCRUD:
 
 
 visitor_log_crud = VisitorLogCRUD()
+
+
+# ==================== 回测 ====================
+
+
+class BacktestRunCRUD:
+    """回测运行 CRUD"""
+
+    def create(self, db: Session, obj_in: schemas.BacktestCreate) -> models.BacktestRun:
+        """创建回测（不自动 commit，由调用方统一提交）"""
+        from datetime import datetime as _datetime
+        start_date = _datetime.strptime(obj_in.start_date, '%Y-%m-%d').date()
+        end_date = None
+        if obj_in.end_date:
+            end_date = _datetime.strptime(obj_in.end_date, '%Y-%m-%d').date()
+        db_obj = models.BacktestRun(
+            start_date=start_date,
+            end_date=end_date,
+            current_date=start_date,
+            initial_capital=obj_in.initial_capital or 40000,
+            cash=obj_in.initial_capital or 40000,
+            ai_model=obj_in.ai_model or 'deepseek-v4-pro',
+        )
+        db.add(db_obj)
+        db.flush()
+        return db_obj
+
+    def get_by_id(self, db: Session, run_id: int) -> Optional[models.BacktestRun]:
+        return db.query(models.BacktestRun).filter(models.BacktestRun.id == run_id).first()
+
+    def get_list(
+        self,
+        db: Session,
+        query: schemas.BacktestQuery,
+    ) -> tuple[List[models.BacktestRun], int]:
+        stmt = db.query(models.BacktestRun)
+        if query.status:
+            stmt = stmt.filter(models.BacktestRun.status == query.status)
+        total = stmt.with_entities(func.count(models.BacktestRun.id)).scalar() or 0
+        list_data = (
+            stmt.order_by(models.BacktestRun.created_at.desc())
+            .offset((query.page_num - 1) * query.page_size)
+            .limit(query.page_size)
+            .all()
+        )
+        return list_data, total
+
+    def update_state(
+        self,
+        db: Session,
+        run_id: int,
+        current_date: date,
+        cash: float,
+        total_market_value: float,
+        status: Optional[str] = None,
+    ) -> Optional[models.BacktestRun]:
+        db_obj = self.get_by_id(db, run_id)
+        if not db_obj:
+            return None
+        db_obj.current_date = current_date
+        db_obj.cash = cash
+        db_obj.total_market_value = total_market_value
+        total_asset = float(cash) + float(total_market_value)
+        initial = float(db_obj.initial_capital)
+        db_obj.total_return_pct = round((total_asset - initial) / initial * 100, 4) if initial > 0 else 0
+        if status:
+            db_obj.status = status
+        return db_obj
+
+    def delete(self, db: Session, run_id: int) -> bool:
+        db.query(models.BacktestTrade).filter(models.BacktestTrade.run_id == run_id).delete()
+        db.query(models.BacktestDailySnapshot).filter(models.BacktestDailySnapshot.run_id == run_id).delete()
+        db.query(models.BacktestDecisionLog).filter(models.BacktestDecisionLog.run_id == run_id).delete()
+        db.query(models.BacktestTask).filter(models.BacktestTask.run_id == run_id).delete()
+        db.query(models.BacktestRun).filter(models.BacktestRun.id == run_id).delete()
+        return True
+
+
+class BacktestTradeCRUD:
+    """回测交易记录 CRUD"""
+
+    def create(self, db: Session, run_id: int, data: dict) -> models.BacktestTrade:
+        """创建交易记录（不自动 commit，由调用方统一提交）"""
+        db_obj = models.BacktestTrade(run_id=run_id, **data)
+        db.add(db_obj)
+        return db_obj
+
+    def create_batch(self, db: Session, run_id: int, items: List[dict]) -> List[models.BacktestTrade]:
+        if not items:
+            return []
+        db_objs = []
+        for item in items:
+            db_obj = models.BacktestTrade(run_id=run_id, **item)
+            db.add(db_obj)
+            db_objs.append(db_obj)
+        return db_objs
+
+    def get_by_run_id(
+        self,
+        db: Session,
+        run_id: int,
+        page_num: int = 1,
+        page_size: int = 100,
+    ) -> tuple[List[models.BacktestTrade], int]:
+        stmt = db.query(models.BacktestTrade).filter(models.BacktestTrade.run_id == run_id)
+        total = stmt.with_entities(func.count(models.BacktestTrade.id)).scalar() or 0
+        list_data = (
+            stmt.order_by(models.BacktestTrade.trade_date.desc(), models.BacktestTrade.id.desc())
+            .offset((page_num - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return list_data, total
+
+
+class BacktestDailySnapshotCRUD:
+    """回测每日快照 CRUD"""
+
+    def create(self, db: Session, run_id: int, data: dict) -> models.BacktestDailySnapshot:
+        db_obj = models.BacktestDailySnapshot(run_id=run_id, **data)
+        db.add(db_obj)
+        return db_obj
+
+    def get_by_run_id(
+        self,
+        db: Session,
+        run_id: int,
+        page_num: int = 1,
+        page_size: int = 100,
+    ) -> tuple[List[models.BacktestDailySnapshot], int]:
+        stmt = db.query(models.BacktestDailySnapshot).filter(models.BacktestDailySnapshot.run_id == run_id)
+        total = stmt.with_entities(func.count(models.BacktestDailySnapshot.id)).scalar() or 0
+        list_data = (
+            stmt.order_by(models.BacktestDailySnapshot.trade_date.asc())
+            .offset((page_num - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return list_data, total
+
+
+class BacktestDecisionLogCRUD:
+    """回测 AI 决策日志 CRUD"""
+
+    def create(self, db: Session, run_id: int, data: dict) -> models.BacktestDecisionLog:
+        db_obj = models.BacktestDecisionLog(run_id=run_id, **data)
+        db.add(db_obj)
+        return db_obj
+
+    def get_by_run_id(
+        self,
+        db: Session,
+        run_id: int,
+        page_num: int = 1,
+        page_size: int = 100,
+    ) -> tuple[List[models.BacktestDecisionLog], int]:
+        stmt = db.query(models.BacktestDecisionLog).filter(models.BacktestDecisionLog.run_id == run_id)
+        total = stmt.with_entities(func.count(models.BacktestDecisionLog.id)).scalar() or 0
+        list_data = (
+            stmt.order_by(models.BacktestDecisionLog.trade_date.asc())
+            .offset((page_num - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return list_data, total
+
+
+backtest_run_crud = BacktestRunCRUD()
+backtest_trade_crud = BacktestTradeCRUD()
+backtest_snapshot_crud = BacktestDailySnapshotCRUD()
+backtest_decision_log_crud = BacktestDecisionLogCRUD()

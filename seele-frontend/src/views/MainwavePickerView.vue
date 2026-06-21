@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { stockDailyApi, tradeCalendarApi } from '@/api/stock'
 import { formatNumber } from '@/utils/formatters'
+import { useTableSort } from '@/composables/useTableSort'
 import MainwavePickerFilter from '@/components/stock/MainwavePickerFilter.vue'
 import MainwaveTable from '@/components/stock/MainwaveTable.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
@@ -27,18 +28,12 @@ const filterForm = ref({
   maBull: true
 })
 
-const sortField = ref('score')
-const sortOrder = ref('desc')
-
-function handleSort (field) {
-  if (sortField.value === field) {
-    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
-  } else {
-    sortField.value = field
-    sortOrder.value = 'asc'
-  }
-  loadData()
-}
+const { sortField, sortOrder, handleSort } = useTableSort({
+  defaultField: 'score',
+  defaultOrder: 'desc',
+  getDefaultOrder: field => field === 'score' ? 'desc' : 'asc',
+  onChange: () => loadData()
+})
 
 async function loadLatestTradeDate () {
   try {
@@ -183,7 +178,7 @@ onMounted(async () => {
   <div class="stock-basic page">
     <PageHero
       section="选股策略"
-      number="03.7"
+      number="08.1"
       title="主升浪选股"
       description="基于交易日期筛选符合主升浪门槛的主板标的：流通市值≥200亿、股价≤300元、10日换手≥2%、10日成交额≥2亿。双击行跳转K线图。"
       meta="选股门槛"

@@ -2,6 +2,7 @@
 import { reactive, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { stockDailyApi, tradeCalendarApi } from '@/api/stock'
+import { useTableSort } from '@/composables/useTableSort'
 import MainwavePickerFilter from '@/components/stock/MainwavePickerFilter.vue'
 import MainwaveScoreTable from '@/components/stock/MainwaveScoreTable.vue'
 import BasePagination from '@/components/common/BasePagination.vue'
@@ -26,18 +27,12 @@ let filterForm = reactive({
   maBull: true
 })
 
-const sortField = ref('score')
-const sortOrder = ref('desc')
-
-function handleSort (field) {
-  if (sortField.value === field) {
-    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
-  } else {
-    sortField.value = field
-    sortOrder.value = field === 'score' ? 'desc' : 'asc'
-  }
-  loadData()
-}
+const { sortField, sortOrder, handleSort } = useTableSort({
+  defaultField: 'score',
+  defaultOrder: 'desc',
+  getDefaultOrder: field => field === 'score' ? 'desc' : 'asc',
+  onChange: () => loadData()
+})
 
 async function loadLatestTradeDate () {
   try {
@@ -173,7 +168,7 @@ onMounted(async () => {
   <div class="scorer-page page">
     <PageHero
       section="选股策略"
-      number="03.8"
+      number="08.2"
       title="主升浪评分"
       description="对主升浪选股结果进行多维度评分：趋势形态、方向分散、板块强度、业绩质量、市值流动性、催化剂。满分100分，60分及格，80分强烈推荐。"
       meta="评分体系"

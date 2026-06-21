@@ -385,7 +385,9 @@ async def query_portfolio_trades(db: Session, symbol: Optional[str] = None, trad
                 'price': i.price,
                 'quantity': i.quantity,
                 'amount': i.amount,
-                'fee': i.fee,
+                'stamp_tax': i.stamp_tax,
+                'transfer_fee': i.transfer_fee,
+                'commission': i.commission,
                 'remark': i.remark,
             }
             for i in items
@@ -664,14 +666,14 @@ async def query_market_sentiment(db: Session, start_date: Optional[str] = None, 
             'price': {'type': 'number', 'description': '成交价格'},
             'quantity': {'type': 'integer', 'description': '成交股数'},
             'amount': {'type': 'number', 'description': '成交金额（可选，不传则自动计算 price*quantity）'},
-            'fee': {'type': 'number', 'description': '手续费'},
+            'commission': {'type': 'number', 'description': '券商佣金/手续费'},
             'remark': {'type': 'string', 'description': '备注'},
         },
         'required': ['symbol', 'name', 'trade_type', 'trade_date', 'price', 'quantity'],
     },
     category='write',
 )
-async def create_trade(db: Session, symbol: str, name: str, trade_type: str, trade_date: str, price: float, quantity: int, amount: Optional[float] = None, fee: Optional[float] = None, remark: Optional[str] = None):
+async def create_trade(db: Session, symbol: str, name: str, trade_type: str, trade_date: str, price: float, quantity: int, amount: Optional[float] = None, commission: Optional[float] = None, remark: Optional[str] = None):
     from app.routes.portfolio import _sync_position_snapshot, _calc_closed_for_symbol, _rebuild_daily_data
 
     if trade_type not in ('BUY', 'SELL'):
@@ -685,7 +687,7 @@ async def create_trade(db: Session, symbol: str, name: str, trade_type: str, tra
         'price': price,
         'quantity': quantity,
         'amount': amount if amount is not None else round(price * quantity, 4),
-        'fee': fee if fee is not None else 0,
+        'commission': commission if commission is not None else 0,
         'remark': remark,
     }
     db_obj = models.PortfolioTrade(**data)

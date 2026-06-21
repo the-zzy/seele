@@ -62,13 +62,12 @@ def is_trading_day(check_date: datetime | None = None) -> bool:
     """判断是否为A股交易日"""
     if check_date is None:
         check_date = datetime.now()
-    if check_date.weekday() >= 5:
-        return False
     date_str = check_date.strftime('%Y-%m-%d')
     trade_dates = _get_trade_dates()
     if trade_dates:
         return date_str in trade_dates
-    return True
+    # 交易日历获取失败时的 fallback：周末非交易日
+    return check_date.weekday() < 5
 
 
 def get_last_trade_date() -> str:
@@ -93,7 +92,6 @@ def _with_job_log(job_type: str):
             from app import crud, schemas
 
             db = SessionLocal()
-            log = None
             try:
                 log = crud.sync_job_log_crud.create(
                     db,
@@ -116,18 +114,15 @@ def _with_job_log(job_type: str):
                     )
                     _db_err.commit()
                     _db_err.close()
-                except Exception as exc:
-                    logger.warning('[SCHEDULER] 写入 system_error_log 失败: %s', exc)
-                db.close()
+                except Exception:
+                    logger.warning('[SCHEDULER] 写入 system_error_log 失败', exc_info=True)
                 raise
             finally:
-                if log is None:
-                    db.close()
+                db.close()
 
             db2 = SessionLocal()
             try:
-                result = func(db2, log_id, *args, **kwargs)
-                return result
+                return func(db2, log_id)
             except Exception as exc:
                 logger.error('[SCHEDULER] 任务执行异常: %s', exc, exc_info=True)
                 try:
@@ -143,15 +138,15 @@ def _with_job_log(job_type: str):
                     )
                     _db_err.commit()
                     _db_err.close()
-                except Exception as exc:
-                    logger.warning('[SCHEDULER] 写入 system_error_log 失败: %s', exc)
+                except Exception:
+                    logger.warning('[SCHEDULER] 写入 system_error_log 失败', exc_info=True)
                 try:
                     crud.sync_job_log_crud.finish(
                         db2, log_id, 'failed', error_message=str(exc)[:2000]
                     )
                     db2.commit()
-                except Exception as exc:
-                    logger.warning('[SCHEDULER] 更新 sync_job_log 失败状态失败: %s', exc)
+                except Exception:
+                    logger.warning('[SCHEDULER] 更新 sync_job_log 失败状态失败', exc_info=True)
                 raise
             finally:
                 db2.close()

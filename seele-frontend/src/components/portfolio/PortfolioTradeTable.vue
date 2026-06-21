@@ -1,17 +1,28 @@
 <script setup>
-import { toRef } from 'vue'
+import { computed } from 'vue'
 import { useViewport } from '@/composables/useViewport'
 import { useFixedRows } from '@/composables/useFixedRows'
 import MobileCardList from '@/components/common/MobileCardList.vue'
 
 const props = defineProps({
   list: { type: Array, default: () => [] },
-  loading: { type: Boolean, default: false }
+  loading: { type: Boolean, default: false },
+  sortField: { type: String, default: 'trade_date' },
+  sortOrder: { type: String, default: 'desc' }
 })
 
-const emit = defineEmits(['delete', 'edit'])
+const emit = defineEmits(['delete', 'edit', 'sort'])
 
 const { isMobile } = useViewport()
+
+function onSort (field) {
+  emit('sort', field)
+}
+
+function getSortIcon (field) {
+  if (field !== props.sortField) return '⇅'
+  return props.sortOrder === 'asc' ? '▲' : '▼'
+}
 
 function fmt (v) {
   if (v == null) return '-'
@@ -39,7 +50,28 @@ function onDelete (item) {
   }
 }
 
-const paddedList = useFixedRows(toRef(props, 'list'))
+const sortedList = computed(() => {
+  const field = props.sortField
+  const order = props.sortOrder
+  const multiplier = order === 'desc' ? -1 : 1
+
+  return [...props.list].sort((a, b) => {
+    const va = a[field]
+    const vb = b[field]
+
+    if (va == null && vb == null) return 0
+    if (va == null) return 1 * multiplier
+    if (vb == null) return -1 * multiplier
+
+    if (typeof va === 'number' && typeof vb === 'number') {
+      return (va - vb) * multiplier
+    }
+
+    return String(va).localeCompare(String(vb), 'zh-CN') * multiplier
+  })
+})
+
+const paddedList = useFixedRows(sortedList)
 
 function typeClass (item) {
   if (isDayTrade(item)) return 'daytrade'
@@ -84,8 +116,16 @@ function typeClass (item) {
               <span class="field-value">{{ fmt(item.amount) }}</span>
             </div>
             <div class="card-field">
-              <span class="field-label">手续费</span>
-              <span class="field-value">{{ fmt(item.fee) }}</span>
+              <span class="field-label">印花税</span>
+              <span class="field-value">{{ fmt(item.stamp_tax) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">过户费</span>
+              <span class="field-value">{{ fmt(item.transfer_fee) }}</span>
+            </div>
+            <div class="card-field">
+              <span class="field-label">合计费用</span>
+              <span class="field-value">{{ fmt(item.total_fee) }}</span>
             </div>
           </div>
           <div class="card-actions">
@@ -99,14 +139,16 @@ function typeClass (item) {
       <table class="stock-table">
         <thead>
           <tr>
-            <th>日期</th>
-            <th>类型</th>
-            <th>股票代码</th>
-            <th>股票名称</th>
-            <th class="num">价格</th>
-            <th class="num">股数</th>
-            <th class="num">金额</th>
-            <th class="num">手续费</th>
+            <th class="sortable" @click="onSort('trade_date')"><span class="th-label">日期</span><span class="sort-icon">{{ getSortIcon('trade_date') }}</span></th>
+            <th class="sortable" @click="onSort('trade_type')"><span class="th-label">类型</span><span class="sort-icon">{{ getSortIcon('trade_type') }}</span></th>
+            <th class="sortable" @click="onSort('symbol')"><span class="th-label">股票代码</span><span class="sort-icon">{{ getSortIcon('symbol') }}</span></th>
+            <th class="sortable" @click="onSort('name')"><span class="th-label">股票名称</span><span class="sort-icon">{{ getSortIcon('name') }}</span></th>
+            <th class="sortable num" @click="onSort('price')"><span class="th-label">价格</span><span class="sort-icon">{{ getSortIcon('price') }}</span></th>
+            <th class="sortable num" @click="onSort('quantity')"><span class="th-label">股数</span><span class="sort-icon">{{ getSortIcon('quantity') }}</span></th>
+            <th class="sortable num" @click="onSort('amount')"><span class="th-label">金额</span><span class="sort-icon">{{ getSortIcon('amount') }}</span></th>
+            <th class="sortable num" @click="onSort('stamp_tax')"><span class="th-label">印花税</span><span class="sort-icon">{{ getSortIcon('stamp_tax') }}</span></th>
+            <th class="sortable num" @click="onSort('transfer_fee')"><span class="th-label">过户费</span><span class="sort-icon">{{ getSortIcon('transfer_fee') }}</span></th>
+            <th class="sortable num" @click="onSort('total_fee')"><span class="th-label">合计费用</span><span class="sort-icon">{{ getSortIcon('total_fee') }}</span></th>
             <th class="act">操作</th>
           </tr>
         </thead>
@@ -132,14 +174,16 @@ function typeClass (item) {
               <td class="num">{{ fmt(item.price) }}</td>
               <td class="num">{{ item.quantity != null ? item.quantity.toLocaleString() : '-' }}</td>
               <td class="num">{{ fmt(item.amount) }}</td>
-              <td class="num">{{ fmt(item.fee) }}</td>
+              <td class="num">{{ fmt(item.stamp_tax) }}</td>
+              <td class="num">{{ fmt(item.transfer_fee) }}</td>
+              <td class="num">{{ fmt(item.total_fee) }}</td>
               <td class="act">
                 <button class="btn-edit" @click="onEdit(item)">编辑</button>
                 <button class="btn-del" @click="onDelete(item)">删除</button>
               </td>
             </template>
             <template v-else>
-              <td v-for="col in ['date','type','symbol','name','price','quantity','amount','fee','act']" :key="col">&nbsp;</td>
+              <td v-for="col in ['date','type','symbol','name','price','quantity','amount','stamp_tax','transfer_fee','total_fee','act']" :key="col">&nbsp;</td>
             </template>
           </tr>
         </tbody>
@@ -154,7 +198,25 @@ function typeClass (item) {
 }
 
 .stock-table {
-  min-width: 720px;
+  min-width: 980px;
+
+  th.sortable {
+    cursor: pointer;
+    user-select: none;
+
+    &:hover {
+      color: var(--text-primary);
+    }
+  }
+
+  .th-label {
+    margin-right: 4px;
+  }
+
+  .sort-icon {
+    font-size: 10px;
+    color: var(--text-muted);
+  }
 }
 
 .num {
@@ -173,13 +235,13 @@ function typeClass (item) {
   font-weight: 600;
 
   &.buy {
-    background: rgba(59, 130, 246, 0.12);
-    color: var(--accent);
+    background: rgba(239, 68, 68, 0.12);
+    color: var(--up);
   }
 
   &.sell {
-    background: rgba(239, 68, 68, 0.12);
-    color: var(--up);
+    background: rgba(59, 130, 246, 0.12);
+    color: var(--accent);
   }
 
   &.daytrade {

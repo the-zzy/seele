@@ -50,6 +50,20 @@ export const stockDailyApi = {
   },
 
   /**
+   * 批量获取指定日期收盘价
+   * @param {string} symbols - 股票代码，逗号分隔
+   * @param {string} tradeDate - 交易日期 YYYY-MM-DD
+   * @returns {Promise<Object>} - {symbol: {close, trade_date}}
+   */
+  getCloseByDate (symbols, tradeDate) {
+    return request({
+      url: '/stock/daily/close',
+      method: 'get',
+      params: { symbols, trade_date: tradeDate }
+    })
+  },
+
+  /**
    * 主升浪选股（关联日线及指标表，支持市值/股价/换手率/成交额筛选）
    * @param {Object} params - 查询参数
    * @param {string} params.trade_date - 交易日期(YYYY-MM-DD)
@@ -138,6 +152,14 @@ export const syncApi = {
       url: '/sync/indicator',
       method: 'post',
       params: { trade_date: tradeDate, only_missing: onlyMissing },
+      timeout: 600000
+    })
+  },
+
+  syncSingleStock (symbol, tradeDate) {
+    return request({
+      url: `/sync/daily/stock/${symbol}/date/${tradeDate}`,
+      method: 'post',
       timeout: 600000
     })
   },
