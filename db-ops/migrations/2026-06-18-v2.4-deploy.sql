@@ -2,46 +2,112 @@
 -- 适用版本: feature/mainwave-scorer-v2.4
 -- 执行顺序: 先改现有表，再建新表
 -- 注意: 执行前请先备份数据库
+-- 说明: 远程 MySQL 不支持 ALTER TABLE ... IF [NOT] EXISTS，所有字段变更均通过 information_schema 条件判断实现幂等
 
 -- ============================================================
--- 1. portfolio_trade 交易费用拆分
+-- 1. portfolio_trade 交易费用字段
 -- ============================================================
--- 佣金不再单独存储，统一作为 fee（手续费合计）的一部分。
--- fee = 券商佣金（不免五最低 5 元）+ 印花税 + 过户费。
+-- 最终结构：保留 commission、stamp_tax、transfer_fee 三个明细字段，删除 fee 合计字段
 
-ALTER TABLE portfolio_trade
-    DROP COLUMN IF EXISTS commission,
-    ADD COLUMN IF NOT EXISTS stamp_tax DECIMAL(18,2) DEFAULT 0 COMMENT '印花税' AFTER amount,
-    ADD COLUMN IF NOT EXISTS transfer_fee DECIMAL(18,2) DEFAULT 0 COMMENT '过户费' AFTER stamp_tax;
+-- 1.1 添加 commission 字段（如不存在）
+SET @exist := (SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'portfolio_trade' AND column_name = 'commission');
+SET @sql := IF(@exist = 0,
+    "ALTER TABLE portfolio_trade ADD COLUMN commission DECIMAL(18,2) DEFAULT 0 COMMENT '券商佣金/手续费' AFTER amount",
+    'SELECT "commission column already exists" AS msg');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
--- fee 字段为三费合计，并扩容精度
+-- 1.2 添加 stamp_tax 字段（如不存在）
+SET @exist := (SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'portfolio_trade' AND column_name = 'stamp_tax');
+SET @sql := IF(@exist = 0,
+    "ALTER TABLE portfolio_trade ADD COLUMN stamp_tax DECIMAL(18,2) DEFAULT 0 COMMENT '印花税' AFTER commission",
+    'SELECT "stamp_tax column already exists" AS msg');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- 1.3 添加 transfer_fee 字段（如不存在）
+SET @exist := (SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'portfolio_trade' AND column_name = 'transfer_fee');
+SET @sql := IF(@exist = 0,
+    "ALTER TABLE portfolio_trade ADD COLUMN transfer_fee DECIMAL(18,2) DEFAULT 0 COMMENT '过户费' AFTER stamp_tax",
+    'SELECT "transfer_fee column already exists" AS msg');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- 1.4 补齐 NULL 值
+UPDATE portfolio_trade SET commission = 0 WHERE commission IS NULL;
+UPDATE portfolio_trade SET stamp_tax = 0 WHERE stamp_tax IS NULL;
+UPDATE portfolio_trade SET transfer_fee = 0 WHERE transfer_fee IS NULL;
+
+-- 1.5 删除旧的 fee 合计字段（如存在）
+SET @exist := (SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'portfolio_trade' AND column_name = 'fee');
+SET @sql := IF(@exist = 1,
+    'ALTER TABLE portfolio_trade DROP COLUMN fee',
+    'SELECT "fee column already dropped" AS msg');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- 1.6 统一字段注释与类型
 ALTER TABLE portfolio_trade
-    MODIFY COLUMN fee DECIMAL(18,2) DEFAULT 0 COMMENT '交易手续费合计';
+    MODIFY COLUMN commission DECIMAL(18,2) DEFAULT 0 COMMENT '券商佣金/手续费',
+    MODIFY COLUMN stamp_tax DECIMAL(18,2) DEFAULT 0 COMMENT '印花税',
+    MODIFY COLUMN transfer_fee DECIMAL(18,2) DEFAULT 0 COMMENT '过户费';
 
 
 -- ============================================================
 -- 2. portfolio_config 新增默认费率字段
 -- ============================================================
 
-ALTER TABLE portfolio_config
-    ADD COLUMN IF NOT EXISTS commission_rate DECIMAL(18,6) DEFAULT 0.000235 COMMENT '佣金费率' AFTER initial_capital,
-    ADD COLUMN IF NOT EXISTS stamp_tax_rate DECIMAL(18,6) DEFAULT 0.0005 COMMENT '印花税税率' AFTER commission_rate,
-    ADD COLUMN IF NOT EXISTS transfer_rate DECIMAL(18,6) DEFAULT 0.00001 COMMENT '过户费费率' AFTER stamp_tax_rate;
+-- 2.1 添加 commission_rate 字段（如不存在）
+SET @exist := (SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'portfolio_config' AND column_name = 'commission_rate');
+SET @sql := IF(@exist = 0,
+    "ALTER TABLE portfolio_config ADD COLUMN commission_rate DECIMAL(18,6) DEFAULT 0.000235 COMMENT '佣金费率' AFTER initial_capital",
+    'SELECT "commission_rate column already exists" AS msg');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
--- 对已有配置行写入默认值（避免 NULL）
+-- 2.2 添加 stamp_tax_rate 字段（如不存在）
+SET @exist := (SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'portfolio_config' AND column_name = 'stamp_tax_rate');
+SET @sql := IF(@exist = 0,
+    "ALTER TABLE portfolio_config ADD COLUMN stamp_tax_rate DECIMAL(18,6) DEFAULT 0.0005 COMMENT '印花税税率' AFTER commission_rate",
+    'SELECT "stamp_tax_rate column already exists" AS msg');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- 2.3 添加 transfer_rate 字段（如不存在）
+SET @exist := (SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'portfolio_config' AND column_name = 'transfer_rate');
+SET @sql := IF(@exist = 0,
+    "ALTER TABLE portfolio_config ADD COLUMN transfer_rate DECIMAL(18,6) DEFAULT 0.00001 COMMENT '过户费费率' AFTER stamp_tax_rate",
+    'SELECT "transfer_rate column already exists" AS msg');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- 2.4 对已有配置行写入默认值（避免 NULL）
 UPDATE portfolio_config
 SET commission_rate = 0.000235,
     stamp_tax_rate = 0.0005,
     transfer_rate = 0.00001
-WHERE commission_rate IS NULL;
+WHERE commission_rate IS NULL OR stamp_tax_rate IS NULL OR transfer_rate IS NULL;
 
 
 -- ============================================================
--- 3. sync_job_log.extra_info 扩容
+-- 3. sync_job_log.extra_info 扩容为 TEXT
 -- ============================================================
 
-ALTER TABLE sync_job_log
-    MODIFY COLUMN extra_info TEXT COMMENT '额外信息';
+ALTER TABLE sync_job_log MODIFY COLUMN extra_info TEXT COMMENT '额外信息';
 
 
 -- ============================================================
@@ -52,7 +118,7 @@ CREATE TABLE IF NOT EXISTS backtest_run (
     id INT AUTO_INCREMENT PRIMARY KEY,
     start_date DATE NOT NULL COMMENT '开始日期',
     end_date DATE NULL COMMENT '结束日期（自动运行用）',
-    current_date DATE NOT NULL COMMENT '当前已处理日期',
+    `current_date` DATE NOT NULL COMMENT '当前已处理日期',
     initial_capital DECIMAL(18, 4) NOT NULL DEFAULT 40000 COMMENT '初始资金',
     cash DECIMAL(18, 4) NOT NULL DEFAULT 40000 COMMENT '剩余现金',
     status VARCHAR(20) NOT NULL DEFAULT 'running' COMMENT '状态 running/completed/failed',

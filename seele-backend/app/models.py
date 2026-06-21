@@ -416,7 +416,7 @@ class SyncJobLog(Base):
     total_count = Column(Integer, nullable=True, default=0, comment='总处理数')
     trade_date = Column(String(8), nullable=True, comment='关联交易日')
     error_message = Column(String(2000), nullable=True, comment='错误信息')
-    extra_info = Column(String(1000), nullable=True, comment='额外信息')
+    extra_info = Column(Text, nullable=True, comment='额外信息')
 
     __table_args__ = {
         'mysql_collate': 'utf8mb4_unicode_ci',

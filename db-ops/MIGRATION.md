@@ -1,8 +1,8 @@
 # 远程数据库迁移操作手册
 
-> 本文档用于指导 Seele 项目远程生产环境（阿里云 ECS）的数据库迁移操作。
+> 本文档用于指导 Seele 项目远程生产环境的数据库迁移操作。
 >
-> 适用服务器：`8.138.165.208`（Alibaba Cloud Linux，MySQL 8.0.45 Source distribution）
+> 适用服务器：`$PROD_SERVER_IP`（具体 IP 从环境变量或安全配置源注入，禁止写入仓库）
 
 ## 一、迁移前准备
 
@@ -11,7 +11,7 @@
 **任何迁移操作前必须先备份。**
 
 ```bash
-ssh -i ~/.ssh/id_ed25519 root@8.138.165.208
+ssh -i "$SSH_KEY_PATH" root@$PROD_SERVER_IP
 mysqldump -u root -p seele > /tmp/seele_backup_$(date +%Y%m%d_%H%M%S).sql
 ```
 
@@ -29,7 +29,7 @@ ss -tlnp | grep 9000
 
 ```bash
 cd /www/seele/seele-backend
-DB_PASS=$(grep '^DB_PASSWORD=' .env | cut -d= -f2)
+DB_PASS="${DB_PASS:?请设置 DB_PASS 环境变量}"
 mysql -u root -p"$DB_PASS" seele -e "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name IN ('portfolio_trade', 'portfolio_config', 'sync_job_log', 'board_constituent') AND column_name IN ('name', 'commission', 'stamp_tax', 'transfer_fee', 'fee', 'commission_rate', 'stamp_tax_rate', 'transfer_rate', 'extra_info') ORDER BY table_name, ordinal_position;"
 mysql -u root -p"$DB_PASS" seele -e "SHOW TABLES LIKE 'backtest%';"
 ```
@@ -98,7 +98,7 @@ CREATE TABLE backtest_run (
 set -e
 
 cd /www/seele/seele-backend
-DB_PASS=$(grep '^DB_PASSWORD=' .env | cut -d= -f2)
+DB_PASS="${DB_PASS:?请设置 DB_PASS 环境变量}"
 DB_OPTS="-u root -p$DB_PASS seele"
 
 # 按顺序执行迁移脚本
@@ -115,9 +115,9 @@ echo "=== Migration completed ==="
 
 ```bash
 # 本地执行
-scp -i ~/.ssh/id_ed25519 db-ops/migrations/2026-*.sql root@8.138.165.208:/tmp/migrations/
-scp -i ~/.ssh/id_ed25519 /tmp/run_migrations.sh root@8.138.165.208:/tmp/run_migrations.sh
-ssh -i ~/.ssh/id_ed25519 root@8.138.165.208 'bash /tmp/run_migrations.sh'
+scp -i "$SSH_KEY_PATH" db-ops/migrations/2026-*.sql root@$PROD_SERVER_IP:/tmp/migrations/
+scp -i "$SSH_KEY_PATH" /tmp/run_migrations.sh root@$PROD_SERVER_IP:/tmp/run_migrations.sh
+ssh -i "$SSH_KEY_PATH" root@$PROD_SERVER_IP 'bash /tmp/run_migrations.sh'
 ```
 
 ### 3.3 迁移后验证
