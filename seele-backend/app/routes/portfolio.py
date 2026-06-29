@@ -365,8 +365,13 @@ def _sync_all_positions(db: Session) -> None:
             'first_buy_date': first_buy_date,
         })
 
-    for symbol in symbols_to_delete:
-        portfolio_position_crud.delete_by_symbol(db, symbol)
+    # 清理应删除的持仓快照：
+    # 1. 当前无交易记录或已清仓的股票
+    # 2. 交易记录被删除后残留的幽灵持仓
+    keep_symbols = {symbol for symbol in symbols if symbol not in symbols_to_delete}
+    for symbol in list(existing_map.keys()):
+        if symbol not in keep_symbols:
+            portfolio_position_crud.delete_by_symbol(db, symbol)
 
     portfolio_position_crud.upsert_batch(db, upsert_items)
 
